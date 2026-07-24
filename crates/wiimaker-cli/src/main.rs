@@ -9,9 +9,9 @@ use clap::{Parser, Subcommand};
 use serde::Serialize;
 use wiimaker_assets::WPack;
 use wiimaker_scene::{
-    add_component_disc, add_component_sprite, add_entity, diagnose, find_game_dir, load_project,
-    load_scene, remove_entity, save_scene, set_entity_transform, set_scene_clear, write_scene_wscn,
-    GameProject, MutateOpts, Scene,
+    add_component_disc, add_component_sprite, add_entity, diagnose, duplicate_entity, find_game_dir,
+    load_project, load_scene, remove_entity, rename_entity, save_scene, set_entity_transform,
+    set_scene_clear, write_scene_wscn, GameProject, MutateOpts, Scene,
 };
 
 #[derive(Parser, Debug)]
@@ -132,6 +132,21 @@ enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Deep-clone an entity (unique name, +16,+16 offset)
+    Duplicate {
+        game: String,
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Rename an entity (fails if new name empty or taken)
+    Rename {
+        game: String,
+        old: String,
+        new: String,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -516,6 +531,61 @@ fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             remove_entity(&mut sc, &name)?;
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed entity {name}"))
+        }
+        EntityCmd::Duplicate { game, name, scene } => {
+            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            let new_name = duplicate_entity(&mut sc, &name)?;
+            save_scene(&path, &sc)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out<'a> {
+                    ok: bool,
+                    source: &'a str,
+                    name: &'a str,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&Out {
+                        ok: true,
+                        source: &name,
+                        name: &new_name,
+                    })?
+                );
+                Ok(())
+            } else {
+                println!("duplicated {name} → {new_name}");
+                Ok(())
+            }
+        }
+        EntityCmd::Rename {
+            game,
+            old,
+            new,
+            scene,
+        } => {
+            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            rename_entity(&mut sc, &old, &new)?;
+            save_scene(&path, &sc)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out<'a> {
+                    ok: bool,
+                    old: &'a str,
+                    name: &'a str,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&Out {
+                        ok: true,
+                        old: &old,
+                        name: &new,
+                    })?
+                );
+                Ok(())
+            } else {
+                println!("renamed {old} → {new}");
+                Ok(())
+            }
         }
     }
 }

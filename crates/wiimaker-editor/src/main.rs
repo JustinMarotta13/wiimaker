@@ -12,9 +12,10 @@ use wiimaker_core::draw::DrawList;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer, TextureAtlas};
 use wiimaker_scene::{
-    add_component_disc, add_component_sprite, add_entity, diagnose, find_game_dir, hydrate_lenient,
-    load_project, load_scene, remove_entity, render_world, save_scene, GameProject, MutateOpts,
-    Scene,
+    add_component_disc, add_component_sprite, add_entity, diagnose, duplicate_entity, find_game_dir,
+    hydrate_lenient, insert_entity_clone, load_project, load_scene, remove_entity, rename_entity,
+    render_world, save_scene, unique_entity_name, EntityData, GameProject, MutateOpts, Scene,
+    UndoStack,
 };
 
 const VIEW_W: usize = 640;
@@ -56,6 +57,12 @@ struct EditorApp {
     status: String,
     new_entity_name: String,
     asset_names: Vec<String>,
+    undo: UndoStack,
+    /// Scene snapshot before the current inspector drag gesture.
+    undo_baseline: Scene,
+    inspector_gesture: bool,
+    clipboard: Option<EntityData>,
+    rename_draft: String,
 }
 
 impl EditorApp {
@@ -68,6 +75,7 @@ impl EditorApp {
             root: root.to_path_buf(),
             game_dir,
             project,
+            undo_baseline: scene.clone(),
             scene,
             scene_path,
             dirty: false,
@@ -79,6 +87,10 @@ impl EditorApp {
             status: String::new(),
             new_entity_name: "NewEntity".into(),
             asset_names: Vec::new(),
+            undo: UndoStack::with_default_depth(),
+            inspector_gesture: false,
+            clipboard: None,
+            rename_draft: String::new(),
         };
         app.reload_assets()?;
         app.rehydrate();
@@ -124,6 +136,129 @@ impl EditorApp {
     fn mark_dirty(&mut self) {
         self.dirty = true;
         self.rehydrate();
+    }
+
+    fn sync_baseline(&mut self) {
+        self.undo_baseline = self.scene.clone();
+        self.inspector_gesture = false;
+    }
+
+    /// Push undo for a discrete mutation (buttons, rename, add/remove, etc.).
+    fn push_undo(&mut self) {
+        self.undo.push(&self.scene);
+        self.inspector_gesture = false;
+    }
+
+    /// First change of an inspector slider gesture: push pre-edit baseline once.
+    fn begin_inspector_gesture(&mut self) {
+        if !self.inspector_gesture {
+            self.undo.push(&self.undo_baseline);
+            self.inspector_gesture = true;
+        }
+    }
+
+    fn end_inspector_gesture_if_released(&mut self, ctx: &egui::Context) {
+        if self.inspector_gesture && !ctx.input(|i| i.pointer.any_down()) {
+            self.sync_baseline();
+        }
+    }
+
+    fn select(&mut self, name: Option<String>) {
+        self.selected = name.clone();
+        self.rename_draft = name.unwrap_or_default();
+    }
+
+    fn prune_selection(&mut self) {
+        if let Some(sel) = self.selected.clone() {
+            if !self.scene.entities.iter().any(|e| e.name == sel) {
+                self.select(None);
+            } else {
+                self.rename_draft = sel;
+            }
+        }
+    }
+
+    fn do_undo(&mut self) {
+        if self.undo.undo(&mut self.scene) {
+            self.prune_selection();
+            self.sync_baseline();
+            self.mark_dirty();
+            self.status = "undo".into();
+        }
+    }
+
+    fn do_redo(&mut self) {
+        if self.undo.redo(&mut self.scene) {
+            self.prune_selection();
+            self.sync_baseline();
+            self.mark_dirty();
+            self.status = "redo".into();
+        }
+    }
+
+    fn do_duplicate(&mut self) {
+        let Some(sel) = self.selected.clone() else {
+            return;
+        };
+        self.push_undo();
+        match duplicate_entity(&mut self.scene, &sel) {
+            Ok(new_name) => {
+                self.select(Some(new_name.clone()));
+                self.sync_baseline();
+                self.mark_dirty();
+                self.status = format!("duplicated → {new_name}");
+            }
+            Err(e) => {
+                let _ = self.undo.undo(&mut self.scene);
+                self.status = format!("duplicate failed: {e}");
+            }
+        }
+    }
+
+    fn do_copy(&mut self) {
+        let Some(sel) = self.selected.as_deref() else {
+            return;
+        };
+        if let Some(ent) = self.scene.entities.iter().find(|e| e.name == sel) {
+            self.clipboard = Some(ent.clone());
+            self.status = format!("copied {sel}");
+        }
+    }
+
+    fn do_paste(&mut self) {
+        let Some(clip) = self.clipboard.clone() else {
+            return;
+        };
+        self.push_undo();
+        let new_name = insert_entity_clone(&mut self.scene, &clip);
+        self.select(Some(new_name.clone()));
+        self.sync_baseline();
+        self.mark_dirty();
+        self.status = format!("pasted {new_name}");
+    }
+
+    fn commit_rename(&mut self) {
+        let Some(old) = self.selected.clone() else {
+            return;
+        };
+        let new = self.rename_draft.trim().to_string();
+        if new == old {
+            return;
+        }
+        self.push_undo();
+        match rename_entity(&mut self.scene, &old, &new) {
+            Ok(()) => {
+                self.select(Some(new.clone()));
+                self.sync_baseline();
+                self.mark_dirty();
+                self.status = format!("renamed {old} → {new}");
+            }
+            Err(e) => {
+                let _ = self.undo.undo(&mut self.scene);
+                self.rename_draft = old;
+                self.status = format!("rename failed: {e}");
+            }
+        }
     }
 
     fn save(&mut self) {
@@ -189,9 +324,39 @@ impl EditorApp {
 
 impl eframe::App for EditorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command) {
+        let (cmd_s, cmd_z, cmd_shift_z, cmd_y, cmd_d, cmd_c, cmd_v) = ctx.input(|i| {
+            let cmd = i.modifiers.command;
+            let shift = i.modifiers.shift;
+            (
+                cmd && i.key_pressed(egui::Key::S),
+                cmd && !shift && i.key_pressed(egui::Key::Z),
+                cmd && shift && i.key_pressed(egui::Key::Z),
+                cmd && i.key_pressed(egui::Key::Y),
+                cmd && i.key_pressed(egui::Key::D),
+                cmd && i.key_pressed(egui::Key::C),
+                cmd && i.key_pressed(egui::Key::V),
+            )
+        });
+        if cmd_s {
             self.save();
         }
+        if cmd_z {
+            self.do_undo();
+        }
+        if cmd_shift_z || cmd_y {
+            self.do_redo();
+        }
+        if cmd_d {
+            self.do_duplicate();
+        }
+        if cmd_c {
+            self.do_copy();
+        }
+        if cmd_v {
+            self.do_paste();
+        }
+
+        self.end_inspector_gesture_if_released(ctx);
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -213,6 +378,44 @@ impl eframe::App for EditorApp {
                         ui.close_menu();
                     }
                 });
+                ui.menu_button("Edit", |ui| {
+                    if ui
+                        .add_enabled(self.undo.can_undo(), egui::Button::new("Undo"))
+                        .clicked()
+                    {
+                        self.do_undo();
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(self.undo.can_redo(), egui::Button::new("Redo"))
+                        .clicked()
+                    {
+                        self.do_redo();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui
+                        .add_enabled(self.selected.is_some(), egui::Button::new("Duplicate"))
+                        .clicked()
+                    {
+                        self.do_duplicate();
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(self.selected.is_some(), egui::Button::new("Copy"))
+                        .clicked()
+                    {
+                        self.do_copy();
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(self.clipboard.is_some(), egui::Button::new("Paste"))
+                        .clicked()
+                    {
+                        self.do_paste();
+                        ui.close_menu();
+                    }
+                });
                 ui.label(if self.dirty { "● dirty" } else { "○ saved" });
                 ui.separator();
                 ui.label(&self.status);
@@ -230,13 +433,18 @@ impl eframe::App for EditorApp {
                 for name in self.asset_names.clone() {
                     if ui.button(&name).clicked() {
                         if let Some(sel) = self.selected.clone() {
+                            self.push_undo();
+                            let mut applied = false;
                             if let Some(ent) =
                                 self.scene.entities.iter_mut().find(|e| e.name == sel)
                             {
                                 if let Some(sp) = ent.components.sprite.as_mut() {
                                     sp.texture = name.clone();
-                                    self.mark_dirty();
-                                } else if add_component_sprite(
+                                    applied = true;
+                                }
+                            }
+                            if !applied {
+                                if add_component_sprite(
                                     &mut self.scene,
                                     &sel,
                                     &name,
@@ -244,8 +452,14 @@ impl eframe::App for EditorApp {
                                 )
                                 .is_ok()
                                 {
-                                    self.mark_dirty();
+                                    applied = true;
                                 }
+                            }
+                            if applied {
+                                self.sync_baseline();
+                                self.mark_dirty();
+                            } else {
+                                let _ = self.undo.undo(&mut self.scene);
                             }
                         }
                     }
@@ -260,7 +474,8 @@ impl eframe::App for EditorApp {
                 ui.horizontal(|ui| {
                     ui.text_edit_singleline(&mut self.new_entity_name);
                     if ui.button("+").clicked() {
-                        let name = self.new_entity_name.clone();
+                        let name = unique_entity_name(&self.scene, &self.new_entity_name);
+                        self.push_undo();
                         if add_entity(
                             &mut self.scene,
                             &name,
@@ -272,30 +487,44 @@ impl eframe::App for EditorApp {
                         )
                         .is_ok()
                         {
-                            self.selected = Some(name);
+                            self.select(Some(name.clone()));
+                            self.new_entity_name = unique_entity_name(&self.scene, "NewEntity");
+                            self.sync_baseline();
                             self.mark_dirty();
+                        } else {
+                            let _ = self.undo.undo(&mut self.scene);
                         }
                     }
                 });
                 ui.separator();
                 let names: Vec<_> = self.scene.entities.iter().map(|e| e.name.clone()).collect();
                 let mut to_remove = None;
+                let mut to_duplicate = None;
                 for name in &names {
                     ui.horizontal(|ui| {
                         let selected = self.selected.as_deref() == Some(name.as_str());
                         if ui.selectable_label(selected, name).clicked() {
-                            self.selected = Some(name.clone());
+                            self.select(Some(name.clone()));
+                        }
+                        if ui.small_button("⧉").on_hover_text("Duplicate").clicked() {
+                            to_duplicate = Some(name.clone());
                         }
                         if ui.small_button("✕").clicked() {
                             to_remove = Some(name.clone());
                         }
                     });
                 }
+                if let Some(name) = to_duplicate {
+                    self.select(Some(name));
+                    self.do_duplicate();
+                }
                 if let Some(name) = to_remove {
+                    self.push_undo();
                     let _ = remove_entity(&mut self.scene, &name);
                     if self.selected.as_deref() == Some(name.as_str()) {
-                        self.selected = None;
+                        self.select(None);
                     }
+                    self.sync_baseline();
                     self.mark_dirty();
                 }
             });
@@ -313,33 +542,50 @@ impl eframe::App for EditorApp {
                 let mut add_disc = false;
                 let mut remove_sprite = false;
                 let mut remove_disc = false;
+                let mut rename_committed = false;
+
+                ui.horizontal(|ui| {
+                    ui.label("name");
+                    let resp = ui.text_edit_singleline(&mut self.rename_draft);
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        rename_committed = true;
+                    } else if resp.lost_focus() {
+                        rename_committed = true;
+                    }
+                });
+                if rename_committed {
+                    self.commit_rename();
+                }
 
                 if let Some(ent) = self.scene.entities.iter_mut().find(|e| e.name == sel) {
-                    ui.label(format!("name: {}", ent.name));
                     ui.separator();
                     ui.label("Transform");
-                    dirty |= ui
+                    let mut changed = false;
+                    changed |= ui
                         .add(
                             egui::Slider::new(&mut ent.transform.translation[0], 0.0..=640.0)
                                 .text("x"),
                         )
                         .changed();
-                    dirty |= ui
+                    changed |= ui
                         .add(
                             egui::Slider::new(&mut ent.transform.translation[1], 0.0..=480.0)
                                 .text("y"),
                         )
                         .changed();
-                    dirty |= ui
+                    changed |= ui
                         .add(
                             egui::Slider::new(&mut ent.transform.scale[0], 0.1..=8.0).text("scale x"),
                         )
                         .changed();
-                    dirty |= ui
+                    changed |= ui
                         .add(
                             egui::Slider::new(&mut ent.transform.scale[1], 0.1..=8.0).text("scale y"),
                         )
                         .changed();
+                    if changed {
+                        dirty = true;
+                    }
 
                     ui.separator();
                     ui.label("Components");
@@ -382,16 +628,24 @@ impl eframe::App for EditorApp {
                     }
                 }
 
+                if dirty {
+                    self.begin_inspector_gesture();
+                    self.mark_dirty();
+                }
                 if remove_sprite {
+                    self.push_undo();
                     if let Some(ent) = self.scene.entities.iter_mut().find(|e| e.name == sel) {
                         ent.components.sprite = None;
-                        dirty = true;
+                        self.sync_baseline();
+                        self.mark_dirty();
                     }
                 }
                 if remove_disc {
+                    self.push_undo();
                     if let Some(ent) = self.scene.entities.iter_mut().find(|e| e.name == sel) {
                         ent.components.disc = None;
-                        dirty = true;
+                        self.sync_baseline();
+                        self.mark_dirty();
                     }
                 }
                 if add_sprite {
@@ -400,14 +654,15 @@ impl eframe::App for EditorApp {
                         .first()
                         .cloned()
                         .unwrap_or_else(|| "missing".into());
+                    self.push_undo();
                     let _ = add_component_sprite(&mut self.scene, &sel, &tex, [32.0, 32.0]);
-                    dirty = true;
+                    self.sync_baseline();
+                    self.mark_dirty();
                 }
                 if add_disc {
+                    self.push_undo();
                     let _ = add_component_disc(&mut self.scene, &sel, 36.0, [72, 210, 160, 255]);
-                    dirty = true;
-                }
-                if dirty {
+                    self.sync_baseline();
                     self.mark_dirty();
                 }
             });
