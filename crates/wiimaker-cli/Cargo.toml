@@ -1,0 +1,18 @@
+[package]
+name = "wiimaker-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI for scaffolding, cooking assets, and packing Wii builds"
+
+[[bin]]
+name = "wiimaker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+wiimaker-assets = { workspace = true }
+wiimaker-scene = { workspace = true }

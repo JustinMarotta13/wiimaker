@@ -1,0 +1,34 @@
+---
+description: Agent MEMORY filesystem — read/write durable and session notes
+alwaysApply: true
+---
+
+# Memory filesystem
+
+Agents persist continuity under `MEMORY/` (see `MEMORY/README.md`).
+
+```
+MEMORY/durable/   # committed long-lived notes (engine.md, editor.md, cli.md, index.md)
+MEMORY/sessions/  # gitignored scratch for the current chat
+```
+
+## Protocol
+
+1. **Start** of non-trivial work: read `MEMORY/durable/index.md`, then the durable file(s) for your area.
+2. **During** work: keep short scratch in `MEMORY/sessions/YYYY-MM-DD-<topic>.md` (create if missing).
+3. **When you learn something lasting** (gotcha, decision, next step): update the matching `MEMORY/durable/*.md` bullet list.
+4. **End** of a multi-step task: promote anything durable out of the session file; prune stale durable bullets.
+
+## Area map
+
+| Working on | Read / update |
+|---|---|
+| core, host, assets, runtime, games | `MEMORY/durable/engine.md` |
+| egui editor / scene mutate UX | `MEMORY/durable/editor.md` |
+| CLI / agent commands / `--json` | `MEMORY/durable/cli.md` |
+
+## Do not
+
+- Put secrets in `MEMORY/`
+- Copy `ARCHITECTURE.md` or rules into memory — link instead
+- Skip memory updates after fixing a non-obvious bug or locking a decision

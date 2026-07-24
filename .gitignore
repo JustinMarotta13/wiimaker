@@ -1,0 +1,19 @@
+/target/
+**/target/
+.DS_Store
+*.dol
+*.elf
+*.iso
+*.wbfs
+*.map
+runtime/wii/build/
+runtime/wii/boot.*
+.idea/
+.vscode/
+*.swp
+*.wpack
+*.wscn
+
+# Agent session scratch (durable memory is committed)
+MEMORY/sessions/*
+!MEMORY/sessions/.gitkeep

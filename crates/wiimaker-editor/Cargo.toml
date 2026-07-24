@@ -1,0 +1,20 @@
+[package]
+name = "wiimaker-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "egui scene editor — Hierarchy / Inspector / Project / Viewport"
+
+[[bin]]
+name = "wiimaker-editor"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true }
+wiimaker-core = { workspace = true }
+wiimaker-host = { workspace = true }
+wiimaker-scene = { workspace = true }
+wiimaker-assets = { workspace = true }
+serde_json = { workspace = true }

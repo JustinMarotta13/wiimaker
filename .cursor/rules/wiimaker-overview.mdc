@@ -1,0 +1,39 @@
+---
+description: WiiMaker workspace map, layer cake, and authoring principles
+alwaysApply: true
+---
+
+# WiiMaker
+
+Dual-target Wii toolkit: author on host, ship `.dol` / HBC / disc. See `README.md` and `ARCHITECTURE.md`.
+
+Agent continuity lives in `MEMORY/` — read/write per `.cursor/rules/wiimaker-memory.mdc`.
+
+## Layer cake
+
+| Crate / path | Role |
+|---|---|
+| `games/*` | `App` + `game.toml` + scenes + gameplay |
+| `wiimaker-scene` | `game.toml` / `.scene.json` + shared mutate API |
+| `wiimaker-editor` | egui Hierarchy · Inspector · Viewport · Project |
+| `wiimaker-cli` | Agent twin of every editor mutation (`--json`) |
+| `wiimaker-core` | `World`, components, `DrawList` IR, input, time |
+| `wiimaker-host` | Desktop preview (minifb / atlas / raster) |
+| `wiimaker-assets` | PNG → `.wpack` cooker |
+| `runtime/wii` | C owns VI/GX/PAD; Rust is `staticlib` game logic |
+
+## Non-negotiables
+
+1. **Files are truth.** Editor and CLI mutate the same `.scene.json` / `game.toml`. Runtime loads; it does not own authoring.
+2. **Shared mutations.** New authoring ops go in `wiimaker-scene` (`mutate.rs`) first, then wire CLI + editor to those helpers — never fork logic.
+3. **One IR.** Games emit `DrawCmd` / `DrawList`. Never call GX, OpenGL, or host window APIs from `wiimaker-core` or game crates.
+4. **Core stays lean.** Serde / JSON / project I/O live in `wiimaker-scene` (std). Keep `wiimaker-core` `no_std`-ready.
+5. **C owns the metal.** Do not reintroduce pure-Rust VI/GX init in `runtime/wii`.
+
+## Unity → WiiMaker
+
+Project → `game.toml` · Scene → `.scene.json` · GameObject → named entity · SpriteRenderer → `Sprite` · Prefab → `.prefab.json` · Play → `wiimaker run`.
+
+## Prove changes on hello-orb
+
+Prefer validating host loops with `games/hello-orb` (`cook` → `run` / `edit`).

@@ -1,0 +1,13 @@
+[package]
+name = "wiimaker-assets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Asset cooker — PNG/OBJ to .wpack for Broadway"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+image = { workspace = true }
+byteorder = "1"

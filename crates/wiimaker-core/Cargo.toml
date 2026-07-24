@@ -1,0 +1,13 @@
+[package]
+name = "wiimaker-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Platform-agnostic Wii game engine core (DisplayList IR, world, input)"
+
+[features]
+default = ["std"]
+std = ["glam/std"]
+
+[dependencies]
+glam = { workspace = true }

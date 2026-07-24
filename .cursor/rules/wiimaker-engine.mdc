@@ -1,0 +1,54 @@
+---
+description: Game engine conventions for wiimaker-core, host, assets, runtime, and games
+globs: crates/wiimaker-core/**,crates/wiimaker-host/**,crates/wiimaker-assets/**,runtime/**,games/**
+alwaysApply: false
+---
+
+# Engine
+
+Before deep work, read `MEMORY/durable/engine.md`. After lasting discoveries (gotchas, decisions, follow-ups), update that file.
+
+## Boundaries
+
+- Games depend on `wiimaker-core` (+ `wiimaker-host` / `wiimaker-scene` on desktop). They never talk to GX or window backends directly.
+- `wiimaker-core`: `App` / `FrameCtx`, `World`, `Transform` / `Sprite` / `Disc` / `Camera`, `DrawList`, `Input`, `Clock`.
+- Rendering path: scene hydrate → `World` → `render_world` (or hand-built `DrawList`) → host raster / Wii GX.
+
+## World model (v0)
+
+Unity-shaped store, not a full ECS:
+
+- Named entities (`find_by_name`)
+- Components: `Transform`, `Sprite` (texture by `TextureId`), `Disc`, `Camera`
+- Do not add archetype queries / systems UI; extend the v0 component set carefully
+
+Sprite textures resolve from cooked `.wpack` names via hydrate `TextureMap` — keep string names in scene JSON, ids only at runtime.
+
+## Game `App` pattern
+
+```rust
+// ✅ load scene once, mutate World in update, render via scene helper
+let scene = load_scene(...)?;
+let world = hydrate(&scene, atlas.map())?;
+// update: world.transform_mut(id)
+// render: render_world(&world, clear, draw)
+```
+
+Gameplay stays in Rust `App` (MonoBehaviour-like). No visual scripting.
+
+## Host vs Wii
+
+- Host: `wiimaker-host` software raster + atlas; `run` stays minifb (fast). Editor uses egui separately.
+- Wii: `runtime/wii` C bootstrap calls Rust `wiimaker_game_frame`. Respect MEM1/MEM2 and fixed-function GX limits.
+- Assets: cook offline (`wiimaker-assets`). No PNG decode on console. Non-PoT PNGs pad with warning.
+
+## Do / don't
+
+```rust
+// ❌ BAD — platform or serde in core
+fn draw_sprite_gx(...);
+#[derive(Serialize)] struct Scene { ... } // belongs in wiimaker-scene
+
+// ✅ GOOD — IR only
+draw.push(DrawCmd::DrawSprite { texture, dest, uv, color });
+```

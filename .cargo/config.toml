@@ -1,0 +1,2 @@
+# Host builds use the default target.
+# Wii Rust staticlibs (milestone 2+) will use a custom target JSON + linker.

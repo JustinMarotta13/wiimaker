@@ -1,0 +1,50 @@
+---
+description: egui editor conventions for Hierarchy / Inspector / Scene / Project
+globs: crates/wiimaker-editor/**,crates/wiimaker-scene/**
+alwaysApply: false
+---
+
+# Editor (`wiimaker edit`)
+
+Before deep work, read `MEMORY/durable/editor.md`. After lasting discoveries, update that file.
+
+eframe/egui shell over the same scene files agents edit via CLI. Launch: `cargo run -p wiimaker-editor -- <game>` (or `wiimaker edit`).
+
+## Layout (keep Unity-shaped)
+
+```
+Hierarchy | Scene viewport (DrawList → framebuffer → egui texture) | Inspector
+----------+--------------------------------------------------------+----------
+Project: assets / scenes / cook / doctor status
+```
+
+- Hierarchy: list / create / rename / delete / select entities
+- Inspector: Transform + known components; Add Component
+- Viewport: live `render_world` blit; selection via Hierarchy in v0 (no IR picking yet)
+- Project: browse `assets/`, surface doctor/cook warnings
+
+## Mutation rule
+
+All edits go through `wiimaker-scene` helpers (`add_entity`, `remove_entity`, `set_entity_transform`, `add_component_*`, `set_scene_clear`, load/save). Then set `dirty` and `rehydrate()` the preview `World`.
+
+```rust
+// ❌ BAD — edit World or invent parallel JSON writes
+world.spawn(...);
+serde_json::to_writer(...); // bypassing save_scene
+
+// ✅ GOOD
+add_entity(&mut self.scene, &name, &MutateOpts { .. })?;
+self.dirty = true;
+self.rehydrate();
+// Save → save_scene(&self.scene_path, &self.scene)
+```
+
+## State pattern
+
+`EditorApp` holds: `GameProject`, `Scene`, `scene_path`, `dirty`, `selected`, `World`, `TextureAtlas`, viewport `Framebuffer`. After asset cook/reload, rebuild atlas and rehydrate.
+
+Play shells `wiimaker run` / `cargo run -p <game>` — do not fold egui into the fast play path.
+
+## Out of scope (v0)
+
+Visual scripting, full ECS UI, TEV materials, Wiimote IR picking, editing C/GX bootstrap.

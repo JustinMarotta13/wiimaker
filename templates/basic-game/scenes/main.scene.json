@@ -1,0 +1,22 @@
+{
+  "name": "main",
+  "clear_color": [16, 22, 40, 255],
+  "entities": [
+    {
+      "name": "Orb",
+      "transform": {
+        "translation": [320.0, 240.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": {
+        "Disc": {
+          "radius": 28.0,
+          "color": [72, 210, 160, 255],
+          "z": 0.0
+        }
+      },
+      "tag": 0
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+---
+description: Agent-first CLI — every editor mutation has a twin with --json
+globs: crates/wiimaker-cli/**,crates/wiimaker-scene/**,templates/**
+alwaysApply: false
+---
+
+# CLI (`wiimaker`)
+
+Before deep work, read `MEMORY/durable/cli.md`. After lasting discoveries, update that file.
+
+clap binary in `crates/wiimaker-cli`. Agents build games as: `new` → `asset import` → `entity add` → `cook` → `doctor` / `run` / `edit`.
+
+## Commands (keep mirrored with editor)
+
+| Area | Commands |
+|---|---|
+| Project | `new`, `run`, `edit`, `cook`, `doctor`, `build-wii` |
+| Scene | `scene list\|show\|set-clear` |
+| Entity | `entity list\|add\|set\|add-component\|remove` |
+| Asset | `asset list\|import` |
+
+Global `--json` must work on mutating and query commands for machine output.
+
+## Implementation rules
+
+1. **Resolve workspace** with `find_root()` (workspace `Cargo.toml` + `runtime/wii`).
+2. **Resolve game** via `wiimaker_scene::find_game_dir` + `load_project`.
+3. **Mutations** call `wiimaker-scene` helpers only, then `save_scene` — same path as the editor.
+4. **`new`** copies `templates/basic-game`, replaces `{{name}}`, adds workspace member under `games/`.
+5. **`edit` / `run` / `build-wii`** shell existing tools (`wiimaker-editor`, `cargo run -p`, `tools/wii-build.sh`); don't reimplement.
+
+```rust
+// ❌ BAD — hand-edit JSON in the CLI
+let mut v: Value = serde_json::from_str(&text)?;
+v["entities"].as_array_mut().unwrap().push(...);
+
+// ✅ GOOD
+let mut scene = load_scene(&path)?;
+add_entity(&mut scene, name, &opts)?;
+save_scene(&path, &scene)?;
+```
+
+## Agent contract
+
+- Prefer `--json` responses that include enough ids/paths for the next step.
+- After structural asset changes, remind/cook: sprites need `.wpack` before host textures resolve.
+- `doctor` surfaces missing textures, non-PoT, broken scene refs — fix those before inventing new diagnostics elsewhere.
+
+When adding a flag or subcommand, update the editor UI that performs the same mutation (or document why it's CLI-only).
