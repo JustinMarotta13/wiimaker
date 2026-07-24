@@ -3,6 +3,7 @@
 mod doctor;
 mod hydrate;
 mod mutate;
+mod pick;
 mod project;
 mod render;
 mod scene;
@@ -16,6 +17,7 @@ pub use mutate::{
     remove_entity, rename_entity, set_entity_transform, set_scene_clear, unique_entity_name,
     MutateOpts,
 };
+pub use pick::{pick_entity_at, pointer_to_scene};
 pub use project::{find_game_dir, load_project, save_project, GameProject};
 pub use render::render_world;
 pub use scene::{
