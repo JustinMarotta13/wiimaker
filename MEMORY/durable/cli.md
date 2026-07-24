@@ -9,6 +9,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - Prefer `--json` on mutate/query commands; cook after asset import before run.
 - `bake-wii` needs a cooked `.wpack` first; `wii-build.sh` runs `cook` then `bake-wii` automatically.
 - `entity duplicate <game> <name>` / `entity rename <game> <old> <new>` return new/renamed name in `--json`.
+- `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
 
 ## Decisions
 

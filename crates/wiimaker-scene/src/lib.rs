@@ -18,7 +18,7 @@ pub use mutate::{
     MutateOpts,
 };
 pub use pick::{pick_entity_at, pointer_to_scene};
-pub use project::{find_game_dir, load_project, save_project, GameProject};
+pub use project::{find_game_dir, list_scenes, load_project, save_project, GameProject};
 pub use render::render_world;
 pub use scene::{
     load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneComponents,

@@ -13,9 +13,9 @@ use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer, TextureAtlas};
 use wiimaker_scene::{
     add_component_disc, add_component_sprite, add_entity, diagnose, duplicate_entity, find_game_dir,
-    hydrate_lenient, insert_entity_clone, load_project, load_scene, pick_entity_at, pointer_to_scene,
-    remove_entity, rename_entity, render_world, save_scene, set_entity_transform, unique_entity_name,
-    EntityData, GameProject, MutateOpts, Scene, UndoStack,
+    hydrate_lenient, insert_entity_clone, list_scenes, load_project, load_scene, pick_entity_at,
+    pointer_to_scene, remove_entity, rename_entity, render_world, save_project, save_scene,
+    set_entity_transform, unique_entity_name, EntityData, GameProject, MutateOpts, Scene, UndoStack,
 };
 
 const VIEW_W: usize = 640;
@@ -72,6 +72,11 @@ struct EditorApp {
     clipboard: Option<EntityData>,
     rename_draft: String,
     viewport_drag: Option<ViewportDrag>,
+    /// Scene paths relative to `game_dir`.
+    scene_rels: Vec<PathBuf>,
+    /// Pending open when current scene is dirty (absolute path).
+    pending_open: Option<PathBuf>,
+    new_scene_name: String,
 }
 
 impl EditorApp {
@@ -101,11 +106,102 @@ impl EditorApp {
             clipboard: None,
             rename_draft: String::new(),
             viewport_drag: None,
+            scene_rels: Vec::new(),
+            pending_open: None,
+            new_scene_name: "menu".into(),
         };
         app.reload_assets()?;
+        app.refresh_scenes();
         app.rehydrate();
         app.status = format!("opened {}", app.project.name);
         Ok(app)
+    }
+
+    fn refresh_scenes(&mut self) {
+        match list_scenes(&self.game_dir) {
+            Ok(rels) => self.scene_rels = rels,
+            Err(e) => self.status = format!("list scenes failed: {e}"),
+        }
+    }
+
+    /// Request opening a scene; if dirty, show confirm modal first.
+    fn request_open_scene(&mut self, abs_path: PathBuf) {
+        if abs_path == self.scene_path {
+            return;
+        }
+        if self.dirty {
+            self.pending_open = Some(abs_path);
+        } else {
+            self.open_scene_at(abs_path);
+        }
+    }
+
+    fn open_scene_at(&mut self, abs_path: PathBuf) {
+        match load_scene(&abs_path) {
+            Ok(scene) => {
+                self.scene = scene;
+                self.scene_path = abs_path;
+                self.dirty = false;
+                self.undo.clear();
+                self.viewport_drag = None;
+                self.inspector_gesture = false;
+                self.select(None);
+                self.pending_open = None;
+                self.sync_baseline();
+                self.rehydrate();
+                self.status = format!("opened {}", self.scene_path.display());
+            }
+            Err(e) => {
+                self.pending_open = None;
+                self.status = format!("open failed: {e}");
+            }
+        }
+    }
+
+    fn create_new_scene(&mut self) {
+        let name = self.new_scene_name.trim();
+        if name.is_empty() {
+            self.status = "new scene: name required".into();
+            return;
+        }
+        if name.contains('/') || name.contains('\\') || name.contains('.') {
+            self.status = "new scene: use a simple name (no path/ext)".into();
+            return;
+        }
+        let rel = PathBuf::from("scenes").join(format!("{name}.scene.json"));
+        let abs = self.game_dir.join(&rel);
+        if abs.exists() {
+            self.status = format!("scene already exists: {}", rel.display());
+            return;
+        }
+        let scene = Scene::new(name);
+        match save_scene(&abs, &scene) {
+            Ok(()) => {
+                self.refresh_scenes();
+                if self.dirty {
+                    self.pending_open = Some(abs);
+                    self.status = format!("created {}; save current scene to open it", rel.display());
+                } else {
+                    self.open_scene_at(abs);
+                    self.status = format!("created {}", rel.display());
+                }
+            }
+            Err(e) => self.status = format!("create scene failed: {e}"),
+        }
+    }
+
+    fn set_as_default_scene(&mut self) {
+        let Ok(rel) = self.scene_path.strip_prefix(&self.game_dir) else {
+            self.status = "set default: scene outside game dir".into();
+            return;
+        };
+        self.project.default_scene = rel.to_string_lossy().into_owned();
+        match save_project(&self.game_dir, &self.project) {
+            Ok(()) => {
+                self.status = format!("default scene → {}", self.project.default_scene);
+            }
+            Err(e) => self.status = format!("save project failed: {e}"),
+        }
     }
 
     fn reload_assets(&mut self) -> Result<()> {
@@ -439,6 +535,31 @@ impl eframe::App for EditorApp {
                 ui.label(format!("scene: {}", self.scene.name));
                 ui.label(format!("assets: {}", self.asset_names.len()));
             });
+
+            ui.separator();
+            ui.label("Scenes");
+            ui.horizontal_wrapped(|ui| {
+                for rel in self.scene_rels.clone() {
+                    let abs = self.game_dir.join(&rel);
+                    let is_open = abs == self.scene_path;
+                    let label = rel.to_string_lossy();
+                    if ui.selectable_label(is_open, label.as_ref()).clicked() {
+                        self.request_open_scene(abs);
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut self.new_scene_name);
+                if ui.button("New scene…").clicked() {
+                    self.create_new_scene();
+                }
+                if ui.button("Set as default scene").clicked() {
+                    self.set_as_default_scene();
+                }
+            });
+
+            ui.separator();
+            ui.label("Assets");
             ui.horizontal_wrapped(|ui| {
                 for name in self.asset_names.clone() {
                     if ui.button(&name).clicked() {
@@ -476,6 +597,34 @@ impl eframe::App for EditorApp {
                 }
             });
         });
+
+        if self.pending_open.is_some() {
+            egui::Window::new("Unsaved changes")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label("Current scene has unsaved changes. Save before switching?");
+                    ui.horizontal(|ui| {
+                        if ui.button("Save").clicked() {
+                            self.save();
+                            if !self.dirty {
+                                if let Some(path) = self.pending_open.take() {
+                                    self.open_scene_at(path);
+                                }
+                            }
+                        }
+                        if ui.button("Discard").clicked() {
+                            if let Some(path) = self.pending_open.take() {
+                                self.open_scene_at(path);
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.pending_open = None;
+                        }
+                    });
+                });
+        }
 
         egui::SidePanel::left("hierarchy")
             .default_width(220.0)
