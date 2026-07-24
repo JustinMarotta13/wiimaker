@@ -9,9 +9,9 @@ use clap::{Parser, Subcommand};
 use serde::Serialize;
 use wiimaker_assets::WPack;
 use wiimaker_scene::{
-    add_component_disc, add_component_sprite, add_entity, diagnose, find_game_dir, load_project,
-    load_scene, remove_entity, save_scene, set_entity_transform, set_scene_clear, write_scene_wscn,
-    GameProject, MutateOpts, Scene,
+    add_component_disc, add_component_sprite, add_entity, diagnose, find_game_dir, list_scenes,
+    load_project, load_scene, remove_entity, save_scene, set_entity_transform, set_scene_clear,
+    write_scene_wscn, GameProject, MutateOpts, Scene,
 };
 
 #[derive(Parser, Debug)]
@@ -393,23 +393,15 @@ fn scene_cmd(root: &Path, cmd: SceneCmd, json: bool) -> Result<()> {
     match cmd {
         SceneCmd::List { game } => {
             let game_dir = find_game_dir(root, &game)?;
-            let scenes = game_dir.join("scenes");
-            let mut names = Vec::new();
-            if scenes.is_dir() {
-                for entry in fs::read_dir(&scenes)? {
-                    let path = entry?.path();
-                    if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                        if let Some(n) = path.file_name().and_then(|s| s.to_str()) {
-                            names.push(n.to_string());
-                        }
-                    }
-                }
-            }
-            names.sort();
+            let scenes = list_scenes(&game_dir)?;
+            let names: Vec<String> = scenes
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
             if json {
                 println!("{}", serde_json::to_string_pretty(&names)?);
             } else {
-                for n in names {
+                for n in &names {
                     println!("{n}");
                 }
             }

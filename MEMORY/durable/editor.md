@@ -6,13 +6,13 @@ Canonical rules: `.cursor/rules/wiimaker-editor.mdc`.
 
 ## Gotchas
 
-<!-- Agents: add durable bullets below. Example:
-- After mutate helpers, always set dirty + rehydrate() before relying on World/viewport.
--->
+- After open-scene: set `scene`/`scene_path`, `dirty = false`, `selected = None`, then `rehydrate()`. Do not rewrite `game.toml` just to preview another scene.
+- Dirty switch uses `pending_open` + egui "Unsaved changes" modal (Save / Discard / Cancel).
 
 ## Decisions
 
-<!-- Locked UI / authoring choices. -->
+- Scene discovery: `wiimaker_scene::list_scenes(game_dir)` → relative `*.scene.json` under `scenes/` plus `default_scene` if outside that dir.
+- Opening a non-default scene is editor-only preview; "Set as default scene" persists via `save_project`.
 
 ## Open follow-ups
 
