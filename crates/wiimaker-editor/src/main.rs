@@ -13,8 +13,8 @@ use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer, TextureAtlas};
 use wiimaker_scene::{
     add_component_disc, add_component_sprite, add_entity, diagnose, find_game_dir, hydrate_lenient,
-    load_project, load_scene, remove_entity, render_world, save_scene, GameProject, MutateOpts,
-    Scene,
+    load_project, load_scene, pick_entity_at, pointer_to_scene, remove_entity, render_world,
+    save_scene, set_entity_transform, GameProject, MutateOpts, Scene,
 };
 
 const VIEW_W: usize = 640;
@@ -41,6 +41,14 @@ fn main() -> eframe::Result<()> {
     )
 }
 
+/// Active viewport translate drag (scene-space grab offset from entity origin).
+#[derive(Clone)]
+struct ViewportDrag {
+    entity: String,
+    /// `pointer_scene - translation` at drag start so the entity doesn't jump.
+    grab_offset: [f32; 2],
+}
+
 struct EditorApp {
     root: PathBuf,
     game_dir: PathBuf,
@@ -56,6 +64,7 @@ struct EditorApp {
     status: String,
     new_entity_name: String,
     asset_names: Vec<String>,
+    viewport_drag: Option<ViewportDrag>,
 }
 
 impl EditorApp {
@@ -79,6 +88,7 @@ impl EditorApp {
             status: String::new(),
             new_entity_name: "NewEntity".into(),
             asset_names: Vec::new(),
+            viewport_drag: None,
         };
         app.reload_assets()?;
         app.rehydrate();
@@ -429,10 +439,134 @@ impl eframe::App for EditorApp {
                 .min(max.y / VIEW_H as f32)
                 .min(1.0);
             let size = egui::vec2(VIEW_W as f32 * scale, VIEW_H as f32 * scale);
-            ui.image((tex.id(), size));
+            let image = egui::Image::new((tex.id(), size)).sense(egui::Sense::click_and_drag());
+            let response = ui.add(image);
+            let rect = response.rect;
+
+            paint_selection_outline(ui, rect, &self.scene, self.selected.as_deref());
+
+            self.handle_viewport_input(&response, rect);
         });
 
         ctx.request_repaint();
+    }
+}
+
+impl EditorApp {
+    fn handle_viewport_input(&mut self, response: &egui::Response, rect: egui::Rect) {
+        let to_scene = |pos: egui::Pos2| -> Option<[f32; 2]> {
+            pointer_to_scene(
+                [pos.x, pos.y],
+                [rect.min.x, rect.min.y],
+                [rect.width(), rect.height()],
+                VIEW_W as f32,
+                VIEW_H as f32,
+            )
+        };
+
+        let pick_at = |app: &Self, pos: [f32; 2]| -> Option<(String, [f32; 2])> {
+            let name = pick_entity_at(&app.scene, pos[0], pos[1])?;
+            let grab_offset = app
+                .scene
+                .entities
+                .iter()
+                .find(|e| e.name == name)
+                .map(|e| {
+                    [
+                        pos[0] - e.transform.translation[0],
+                        pos[1] - e.transform.translation[1],
+                    ]
+                })
+                .unwrap_or([0.0, 0.0]);
+            Some((name, grab_offset))
+        };
+
+        // Click (no drag): select or clear.
+        if response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos().and_then(to_scene) {
+                match pick_at(self, pos) {
+                    Some((name, _)) => self.selected = Some(name),
+                    None => self.selected = None,
+                }
+            }
+        }
+
+        // Drag start: select hit entity and begin translate.
+        if response.drag_started() {
+            if let Some(pos) = response.interact_pointer_pos().and_then(to_scene) {
+                match pick_at(self, pos) {
+                    Some((name, grab_offset)) => {
+                        self.selected = Some(name.clone());
+                        // TODO(undo): push snapshot at drag start
+                        self.viewport_drag = Some(ViewportDrag {
+                            entity: name,
+                            grab_offset,
+                        });
+                    }
+                    None => {
+                        self.selected = None;
+                        self.viewport_drag = None;
+                    }
+                }
+            }
+        }
+
+        if let Some(drag) = self.viewport_drag.clone() {
+            if response.dragged() {
+                if let Some(pos) = response.interact_pointer_pos().and_then(to_scene) {
+                    let x = pos[0] - drag.grab_offset[0];
+                    let y = pos[1] - drag.grab_offset[1];
+                    if set_entity_transform(&mut self.scene, &drag.entity, Some(x), Some(y)).is_ok()
+                    {
+                        self.mark_dirty();
+                    }
+                }
+            }
+        }
+
+        if response.drag_stopped() {
+            self.viewport_drag = None;
+        }
+    }
+}
+
+fn paint_selection_outline(
+    ui: &egui::Ui,
+    image_rect: egui::Rect,
+    scene: &Scene,
+    selected: Option<&str>,
+) {
+    let Some(name) = selected else {
+        return;
+    };
+    let Some(ent) = scene.entities.iter().find(|e| e.name == name) else {
+        return;
+    };
+
+    let to_screen = |sx: f32, sy: f32| -> egui::Pos2 {
+        egui::pos2(
+            image_rect.min.x + sx / VIEW_W as f32 * image_rect.width(),
+            image_rect.min.y + sy / VIEW_H as f32 * image_rect.height(),
+        )
+    };
+    let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 64));
+    let painter = ui.painter();
+
+    if let Some(sp) = &ent.components.sprite {
+        let hw = sp.size[0] * ent.transform.scale[0] * 0.5;
+        let hh = sp.size[1] * ent.transform.scale[1] * 0.5;
+        let cx = ent.transform.translation[0];
+        let cy = ent.transform.translation[1];
+        let r = egui::Rect::from_min_max(to_screen(cx - hw, cy - hh), to_screen(cx + hw, cy + hh));
+        painter.rect_stroke(r, 0.0, stroke);
+    }
+    if let Some(d) = &ent.components.disc {
+        let cx = ent.transform.translation[0];
+        let cy = ent.transform.translation[1];
+        let r_scene = d.radius * ent.transform.scale[0].max(ent.transform.scale[1]);
+        let center = to_screen(cx, cy);
+        let radius_px = r_scene / VIEW_W as f32 * image_rect.width();
+        painter.circle_stroke(center, radius_px, stroke);
     }
 }
 
