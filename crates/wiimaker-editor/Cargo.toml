@@ -13,6 +13,7 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true }
+image = { workspace = true }
 wiimaker-core = { workspace = true }
 wiimaker-host = { workspace = true }
 wiimaker-scene = { workspace = true }

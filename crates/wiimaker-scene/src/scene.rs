@@ -51,6 +51,9 @@ pub struct Prefab {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EntityData {
     pub name: String,
+    /// Parent entity name. `None` = scene root. Transform is local to parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     #[serde(default)]
     pub transform: SceneTransform,
     #[serde(default)]
@@ -117,6 +120,116 @@ impl SceneTransform {
             scale: t.scale.to_array(),
         }
     }
+
+    /// Compose `local` under `parent` (translation × parent scale; scales multiply).
+    pub fn compose_child(parent: &Self, local: &Self) -> Self {
+        Self {
+            translation: [
+                parent.translation[0] + local.translation[0] * parent.scale[0],
+                parent.translation[1] + local.translation[1] * parent.scale[1],
+                parent.translation[2] + local.translation[2] * parent.scale[2],
+            ],
+            rotation: local.rotation,
+            scale: [
+                parent.scale[0] * local.scale[0],
+                parent.scale[1] * local.scale[1],
+                parent.scale[2] * local.scale[2],
+            ],
+        }
+    }
+
+    /// Inverse of [`compose_child`]: world pose → local under `parent_world`.
+    pub fn to_local(parent_world: &Self, world: &Self) -> Self {
+        let sx = safe_div_scale(parent_world.scale[0]);
+        let sy = safe_div_scale(parent_world.scale[1]);
+        let sz = safe_div_scale(parent_world.scale[2]);
+        Self {
+            translation: [
+                (world.translation[0] - parent_world.translation[0]) / sx,
+                (world.translation[1] - parent_world.translation[1]) / sy,
+                (world.translation[2] - parent_world.translation[2]) / sz,
+            ],
+            rotation: world.rotation,
+            scale: [
+                world.scale[0] / sx,
+                world.scale[1] / sy,
+                world.scale[2] / sz,
+            ],
+        }
+    }
+}
+
+fn safe_div_scale(s: f32) -> f32 {
+    if s.abs() < 1e-8 {
+        1.0
+    } else {
+        s
+    }
+}
+
+impl Scene {
+    pub fn find_entity(&self, name: &str) -> Option<&EntityData> {
+        self.entities.iter().find(|e| e.name == name)
+    }
+
+    /// World-space transform (local composed through parents). `None` if missing or cyclic.
+    pub fn world_transform(&self, name: &str) -> Option<SceneTransform> {
+        let mut locals = Vec::new();
+        let mut current = name.to_string();
+        for _ in 0..=self.entities.len() {
+            let ent = self.find_entity(&current)?;
+            locals.push(ent.transform.clone());
+            match &ent.parent {
+                Some(p) => current = p.clone(),
+                None => {
+                    locals.reverse();
+                    let mut world = locals[0].clone();
+                    for local in locals.iter().skip(1) {
+                        world = SceneTransform::compose_child(&world, local);
+                    }
+                    return Some(world);
+                }
+            }
+        }
+        None
+    }
+
+    /// Names of root entities, in scene order.
+    pub fn root_names(&self) -> Vec<String> {
+        self.entities
+            .iter()
+            .filter(|e| e.parent.is_none())
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    /// Direct children of `parent`, in scene order.
+    pub fn child_names(&self, parent: &str) -> Vec<String> {
+        self.entities
+            .iter()
+            .filter(|e| e.parent.as_deref() == Some(parent))
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    /// True if `maybe_desc` is `ancestor` or nested under it.
+    pub fn is_descendant_of(&self, maybe_desc: &str, ancestor: &str) -> bool {
+        if maybe_desc == ancestor {
+            return true;
+        }
+        let mut current = maybe_desc.to_string();
+        for _ in 0..=self.entities.len() {
+            let Some(ent) = self.find_entity(&current) else {
+                return false;
+            };
+            match &ent.parent {
+                Some(p) if p == ancestor => return true,
+                Some(p) => current = p.clone(),
+                None => return false,
+            }
+        }
+        false
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -138,6 +251,9 @@ pub struct SceneSprite {
     pub color: [u8; 4],
     #[serde(default)]
     pub z: f32,
+    /// When false, skipped by hydrate / pick / bake (Unity component checkbox).
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
 }
 
 fn default_sprite_size() -> [f32; 2] {
@@ -164,6 +280,9 @@ pub struct SceneDisc {
     pub color: [u8; 4],
     #[serde(default)]
     pub z: f32,
+    /// When false, skipped by hydrate / pick / bake (Unity component checkbox).
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
 }
 
 fn mintish() -> [u8; 4] {
@@ -184,6 +303,10 @@ pub struct SceneCamera {
 
 fn default_true() -> bool {
     true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 pub fn load_scene(path: &Path) -> Result<Scene> {

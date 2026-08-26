@@ -5,7 +5,9 @@ use wiimaker_core::draw::{DrawList, Rect};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::world::World;
 
-/// Emit clear + all Sprite/Disc components. Dest rect is centered on transform xy.
+/// Emit clear + all Sprite/Disc components.
+///
+/// Dest origin = `translation - pivot * size * scale` (default pivot is center).
 pub fn render_world(world: &World, draw: &mut DrawList, clear: Rgba8) {
     draw.clear(clear);
 
@@ -14,8 +16,8 @@ pub fn render_world(world: &World, draw: &mut DrawList, clear: Rgba8) {
     sprites.sort_by(|a, b| a.2.z.partial_cmp(&b.2.z).unwrap_or(std::cmp::Ordering::Equal));
     for (_id, xf, sp) in sprites {
         let dest = Rect::new(
-            xf.translation.x - sp.size.x * 0.5 * xf.scale.x,
-            xf.translation.y - sp.size.y * 0.5 * xf.scale.y,
+            xf.translation.x - sp.size.x * sp.pivot.x * xf.scale.x,
+            xf.translation.y - sp.size.y * sp.pivot.y * xf.scale.y,
             sp.size.x * xf.scale.x,
             sp.size.y * xf.scale.y,
         );

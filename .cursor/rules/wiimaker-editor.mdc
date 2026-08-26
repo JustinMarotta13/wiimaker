@@ -13,19 +13,19 @@ eframe/egui shell over the same scene files agents edit via CLI. Launch: `cargo 
 ## Layout (keep Unity-shaped)
 
 ```
-Hierarchy | Scene viewport (DrawList → framebuffer → egui texture) | Inspector
-----------+--------------------------------------------------------+----------
-Project: assets / scenes / cook / doctor status
+Scene viewport | Hierarchy | Inspector
+---------------+-----------+----------
+Project: file explorer (assets / scenes / game.toml)
 ```
 
-- Hierarchy: list / create / rename / delete / select entities
-- Inspector: Transform + known components; Add Component
-- Viewport: live `render_world` blit; selection via Hierarchy in v0 (no IR picking yet)
-- Project: browse `assets/`, surface doctor/cook warnings
+- Hierarchy: tree / create / rename / delete / select / drag-drop reparent
+- Inspector: entity (Local Transform + parent + components) **or** selected project file (meta + actions)
+- Viewport: live `render_world` blit; pick/drag uses world transforms
+- Project: browse game files; PNG → Edit Sprites / assign; `.scene.json` → open / set default
 
 ## Mutation rule
 
-All edits go through `wiimaker-scene` helpers (`add_entity`, `remove_entity`, `set_entity_transform`, `add_component_*`, `set_scene_clear`, load/save). Then set `dirty` and `rehydrate()` the preview `World`.
+All edits go through `wiimaker-scene` helpers (`add_entity`, `remove_entity`, `set_entity_parent`, `set_entity_transform` / `set_entity_world_xy`, `add_component_*`, `set_scene_clear`, load/save). Then set `dirty` and `rehydrate()` the preview `World`.
 
 ```rust
 // ❌ BAD — edit World or invent parallel JSON writes

@@ -13,6 +13,13 @@ use anyhow::{bail, Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
 
+mod sprites;
+
+pub use sprites::{
+    grid_by_cell_count, set_sprite_pivot, slice_sheet, ResolvedSprite, SpriteCatalog, SpriteCell,
+    SpriteSheetMeta, PixelRect, Pivot,
+};
+
 pub const MAGIC: &[u8; 8] = b"WPACK001";
 
 #[derive(Clone, Debug)]

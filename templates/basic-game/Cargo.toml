@@ -12,3 +12,4 @@ path = "src/main.rs"
 wiimaker-core = { workspace = true }
 wiimaker-host = { workspace = true }
 wiimaker-scene = { workspace = true }
+wiimaker-assets = { workspace = true }

@@ -14,10 +14,10 @@ clap binary in `crates/wiimaker-cli`. Agents build games as: `new` → `asset im
 
 | Area | Commands |
 |---|---|
-| Project | `new`, `run`, `edit`, `cook`, `doctor`, `build-wii` |
+| Project | `new`, `run`, `edit`, `cook`, `doctor`, `build`, `dolphin`, `play-wii` |
 | Scene | `scene list\|show\|set-clear` |
-| Entity | `entity list\|add\|set\|add-component\|remove` |
-| Asset | `asset list\|import` |
+| Entity | `entity list\|add\|set\|add-component\|remove\|duplicate\|rename\|set-parent` |
+| Asset | `asset list\|import\|slice\|set-pivot\|list-sprites` |
 
 Global `--json` must work on mutating and query commands for machine output.
 
@@ -27,7 +27,7 @@ Global `--json` must work on mutating and query commands for machine output.
 2. **Resolve game** via `wiimaker_scene::find_game_dir` + `load_project`.
 3. **Mutations** call `wiimaker-scene` helpers only, then `save_scene` — same path as the editor.
 4. **`new`** copies `templates/basic-game`, replaces `{{name}}`, adds workspace member under `games/`.
-5. **`edit` / `run` / `build-wii`** shell existing tools (`wiimaker-editor`, `cargo run -p`, `tools/wii-build.sh`); don't reimplement.
+5. **`edit` / `run` / `build` / `dolphin`** shell existing tools (`wiimaker-editor`, `cargo run -p`, `tools/wii-build.sh`, `tools/run-dolphin.sh`); don't reimplement. Prefer `pipeline.rs` helpers.
 
 ```rust
 // ❌ BAD — hand-edit JSON in the CLI

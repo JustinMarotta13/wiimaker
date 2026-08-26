@@ -1,0 +1,263 @@
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
+use crate::util::parse_rgb;
+
+#[derive(Parser, Debug)]
+#[command(name = "wiimaker", about = "Build Wii games with a host-first loop")]
+pub struct Cli {
+    /// Emit machine-readable JSON where applicable
+    #[arg(long, global = true)]
+    pub json: bool,
+
+    #[command(subcommand)]
+    pub cmd: Cmd,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Cmd {
+    /// Scaffold a new game crate under games/
+    New { name: String },
+    /// Run a game on the host
+    Run { name: String },
+    /// Open the egui scene editor
+    Edit { name: String },
+    /// Prepare assets → `.wpack` (advanced / agents; prefer `build`)
+    Cook {
+        name: String,
+        #[arg(long)]
+        input: Option<PathBuf>,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Bake scene.wscn for Wii embed (advanced; requires prepared assets)
+    BakeWii { name: String },
+    /// Build Wii `.dol` (prepare + bake + Docker). Alias: `build-wii`
+    #[command(alias = "build-wii")]
+    Build { name: String },
+    /// Launch existing `target/wii/<game>/boot.dol` in Dolphin
+    Dolphin { name: String },
+    /// Build then launch in Dolphin
+    PlayWii { name: String },
+    /// Validate project / scene / assets
+    Doctor { name: String },
+    /// Scene operations
+    Scene {
+        #[command(subcommand)]
+        cmd: SceneCmd,
+    },
+    /// Entity operations
+    Entity {
+        #[command(subcommand)]
+        cmd: EntityCmd,
+    },
+    /// Asset operations
+    Asset {
+        #[command(subcommand)]
+        cmd: AssetCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SceneCmd {
+    List { game: String },
+    Show {
+        game: String,
+        scene: Option<String>,
+    },
+    SetClear {
+        game: String,
+        #[arg(long, value_parser = parse_rgb)]
+        rgb: [u8; 3],
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EntityCmd {
+    List {
+        game: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    Add {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        sprite: Option<String>,
+        #[arg(long)]
+        x: Option<f32>,
+        #[arg(long)]
+        y: Option<f32>,
+        #[arg(long)]
+        radius: Option<f32>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    Set {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        x: Option<f32>,
+        #[arg(long)]
+        y: Option<f32>,
+        /// Local X scale
+        #[arg(long)]
+        sx: Option<f32>,
+        /// Local Y scale
+        #[arg(long)]
+        sy: Option<f32>,
+        /// Z rotation in degrees (2D)
+        #[arg(long)]
+        rotation_deg: Option<f32>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    AddComponent {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// Component kind: Sprite or Disc
+        kind: String,
+        #[arg(long)]
+        texture: Option<String>,
+        #[arg(long, default_value_t = 32.0)]
+        width: f32,
+        #[arg(long, default_value_t = 32.0)]
+        height: f32,
+        #[arg(long, default_value_t = 36.0)]
+        radius: f32,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    Remove {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Deep-clone an entity (unique name, +16,+16 offset)
+    Duplicate {
+        game: String,
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Rename an entity (fails if new name empty or taken)
+    Rename {
+        game: String,
+        old: String,
+        new: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Parent an entity under another (omit --parent to unparent / make root)
+    SetParent {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// New parent entity name. Omit to move to scene root.
+        #[arg(long)]
+        parent: Option<String>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Remove a component (Sprite or Disc) from an entity
+    RemoveComponent {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// Component kind: Sprite or Disc
+        kind: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Enable or disable a component (Unity-style checkbox)
+    SetComponentEnabled {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// Component kind: Sprite or Disc
+        kind: String,
+        #[arg(long, action = clap::ArgAction::Set)]
+        enabled: bool,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Save an entity as `assets/prefabs/<name>.prefab.json`
+    CreatePrefab {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// Prefab file stem (defaults to entity name)
+        #[arg(long)]
+        as_name: Option<String>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Instantiate a prefab into the scene
+    InstantiatePrefab {
+        game: String,
+        /// Prefab stem or path relative to game (e.g. player or assets/prefabs/player.prefab.json)
+        prefab: String,
+        #[arg(long)]
+        x: Option<f32>,
+        #[arg(long)]
+        y: Option<f32>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Overwrite entity transform/components from a prefab (keeps name/parent)
+    ApplyPrefab {
+        game: String,
+        #[arg(long)]
+        name: String,
+        prefab: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Unpack prefab instance (v0: no-op beyond verifying entity exists)
+    UnpackPrefab {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AssetCmd {
+    List { game: String },
+    Import {
+        game: String,
+        path: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Grid-slice a sheet PNG into `assets/<stem>.sprites.json`
+    Slice {
+        game: String,
+        /// Sheet stem (e.g. basic_space_suit)
+        sheet: String,
+        #[arg(long)]
+        cols: u32,
+        #[arg(long)]
+        rows: u32,
+    },
+    /// Set normalized pivot on a named cell
+    SetPivot {
+        game: String,
+        /// Cell name (e.g. basic_space_suit_2)
+        sprite: String,
+        #[arg(long)]
+        x: f32,
+        #[arg(long)]
+        y: f32,
+    },
+    /// List catalog sprite names (sheets + cells)
+    ListSprites { game: String },
+}

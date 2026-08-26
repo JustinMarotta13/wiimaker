@@ -47,6 +47,14 @@ impl TextureAtlas {
         self.textures.get(id.0 as usize)
     }
 
+    /// Packed texture dimensions by wpack name (for sprite UV resolve).
+    pub fn size_of(&self, name: &str) -> Option<(u32, u32)> {
+        self.textures
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| (t.width, t.height))
+    }
+
     pub fn sample(&self, id: TextureId, u: f32, v: f32) -> Rgba8 {
         let Some(tex) = self.get(id) else {
             return Rgba8::WHITE;

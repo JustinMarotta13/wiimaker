@@ -9,5 +9,6 @@ description = "Asset cooker — PNG/OBJ to .wpack for Broadway"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 image = { workspace = true }
 byteorder = "1"

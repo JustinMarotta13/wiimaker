@@ -2,11 +2,12 @@
 
 use std::path::PathBuf;
 
+use wiimaker_assets::SpriteCatalog;
 use wiimaker_core::app::{App, FrameCtx};
 use wiimaker_core::draw::DrawList;
 use wiimaker_core::world::World;
 use wiimaker_host::{load_atlas_for_project, run_with_atlas, TextureAtlas};
-use wiimaker_scene::{hydrate, load_project, load_scene, render_world};
+use wiimaker_scene::{hydrate_with_catalog, load_project, load_scene, render_world};
 
 struct Game {
     title: String,
@@ -20,7 +21,10 @@ impl Game {
         let project = load_project(&game_dir)?;
         let atlas = load_atlas_for_project(&game_dir, &project)?;
         let scene = load_scene(&project.scene_path(&game_dir))?;
-        let world = hydrate(&scene, atlas.map())?;
+        let catalog = SpriteCatalog::load_dir(&project.assets_path(&game_dir), |stem| {
+            atlas.size_of(stem)
+        })?;
+        let world = hydrate_with_catalog(&scene, atlas.map(), Some(&catalog))?;
         Ok((
             Self {
                 title: project.title.clone(),

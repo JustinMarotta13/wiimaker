@@ -1,18 +1,41 @@
 /target/
 **/target/
+*.rs.bk
 .DS_Store
+._*
 *.dol
 *.elf
 *.iso
 *.wbfs
+*.wad
+*.rvz
+*.gcz
 *.map
+*.o
 runtime/wii/build/
 runtime/wii/boot.*
+/build/
 .idea/
 .vscode/
 *.swp
+*.swo
+*~
 *.wpack
 *.wscn
+compile_commands.json
+
+# Secrets / machine-local env
+.env
+.env.*
+!.env.example
+
+# Machine-local Cursor MCP (rules stay committed)
+.cursor/mcp.json
+
+.cursor/plans/
+
+# User game projects (local only)
+games/
 
 # Agent session scratch (durable memory is committed)
 MEMORY/sessions/*

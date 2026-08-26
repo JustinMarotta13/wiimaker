@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::project::GameProject;
 use crate::scene::{load_scene, Scene};
+use wiimaker_assets::SpriteCatalog;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -90,8 +91,14 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         });
     }
 
+    let catalog = SpriteCatalog::load_dir(&assets, |_| None).unwrap_or_else(|_| SpriteCatalog::empty());
+    let mut sprite_names: Vec<String> = catalog.names().to_vec();
+    if sprite_names.is_empty() {
+        sprite_names = texture_names.clone();
+    }
+
     if let Some(scene) = &scene {
-        check_scene_refs(scene, &texture_names, &mut issues);
+        check_scene_refs(scene, &sprite_names, &mut issues);
     }
 
     let wpack = project.wpack_path(game_dir);
@@ -116,14 +123,14 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
     }
 }
 
-fn check_scene_refs(scene: &Scene, textures: &[String], issues: &mut Vec<Issue>) {
+fn check_scene_refs(scene: &Scene, sprites: &[String], issues: &mut Vec<Issue>) {
     for ent in &scene.entities {
         if let Some(sp) = &ent.components.sprite {
-            if !textures.iter().any(|t| t == &sp.texture) {
+            if !sprites.iter().any(|t| t == &sp.texture) {
                 issues.push(Issue {
                     severity: Severity::Error,
                     message: format!(
-                        "entity '{}': sprite texture '{}' missing from assets/",
+                        "entity '{}': sprite '{}' missing from assets/ (PNG stem or sheet cell)",
                         ent.name, sp.texture
                     ),
                 });

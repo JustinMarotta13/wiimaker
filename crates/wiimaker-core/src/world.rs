@@ -51,6 +51,8 @@ pub struct Sprite {
     pub texture: TextureId,
     pub size: Vec2,
     pub uv: Rect,
+    /// Normalized pivot in sprite space (`0.5, 0.5` = center).
+    pub pivot: Vec2,
     pub color: Rgba8,
     pub z: f32,
 }
@@ -61,6 +63,7 @@ impl Sprite {
             texture,
             size,
             uv: Rect::unit(),
+            pivot: Vec2::new(0.5, 0.5),
             color: Rgba8::WHITE,
             z: 0.0,
         }

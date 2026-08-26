@@ -1,9 +1,11 @@
-//! Scene → World hydration with texture name resolution.
+//! Scene → World hydration with texture / sprite-cell name resolution.
 
 use std::collections::HashMap;
 
 use anyhow::Result;
-use wiimaker_core::draw::TextureId;
+use wiimaker_assets::SpriteCatalog;
+use wiimaker_core::draw::{Rect, TextureId};
+use wiimaker_core::math::Vec2;
 use wiimaker_core::world::{Camera, Disc, Sprite, World};
 
 use crate::scene::{EntityData, Scene};
@@ -43,41 +45,74 @@ impl TextureMap {
 }
 
 pub fn hydrate(scene: &Scene, textures: &TextureMap) -> Result<World> {
+    hydrate_with_catalog(scene, textures, None)
+}
+
+pub fn hydrate_with_catalog(
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+) -> Result<World> {
     let mut world = World::new();
-    hydrate_into(&mut world, scene, textures)?;
+    hydrate_into_with_catalog(&mut world, scene, textures, catalog)?;
     Ok(world)
 }
 
 pub fn hydrate_into(world: &mut World, scene: &Scene, textures: &TextureMap) -> Result<()> {
+    hydrate_into_with_catalog(world, scene, textures, None)
+}
+
+pub fn hydrate_into_with_catalog(
+    world: &mut World,
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+) -> Result<()> {
     world.clear();
     for ent in &scene.entities {
-        spawn_entity(world, ent, textures)?;
+        spawn_entity(world, scene, ent, textures, catalog)?;
     }
     Ok(())
 }
 
-fn spawn_entity(world: &mut World, ent: &EntityData, textures: &TextureMap) -> Result<()> {
-    let id = world.spawn_named(ent.name.clone(), ent.transform.to_runtime());
+fn spawn_entity(
+    world: &mut World,
+    scene: &Scene,
+    ent: &EntityData,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+) -> Result<()> {
+    let xf = scene
+        .world_transform(&ent.name)
+        .unwrap_or_else(|| ent.transform.clone());
+    let id = world.spawn_named(ent.name.clone(), xf.to_runtime());
     world.set_tag(id, ent.tag);
 
     if let Some(sp) = &ent.components.sprite {
-        let tex = textures.get(&sp.texture).ok_or_else(|| {
-            anyhow::anyhow!(
-                "entity '{}': texture '{}' not found in wpack",
-                ent.name,
-                sp.texture
-            )
-        })?;
-        let mut sprite = Sprite::new(tex, sp.size_vec());
-        sprite.color = sp.color_rgba();
-        sprite.z = sp.z;
-        world.set_sprite(id, Some(sprite));
+        if sp.enabled {
+            let (tex_name, uv, pivot, size) = resolve_sprite(sp, catalog);
+            let tex = textures.get(&tex_name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "entity '{}': texture '{}' not found in wpack",
+                    ent.name,
+                    tex_name
+                )
+            })?;
+            let mut sprite = Sprite::new(tex, size);
+            sprite.uv = uv;
+            sprite.pivot = pivot;
+            sprite.color = sp.color_rgba();
+            sprite.z = sp.z;
+            world.set_sprite(id, Some(sprite));
+        }
     }
 
     if let Some(d) = &ent.components.disc {
-        let mut disc = Disc::new(d.radius, d.color_rgba());
-        disc.z = d.z;
-        world.set_disc(id, Some(disc));
+        if d.enabled {
+            let mut disc = Disc::new(d.radius, d.color_rgba());
+            disc.z = d.z;
+            world.set_disc(id, Some(disc));
+        }
     }
 
     if let Some(cam) = &ent.components.camera {
@@ -92,24 +127,63 @@ fn spawn_entity(world: &mut World, ent: &EntityData, textures: &TextureMap) -> R
     Ok(())
 }
 
+fn resolve_sprite(
+    sp: &crate::scene::SceneSprite,
+    catalog: Option<&SpriteCatalog>,
+) -> (String, Rect, Vec2, Vec2) {
+    if let Some(cat) = catalog {
+        if let Some(r) = cat.lookup(&sp.texture) {
+            let uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
+            let pivot = Vec2::new(r.pivot[0], r.pivot[1]);
+            // Scene size wins when author set it; cells often keep authored size.
+            let size = sp.size_vec();
+            return (r.sheet_texture.clone(), uv, pivot, size);
+        }
+    }
+    (
+        sp.texture.clone(),
+        Rect::unit(),
+        Vec2::new(0.5, 0.5),
+        sp.size_vec(),
+    )
+}
+
 /// Soft hydrate: missing textures skip the sprite instead of failing (editor preview).
 pub fn hydrate_lenient(scene: &Scene, textures: &TextureMap) -> World {
+    hydrate_lenient_with_catalog(scene, textures, None)
+}
+
+pub fn hydrate_lenient_with_catalog(
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+) -> World {
     let mut world = World::new();
     for ent in &scene.entities {
-        let id = world.spawn_named(ent.name.clone(), ent.transform.to_runtime());
+        let xf = scene
+            .world_transform(&ent.name)
+            .unwrap_or_else(|| ent.transform.clone());
+        let id = world.spawn_named(ent.name.clone(), xf.to_runtime());
         world.set_tag(id, ent.tag);
         if let Some(sp) = &ent.components.sprite {
-            if let Some(tex) = textures.get(&sp.texture) {
-                let mut sprite = Sprite::new(tex, sp.size_vec());
-                sprite.color = sp.color_rgba();
-                sprite.z = sp.z;
-                world.set_sprite(id, Some(sprite));
+            if sp.enabled {
+                let (tex_name, uv, pivot, size) = resolve_sprite(sp, catalog);
+                if let Some(tex) = textures.get(&tex_name) {
+                    let mut sprite = Sprite::new(tex, size);
+                    sprite.uv = uv;
+                    sprite.pivot = pivot;
+                    sprite.color = sp.color_rgba();
+                    sprite.z = sp.z;
+                    world.set_sprite(id, Some(sprite));
+                }
             }
         }
         if let Some(d) = &ent.components.disc {
-            let mut disc = Disc::new(d.radius, d.color_rgba());
-            disc.z = d.z;
-            world.set_disc(id, Some(disc));
+            if d.enabled {
+                let mut disc = Disc::new(d.radius, d.color_rgba());
+                disc.z = d.z;
+                world.set_disc(id, Some(disc));
+            }
         }
         if let Some(cam) = &ent.components.camera {
             world.set_camera(id, Some(Camera { active: cam.active }));

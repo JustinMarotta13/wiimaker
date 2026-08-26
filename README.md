@@ -30,7 +30,8 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | Prefab | `.prefab.json` |
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
 | Play | `wiimaker run` / `cargo run -p <game>` |
-| Build Settings | `wiimaker build-wii` |
+| Build Settings | `wiimaker build` · `wiimaker play-wii` |
+| Sprite Editor | `assets/<name>.sprites.json` + editor / `wiimaker asset slice` |
 
 Gameplay scripts stay as Rust `App` (like MonoBehaviour code): load a scene, then mutate entities in `update`.
 
@@ -38,7 +39,7 @@ Gameplay scripts stay as Rust `App` (like MonoBehaviour code): load a scene, the
 
 ```bash
 cd /Users/justin/wiimaker
-cargo run -p wiimaker-cli -- cook hello-orb
+cargo run -p wiimaker-cli -- cook hello-orb   # advanced; Play/Build also prepare assets
 cargo run -p hello-orb
 # or open the editor:
 cargo run -p wiimaker-cli -- edit hello-orb
@@ -53,26 +54,34 @@ Every command accepts `--json` for machine output.
 ```bash
 wiimaker new my-game
 wiimaker asset import my-game ./hero.png
-wiimaker entity add my-game --name Player --sprite hero --x 320 --y 240
-wiimaker cook my-game
+wiimaker asset slice my-game hero --cols 4 --rows 1
+wiimaker asset set-pivot my-game hero_2 --x 0.375 --y 0.375
+wiimaker entity add my-game --name Player --sprite hero_2 --x 320 --y 240
+wiimaker cook my-game          # advanced / agents
 wiimaker doctor my-game
 wiimaker run my-game
 wiimaker edit my-game
-wiimaker build-wii my-game
+wiimaker build my-game         # .dol (alias: build-wii)
+wiimaker dolphin my-game       # launch existing boot.dol
+wiimaker play-wii my-game      # build then Dolphin
 ```
 
 Scene / entity edits write `.scene.json` — the same files the egui editor saves.
+
+Sprite sheets keep one PNG; cells live in `assets/<stem>.sprites.json` (Grid By Cell Count + normalized pivot). Scenes reference cell names like `hero_2`.
 
 ## Quick start (Wii)
 
 Requires [devkitPro](https://devkitpro.org/) `wii-dev` **or** Docker:
 
 ```bash
-./tools/wii-build.sh hello-orb   # cook + bake-wii + Docker .dol
-./tools/run-dolphin.sh target/wii/hello-orb/boot.dol
+wiimaker build hello-orb       # prepare + bake + Docker → target/wii/hello-orb/boot.dol
+wiimaker dolphin hello-orb     # or: ./tools/run-dolphin.sh target/wii/hello-orb/boot.dol
+# one shot:
+wiimaker play-wii hello-orb
 ```
 
-`wii-build.sh` cooks `.wpack`, bakes `scene.wscn`, and embeds both into the `.dol`. Scene sprites should appear alongside the orb in Dolphin.
+`build` prepares `.wpack`, bakes `scene.wscn` (WSCN0002 with UV + pivot), and embeds both into the `.dol`. Editor toolbar: **Build** · **Play in Dolphin** · **Build & Run** (Cook is under ⋯).
 
 ## Workspace layout
 

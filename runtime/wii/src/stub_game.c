@@ -29,6 +29,8 @@ typedef struct {
     uint8_t kind;
     uint16_t tex;
     float size_w, size_h;
+    float u0, v0, u1, v1;
+    float pivot_x, pivot_y;
     float radius;
     uint8_t color[4];
     float z;
@@ -105,7 +107,7 @@ static int load_scene(const uint8_t *data, uint32_t size) {
         return -1;
     const uint8_t *p = data;
     const uint8_t *end = data + size;
-    if (memcmp(p, "WSCN0001", 8) != 0)
+    if (memcmp(p, "WSCN0002", 8) != 0)
         return -1;
     p += 8;
     uint8_t clear[4];
@@ -140,11 +142,30 @@ static int load_scene(const uint8_t *data, uint32_t size) {
             e->tex = rd_u16(&p, end);
             e->size_w = rd_f32(&p, end);
             e->size_h = rd_f32(&p, end);
+            e->u0 = rd_f32(&p, end);
+            e->v0 = rd_f32(&p, end);
+            e->u1 = rd_f32(&p, end);
+            e->v1 = rd_f32(&p, end);
+            e->pivot_x = rd_f32(&p, end);
+            e->pivot_y = rd_f32(&p, end);
             if (p + 4 > end)
                 return -1;
             memcpy(e->color, p, 4);
             p += 4;
             e->z = rd_f32(&p, end);
+            /* Legacy fallback: full UV → content UV for PoT pad. */
+            if (e->u0 == 0.0f && e->v0 == 0.0f && e->u1 == 1.0f && e->v1 == 1.0f) {
+                float tw = (float)wiimaker_tex_width(e->tex);
+                float th = (float)wiimaker_tex_height(e->tex);
+                if (tw > 0.0f && th > 0.0f) {
+                    e->u1 = e->size_w / tw;
+                    e->v1 = e->size_h / th;
+                    if (e->u1 > 1.0f)
+                        e->u1 = 1.0f;
+                    if (e->v1 > 1.0f)
+                        e->v1 = 1.0f;
+                }
+            }
         } else if (e->kind == KIND_DISC) {
             e->radius = rd_f32(&p, end);
             if (p + 4 > end)
@@ -239,22 +260,10 @@ int wiimaker_game_frame(const WiimakerInput *input, float dt) {
         if (e->kind == KIND_SPRITE) {
             float dw = e->size_w * e->sx;
             float dh = e->size_h * e->sy;
-            float x = e->x - dw * 0.5f;
-            float y = e->y - dh * 0.5f;
-            float tw = (float)wiimaker_tex_width(e->tex);
-            float th = (float)wiimaker_tex_height(e->tex);
-            float u1 = 1.0f;
-            float v1 = 1.0f;
-            /* Content-sized sprites on PoT-padded textures sample the top-left. */
-            if (tw > 0.0f && th > 0.0f) {
-                u1 = e->size_w / tw;
-                v1 = e->size_h / th;
-                if (u1 > 1.0f)
-                    u1 = 1.0f;
-                if (v1 > 1.0f)
-                    v1 = 1.0f;
-            }
-            wiimaker_gx_draw_sprite(e->tex, x, y, dw, dh, 0.0f, 0.0f, u1, v1, rgba_pack(e->color));
+            float x = e->x - dw * e->pivot_x;
+            float y = e->y - dh * e->pivot_y;
+            wiimaker_gx_draw_sprite(e->tex, x, y, dw, dh, e->u0, e->v0, e->u1, e->v1,
+                                    rgba_pack(e->color));
         } else if (e->kind == KIND_DISC) {
             uint32_t col = rgba_pack(e->color);
             if (player_i >= 0 && e == &ents[player_i])
