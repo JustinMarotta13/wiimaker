@@ -1,7 +1,8 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
-    add_component_disc, add_component_sprite, remove_component_disc, remove_component_sprite,
-    save_project, set_component_enabled, set_entity_parent,
+    add_component_disc, add_component_sprite, add_component_tilemap, remove_component_disc,
+    remove_component_sprite, remove_component_tilemap, save_project, set_component_enabled,
+    set_entity_parent, tilemap_resize,
 };
 
 use crate::app::EditorApp;
@@ -52,10 +53,15 @@ impl EditorApp {
         let mut dirty = false;
         let mut add_sprite = false;
         let mut add_disc = false;
+        let mut add_tilemap = false;
         let mut remove_sprite = false;
         let mut remove_disc = false;
+        let mut remove_tilemap = false;
         let mut toggle_sprite: Option<bool> = None;
         let mut toggle_disc: Option<bool> = None;
+        let mut toggle_tilemap: Option<bool> = None;
+        let mut pending_tm_resize: Option<(u32, u32)> = None;
+        let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
         let mut unparent = false;
 
@@ -65,9 +71,8 @@ impl EditorApp {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Name").size(12.0).color(theme::TEXT_MUTED));
                 let name_w = (ui.available_width() - 48.0).clamp(80.0, 200.0);
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut self.rename_draft).desired_width(name_w),
-                );
+                let resp = ui
+                    .add(egui::TextEdit::singleline(&mut self.rename_draft).desired_width(name_w));
                 if resp.lost_focus() {
                     rename_committed = true;
                 }
@@ -139,14 +144,10 @@ impl EditorApp {
                     )
                     .changed();
                 changed |= ui
-                    .add(
-                        egui::Slider::new(&mut ent.transform.scale[0], 0.1..=8.0).text("scale x"),
-                    )
+                    .add(egui::Slider::new(&mut ent.transform.scale[0], 0.1..=8.0).text("scale x"))
                     .changed();
                 changed |= ui
-                    .add(
-                        egui::Slider::new(&mut ent.transform.scale[1], 0.1..=8.0).text("scale y"),
-                    )
+                    .add(egui::Slider::new(&mut ent.transform.scale[1], 0.1..=8.0).text("scale y"))
                     .changed();
                 if changed {
                     dirty = true;
@@ -249,6 +250,131 @@ impl EditorApp {
             } else if ui.button("+ Disc").clicked() {
                 add_disc = true;
             }
+
+            if let Some(tm) = ent.components.tilemap.as_mut() {
+                theme::card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let mut en = tm.enabled;
+                        if ui.checkbox(&mut en, "").changed() {
+                            toggle_tilemap = Some(en);
+                        }
+                        ui.label(RichText::new("Tilemap").strong().color(theme::ACCENT));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new("Remove").size(11.0).color(theme::DANGER),
+                                    )
+                                    .fill(theme::BG_SUNKEN),
+                                )
+                                .clicked()
+                            {
+                                remove_tilemap = true;
+                            }
+                        });
+                    });
+                    let mut w = tm.width;
+                    let mut h = tm.height;
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("grid").size(11.0).color(theme::TEXT_MUTED));
+                        let w_ch = ui.add(egui::DragValue::new(&mut w).range(1..=256).prefix("w "));
+                        let h_ch = ui.add(egui::DragValue::new(&mut h).range(1..=256).prefix("h "));
+                        if (w_ch.changed() || h_ch.changed()) && (w != tm.width || h != tm.height) {
+                            pending_tm_resize = Some((w, h));
+                        }
+                    });
+                    dirty |= ui
+                        .add(egui::Slider::new(&mut tm.cell, 4.0..=64.0).text("cell"))
+                        .changed();
+                    dirty |= ui
+                        .add(egui::Slider::new(&mut tm.origin[0], -640.0..=640.0).text("origin x"))
+                        .changed();
+                    dirty |= ui
+                        .add(egui::Slider::new(&mut tm.origin[1], -480.0..=480.0).text("origin y"))
+                        .changed();
+                    dirty |= ui
+                        .add(egui::Slider::new(&mut tm.z, -10.0..=10.0).text("z"))
+                        .changed();
+                    let occupied = tm.cells.iter().filter(|c| **c != 0).count();
+                    ui.label(
+                        RichText::new(format!(
+                            "{occupied} occupied · {} solid",
+                            tm.solid.iter().filter(|s| **s != 0).count()
+                        ))
+                        .size(11.0)
+                        .color(theme::TEXT_DIM),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Palette").size(12.0).color(theme::TEXT_MUTED));
+                    let catalog_names = &catalog_names;
+                    for pal in tm.palette.iter_mut() {
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut pal.id)
+                                    .range(1..=32)
+                                    .prefix("id "),
+                            );
+                            let mut col = egui::Color32::from_rgba_unmultiplied(
+                                pal.color[0],
+                                pal.color[1],
+                                pal.color[2],
+                                pal.color[3],
+                            );
+                            if ui.color_edit_button_srgba(&mut col).changed() {
+                                pal.color = [col.r(), col.g(), col.b(), col.a()];
+                                dirty = true;
+                            }
+                            if ui.small_button("Brush").clicked() {
+                                use_brush = Some((pal.id, true));
+                            }
+                        });
+                        let mut sprite = pal.sprite.clone().unwrap_or_default();
+                        let combo_w = (ui.available_width() - 8.0).clamp(80.0, 200.0);
+                        let mut tex_changed = false;
+                        egui::ComboBox::from_id_salt(format!("tm_pal_{}", pal.id))
+                            .selected_text(if sprite.is_empty() {
+                                "(color quad)"
+                            } else {
+                                sprite.as_str()
+                            })
+                            .width(combo_w)
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_label(sprite.is_empty(), "(color quad)")
+                                    .clicked()
+                                {
+                                    sprite.clear();
+                                    tex_changed = true;
+                                }
+                                for name in catalog_names {
+                                    if ui.selectable_label(sprite == *name, name).clicked() {
+                                        sprite = name.clone();
+                                        tex_changed = true;
+                                    }
+                                }
+                            });
+                        if tex_changed {
+                            pal.sprite = if sprite.is_empty() {
+                                None
+                            } else {
+                                Some(sprite)
+                            };
+                            dirty = true;
+                        }
+                    }
+                    if ui.small_button("+ palette id").clicked() {
+                        let next = tm.palette.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+                        tm.palette.push(wiimaker_scene::SceneTilePalette {
+                            id: next,
+                            sprite: None,
+                            color: [48, 88, 176, 255],
+                        });
+                        dirty = true;
+                    }
+                });
+            } else if ui.button("+ Tilemap").clicked() {
+                add_tilemap = true;
+            }
         }
 
         if let Some((tex, _)) = pending_sprite_tex {
@@ -329,6 +455,43 @@ impl EditorApp {
             let _ = add_component_disc(&mut self.scene, &sel, 36.0, [72, 210, 160, 255]);
             self.sync_baseline();
             self.mark_dirty();
+        }
+        if add_tilemap {
+            self.push_undo();
+            let _ = add_component_tilemap(&mut self.scene, &sel, 32, 18, 16.0);
+            self.edit_tool = crate::app::EditTool::Paint;
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_tilemap {
+            self.push_undo();
+            if remove_component_tilemap(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_tilemap {
+            self.push_undo();
+            if set_component_enabled(&mut self.scene, &sel, "tilemap", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some((w, h)) = pending_tm_resize {
+            self.begin_inspector_gesture();
+            if tilemap_resize(&mut self.scene, &sel, w, h).is_ok() {
+                self.mark_dirty();
+            }
+        }
+        if let Some((id, solid)) = use_brush {
+            self.tile_brush_id = id;
+            self.tile_brush_solid = solid;
+            self.edit_tool = crate::app::EditTool::Paint;
+            self.status = format!("brush {id}");
         }
 
         ui.add_space(8.0);

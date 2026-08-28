@@ -19,6 +19,7 @@ extern const uint8_t _binary_scene_wscn_end[];
 #define KIND_NONE 0
 #define KIND_SPRITE 1
 #define KIND_DISC 2
+#define KIND_TILEMAP 3
 #define MAX_ENTITIES 64
 #define MAX_NAME 48
 
@@ -107,7 +108,7 @@ static int load_scene(const uint8_t *data, uint32_t size) {
         return -1;
     const uint8_t *p = data;
     const uint8_t *end = data + size;
-    if (memcmp(p, "WSCN0002", 8) != 0)
+    if (memcmp(p, "WSCN0003", 8) != 0 && memcmp(p, "WSCN0002", 8) != 0)
         return -1;
     p += 8;
     uint8_t clear[4];
@@ -173,6 +174,12 @@ static int load_scene(const uint8_t *data, uint32_t size) {
             memcpy(e->color, p, 4);
             p += 4;
             e->z = rd_f32(&p, end);
+        } else if (e->kind == KIND_TILEMAP) {
+            /* Length-prefixed payload. Host renders tilemaps; skip on Wii for now. */
+            uint32_t plen = rd_u32(&p, end);
+            if (p + plen > end)
+                return -1;
+            p += plen;
         }
 
         if (strcmp(e->name, "Player") == 0) {

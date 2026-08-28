@@ -3,10 +3,10 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use serde::Serialize;
 use wiimaker_scene::{
-    add_component_disc, add_component_sprite, add_entity, apply_prefab, duplicate_entity,
-    entity_to_prefab, instantiate_prefab, load_prefab, remove_component_disc,
-    remove_component_sprite, remove_entity, rename_entity, save_prefab, save_scene,
-    set_component_enabled, set_entity_parent, set_entity_rotation_z, set_entity_scale,
+    add_component_disc, add_component_sprite, add_component_tilemap, add_entity, apply_prefab,
+    duplicate_entity, entity_to_prefab, instantiate_prefab, load_prefab, remove_component_disc,
+    remove_component_sprite, remove_component_tilemap, remove_entity, rename_entity, save_prefab,
+    save_scene, set_component_enabled, set_entity_parent, set_entity_rotation_z, set_entity_scale,
     set_entity_transform, unpack_prefab_instance, MutateOpts, Scene,
 };
 
@@ -69,11 +69,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
-            if x.is_none()
-                && y.is_none()
-                && sx.is_none()
-                && sy.is_none()
-                && rotation_deg.is_none()
+            if x.is_none() && y.is_none() && sx.is_none() && sy.is_none() && rotation_deg.is_none()
             {
                 bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg");
             }
@@ -102,6 +98,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             width,
             height,
             radius,
+            cell,
+            cols,
+            rows,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -114,7 +113,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "disc" => {
                     add_component_disc(&mut sc, &name, radius, [72, 210, 160, 255])?;
                 }
-                other => bail!("unknown component kind '{other}' (Sprite|Disc)"),
+                "tilemap" => {
+                    add_component_tilemap(&mut sc, &name, cols, rows, cell)?;
+                }
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("added {kind} to {name}"))
@@ -223,7 +225,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             match kind.to_ascii_lowercase().as_str() {
                 "sprite" => remove_component_sprite(&mut sc, &name)?,
                 "disc" => remove_component_disc(&mut sc, &name)?,
-                other => bail!("unknown component kind '{other}' (Sprite|Disc)"),
+                "tilemap" => remove_component_tilemap(&mut sc, &name)?,
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed {kind} from {name}"))
@@ -323,11 +326,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("applied prefab to {name}"))
         }
-        EntityCmd::UnpackPrefab {
-            game,
-            name,
-            scene,
-        } => {
+        EntityCmd::UnpackPrefab { game, name, scene } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             unpack_prefab_instance(&mut sc, &name)?;
             save_scene(&path, &sc)?;
@@ -352,5 +351,9 @@ fn resolve_prefab_path(game_dir: &Path, prefab: &str) -> Result<std::path::PathB
     if with_ext.is_file() {
         return Ok(with_ext);
     }
-    bail!("prefab not found: {prefab} (tried {}, {})", direct.display(), with_ext.display())
+    bail!(
+        "prefab not found: {prefab} (tried {}, {})",
+        direct.display(),
+        with_ext.display()
+    )
 }

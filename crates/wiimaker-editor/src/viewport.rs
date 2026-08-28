@@ -4,10 +4,10 @@ use wiimaker_core::draw::DrawList;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
     pick_entity_at_with_catalog, pointer_to_scene, render_world, set_entity_rotation_z,
-    set_entity_scale, set_entity_world_xy, Scene,
+    set_entity_scale, set_entity_world_xy, tilemap_set_cell, Scene,
 };
 
-use crate::app::{EditTool, EditorApp, PlayMode, ViewportDrag};
+use crate::app::{EditTool, EditorApp, PlayMode, TilePaintDrag, ViewportDrag};
 use crate::theme;
 
 pub(crate) const VIEW_W: usize = 640;
@@ -62,10 +62,25 @@ impl EditorApp {
                         ui.checkbox(&mut self.snap_enabled, "Snap");
                         ui.add_space(8.0);
                         ui.add_enabled_ui(self.play_mode == PlayMode::Edit, |ui| {
+                            ui.selectable_value(&mut self.edit_tool, EditTool::Pick, "Pick");
+                            ui.selectable_value(&mut self.edit_tool, EditTool::Erase, "Erase");
+                            ui.selectable_value(&mut self.edit_tool, EditTool::Paint, "Paint");
                             ui.selectable_value(&mut self.edit_tool, EditTool::Rotate, "Rotate");
                             ui.selectable_value(&mut self.edit_tool, EditTool::Scale, "Scale");
                             ui.selectable_value(&mut self.edit_tool, EditTool::Translate, "Move");
                         });
+                        if self.edit_tool.is_tile_tool() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "brush {}{}",
+                                    self.tile_brush_id,
+                                    if self.tile_brush_solid { " solid" } else { "" }
+                                ))
+                                .size(11.0)
+                                .color(theme::TEXT_DIM),
+                            );
+                        }
                     });
                 });
                 ui.add_space(6.0);
@@ -125,6 +140,11 @@ impl EditorApp {
                         &self.selected,
                         &self.catalog,
                     );
+                    if self.edit_tool.is_tile_tool() {
+                        if let Some(name) = self.tilemap_target() {
+                            paint_tilemap_overlay(ui, response.rect, &self.scene, &name);
+                        }
+                    }
                     viewport_response = Some((response.clone(), response.rect));
                 });
                 if let Some((response, rect)) = viewport_response {
@@ -145,18 +165,19 @@ impl EditorApp {
         };
 
         let pick_at = |app: &Self, pos: [f32; 2]| -> Option<(String, [f32; 2])> {
-            let name =
-                pick_entity_at_with_catalog(&app.scene, pos[0], pos[1], Some(&app.catalog))?;
+            let name = pick_entity_at_with_catalog(&app.scene, pos[0], pos[1], Some(&app.catalog))?;
             let world = app.scene.world_transform(&name)?;
-            let grab_offset = [
-                pos[0] - world.translation[0],
-                pos[1] - world.translation[1],
-            ];
+            let grab_offset = [pos[0] - world.translation[0], pos[1] - world.translation[1]];
             Some((name, grab_offset))
         };
 
         // Block authoring picks while playing.
         if self.play_mode != PlayMode::Edit {
+            return;
+        }
+
+        if self.edit_tool.is_tile_tool() {
+            self.handle_tile_paint(response, to_scene);
             return;
         }
 
@@ -204,8 +225,8 @@ impl EditorApp {
                             .map(|e| e.transform.rotation)
                             .unwrap_or([0.0, 0.0, 0.0, 1.0]);
                         // quat z,w → angle (2D): atan2(2*z*w, w²-z²) simplified for x=y=0
-                        let rot_z_start = (2.0 * rot[2] * rot[3])
-                            .atan2(rot[3] * rot[3] - rot[2] * rot[2]);
+                        let rot_z_start =
+                            (2.0 * rot[2] * rot[3]).atan2(rot[3] * rot[3] - rot[2] * rot[2]);
                         self.push_undo();
                         let others_start: Vec<(String, [f32; 2])> = self
                             .selected
@@ -292,6 +313,7 @@ impl EditorApp {
                                 self.mark_dirty();
                             }
                         }
+                        EditTool::Paint | EditTool::Erase | EditTool::Pick => {}
                     }
                 }
             }
@@ -304,6 +326,157 @@ impl EditorApp {
             self.viewport_drag = None;
         }
     }
+
+    fn handle_tile_paint(
+        &mut self,
+        response: &egui::Response,
+        to_scene: impl Fn(egui::Pos2) -> Option<[f32; 2]>,
+    ) {
+        let scene_pos = response.interact_pointer_pos().and_then(&to_scene);
+
+        let target_at = |app: &Self, pos: [f32; 2]| -> Option<String> {
+            if let Some(name) = app.tilemap_target() {
+                if let Some(ent) = app.scene.find_entity(&name) {
+                    if let Some(tm) = &ent.components.tilemap {
+                        let world = app
+                            .scene
+                            .world_transform(&name)
+                            .unwrap_or_else(|| ent.transform.clone());
+                        let (cx, cy) = tm.world_to_cell(&world, pos[0], pos[1]);
+                        if tm.in_bounds(cx, cy) {
+                            return Some(name);
+                        }
+                    }
+                }
+            }
+            pick_entity_at_with_catalog(&app.scene, pos[0], pos[1], Some(&app.catalog)).and_then(
+                |name| {
+                    app.scene
+                        .find_entity(&name)
+                        .and_then(|e| e.components.tilemap.as_ref())
+                        .map(|_| name)
+                },
+            )
+        };
+
+        if response.clicked() && self.edit_tool == EditTool::Pick {
+            if let Some(pos) = scene_pos {
+                if let Some(name) = target_at(self, pos) {
+                    let picked = self.scene.find_entity(&name).and_then(|ent| {
+                        let tm = ent.components.tilemap.as_ref()?;
+                        let world = self
+                            .scene
+                            .world_transform(&name)
+                            .unwrap_or_else(|| ent.transform.clone());
+                        let (cx, cy) = tm.world_to_cell(&world, pos[0], pos[1]);
+                        let (id, solid) = tm.get(cx, cy);
+                        Some((cx, cy, id, solid))
+                    });
+                    if let Some((cx, cy, id, solid)) = picked {
+                        self.tile_brush_id = if id == 0 { 1 } else { id };
+                        self.tile_brush_solid = if id == 0 { true } else { solid };
+                        self.select(Some(name));
+                        self.status = format!("picked tile {id} solid={solid} @ ({cx},{cy})");
+                    }
+                }
+            }
+            return;
+        }
+
+        let erase =
+            self.edit_tool == EditTool::Erase || response.ctx.input(|i| i.pointer.secondary_down());
+        let painting = self.edit_tool == EditTool::Paint || self.edit_tool == EditTool::Erase;
+
+        if painting && (response.drag_started() || response.clicked()) {
+            if let Some(pos) = scene_pos {
+                if let Some(name) = target_at(self, pos) {
+                    if !self.is_selected(&name) {
+                        self.select(Some(name.clone()));
+                    }
+                    self.push_undo();
+                    self.tile_paint = Some(TilePaintDrag {
+                        entity: name,
+                        last: None,
+                    });
+                }
+            }
+        }
+
+        if painting {
+            if let Some(drag) = self.tile_paint.clone() {
+                if response.dragged() || response.clicked() {
+                    if let Some(pos) = scene_pos {
+                        let cell = self.scene.find_entity(&drag.entity).and_then(|ent| {
+                            let tm = ent.components.tilemap.as_ref()?;
+                            let world = self
+                                .scene
+                                .world_transform(&drag.entity)
+                                .unwrap_or_else(|| ent.transform.clone());
+                            let (cx, cy) = tm.world_to_cell(&world, pos[0], pos[1]);
+                            if tm.in_bounds(cx, cy) {
+                                Some((cx, cy))
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some((cx, cy)) = cell {
+                            if Some((cx, cy)) != drag.last {
+                                let id = if erase { 0 } else { self.tile_brush_id };
+                                let solid = if erase { false } else { self.tile_brush_solid };
+                                if tilemap_set_cell(
+                                    &mut self.scene,
+                                    &drag.entity,
+                                    cx,
+                                    cy,
+                                    id,
+                                    solid,
+                                )
+                                .is_ok()
+                                {
+                                    if let Some(d) = self.tile_paint.as_mut() {
+                                        d.last = Some((cx, cy));
+                                    }
+                                    self.mark_dirty();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if response.drag_stopped() || (response.clicked() && self.tile_paint.is_some()) {
+            if self.tile_paint.is_some() {
+                self.sync_baseline();
+            }
+            self.tile_paint = None;
+        }
+    }
+}
+
+fn paint_tilemap_overlay(ui: &egui::Ui, image_rect: egui::Rect, scene: &Scene, name: &str) {
+    let Some(ent) = scene.find_entity(name) else {
+        return;
+    };
+    let Some(tm) = &ent.components.tilemap else {
+        return;
+    };
+    let world = scene
+        .world_transform(name)
+        .unwrap_or_else(|| ent.transform.clone());
+    let (origin, size) = tm.world_rect(&world);
+    let to_screen = |sx: f32, sy: f32| -> egui::Pos2 {
+        egui::pos2(
+            image_rect.min.x + sx / VIEW_W as f32 * image_rect.width(),
+            image_rect.min.y + sy / VIEW_H as f32 * image_rect.height(),
+        )
+    };
+    let r = egui::Rect::from_min_max(
+        to_screen(origin[0], origin[1]),
+        to_screen(origin[0] + size[0], origin[1] + size[1]),
+    );
+    ui.painter()
+        .rect_stroke(r, 0.0, egui::Stroke::new(1.0, theme::ACCENT));
 }
 
 fn paint_selection_outline(
@@ -363,6 +536,16 @@ fn paint_one_outline(
             let center = to_screen(cx, cy);
             let radius_px = r_scene / VIEW_W as f32 * image_rect.width();
             painter.circle_stroke(center, radius_px, stroke);
+        }
+    }
+    if let Some(tm) = &ent.components.tilemap {
+        if tm.enabled {
+            let (origin, size) = tm.world_rect(&world);
+            let r = egui::Rect::from_min_max(
+                to_screen(origin[0], origin[1]),
+                to_screen(origin[0] + size[0], origin[1] + size[1]),
+            );
+            painter.rect_stroke(r, 0.0, stroke);
         }
     }
 }

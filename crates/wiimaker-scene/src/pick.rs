@@ -88,7 +88,30 @@ fn entity_hit_z(
             });
         }
     }
+    if let Some(tm) = &ent.components.tilemap {
+        if tm.enabled && point_in_tilemap(&world, tm, sx, sy) {
+            hit_z = Some(match hit_z {
+                Some(z) => z.max(tm.z),
+                None => tm.z,
+            });
+        }
+    }
     hit_z
+}
+
+fn point_in_tilemap(
+    world: &crate::scene::SceneTransform,
+    tm: &crate::scene::SceneTilemap,
+    sx: f32,
+    sy: f32,
+) -> bool {
+    let cell_w = tm.cell * world.scale[0];
+    let cell_h = tm.cell * world.scale[1];
+    let left = world.translation[0] + tm.origin[0] * world.scale[0];
+    let top = world.translation[1] + tm.origin[1] * world.scale[1];
+    let w = tm.width as f32 * cell_w;
+    let h = tm.height as f32 * cell_h;
+    sx >= left && sx <= left + w && sy >= top && sy <= top + h
 }
 
 fn point_in_sprite(
@@ -181,7 +204,9 @@ mod tests {
     #[test]
     fn sprite_hit_uses_centered_aabb() {
         let mut scene = Scene::new("t");
-        scene.entities.push(sprite_ent("A", 100.0, 100.0, 40.0, 20.0, 0.0));
+        scene
+            .entities
+            .push(sprite_ent("A", 100.0, 100.0, 40.0, 20.0, 0.0));
         assert_eq!(pick_entity_at(&scene, 100.0, 100.0).as_deref(), Some("A"));
         assert_eq!(pick_entity_at(&scene, 120.0, 110.0).as_deref(), Some("A"));
         assert_eq!(pick_entity_at(&scene, 121.0, 100.0), None);
@@ -218,7 +243,10 @@ mod tests {
         scene
             .entities
             .push(sprite_ent("high", 100.0, 100.0, 40.0, 40.0, 2.0));
-        assert_eq!(pick_entity_at(&scene, 100.0, 100.0).as_deref(), Some("high"));
+        assert_eq!(
+            pick_entity_at(&scene, 100.0, 100.0).as_deref(),
+            Some("high")
+        );
 
         let mut scene2 = Scene::new("t");
         scene2
@@ -238,5 +266,26 @@ mod tests {
         let mut scene = Scene::new("t");
         scene.entities.push(disc_ent("D", 10.0, 10.0, 5.0, 0.0));
         assert_eq!(pick_entity_at(&scene, 200.0, 200.0), None);
+    }
+
+    #[test]
+    fn tilemap_hit_uses_grid_aabb() {
+        use crate::scene::SceneTilemap;
+        let mut scene = Scene::new("t");
+        let mut tm = SceneTilemap::new(4, 3, 10.0);
+        tm.z = 0.0;
+        scene.entities.push(EntityData {
+            name: "Maze".into(),
+            parent: None,
+            transform: SceneTransform::from_xy(0.0, 0.0),
+            components: SceneComponents {
+                tilemap: Some(tm),
+                ..Default::default()
+            },
+            tag: 0,
+        });
+        assert_eq!(pick_entity_at(&scene, 5.0, 5.0).as_deref(), Some("Maze"));
+        assert_eq!(pick_entity_at(&scene, 39.0, 29.0).as_deref(), Some("Maze"));
+        assert_eq!(pick_entity_at(&scene, 41.0, 5.0), None);
     }
 }

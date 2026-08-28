@@ -91,7 +91,8 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         });
     }
 
-    let catalog = SpriteCatalog::load_dir(&assets, |_| None).unwrap_or_else(|_| SpriteCatalog::empty());
+    let catalog =
+        SpriteCatalog::load_dir(&assets, |_| None).unwrap_or_else(|_| SpriteCatalog::empty());
     let mut sprite_names: Vec<String> = catalog.names().to_vec();
     if sprite_names.is_empty() {
         sprite_names = texture_names.clone();
@@ -113,9 +114,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         });
     }
 
-    let ok = !issues
-        .iter()
-        .any(|i| matches!(i.severity, Severity::Error));
+    let ok = !issues.iter().any(|i| matches!(i.severity, Severity::Error));
     Diagnosis {
         game: project.name.clone(),
         ok,
@@ -134,6 +133,35 @@ fn check_scene_refs(scene: &Scene, sprites: &[String], issues: &mut Vec<Issue>) 
                         ent.name, sp.texture
                     ),
                 });
+            }
+        }
+        if let Some(tm) = &ent.components.tilemap {
+            let n = (tm.width as usize).saturating_mul(tm.height as usize);
+            if tm.cells.len() != n {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "entity '{}': Tilemap cells len {} != {}x{} ({})",
+                        ent.name,
+                        tm.cells.len(),
+                        tm.width,
+                        tm.height,
+                        n
+                    ),
+                });
+            }
+            for pal in &tm.palette {
+                if let Some(sprite) = &pal.sprite {
+                    if !sprites.iter().any(|t| t == sprite) {
+                        issues.push(Issue {
+                            severity: Severity::Error,
+                            message: format!(
+                                "entity '{}': tile palette id {} sprite '{}' missing from assets/",
+                                ent.name, pal.id, sprite
+                            ),
+                        });
+                    }
+                }
             }
         }
     }

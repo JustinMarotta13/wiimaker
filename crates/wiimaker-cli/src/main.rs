@@ -9,7 +9,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use args::{Cli, Cmd};
-use cmds::{asset, entity, project, scene};
+use cmds::{asset, entity, project, scene, tilemap};
 use util::find_root;
 
 fn main() -> Result<()> {
@@ -32,5 +32,6 @@ fn main() -> Result<()> {
         Cmd::Scene { cmd } => scene::scene_cmd(&root, cmd, cli.json),
         Cmd::Entity { cmd } => entity::entity_cmd(&root, cmd, cli.json),
         Cmd::Asset { cmd } => asset::asset_cmd(&root, cmd, cli.json),
+        Cmd::Tilemap { cmd } => tilemap::tilemap_cmd(&root, cmd, cli.json),
     }
 }

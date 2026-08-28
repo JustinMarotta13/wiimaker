@@ -1,0 +1,45 @@
+{
+  "name": "maze",
+  "clear_color": [12, 18, 32, 255],
+  "entities": [
+    {
+      "name": "Maze",
+      "transform": {
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": {
+        "Tilemap": {
+          "cell": 16.0,
+          "origin": [0.0, 0.0],
+          "width": 5,
+          "height": 3,
+          "cells": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          "solid": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          "palette": [
+            { "id": 1, "color": [48, 88, 176, 255] }
+          ],
+          "z": -1.0
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "Player",
+      "transform": {
+        "translation": [24.0, 24.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": {
+        "Disc": {
+          "radius": 6.0,
+          "color": [255, 220, 80, 255],
+          "z": 1.0
+        }
+      },
+      "tag": 0
+    }
+  ]
+}

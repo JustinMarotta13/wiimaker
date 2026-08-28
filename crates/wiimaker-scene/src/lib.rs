@@ -7,6 +7,7 @@ mod pick;
 mod project;
 mod render;
 mod scene;
+mod tilemap;
 mod undo;
 mod wscn;
 
@@ -18,19 +19,23 @@ pub use hydrate::{
 pub use mutate::{
     add_component_disc, add_component_sprite, add_entity, apply_prefab, duplicate_entity,
     entity_to_prefab, insert_entity_clone, instantiate_prefab, remove_component_disc,
-    remove_component_sprite, remove_entity, rename_entity, set_component_enabled, set_entity_parent,
-    set_entity_rotation_z, set_entity_scale, set_entity_transform, set_entity_world_xy,
-    set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
+    remove_component_sprite, remove_entity, rename_entity, set_component_enabled,
+    set_entity_parent, set_entity_rotation_z, set_entity_scale, set_entity_transform,
+    set_entity_world_xy, set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{pick_entity_at, pick_entity_at_with_catalog, pointer_to_scene};
 pub use project::{find_game_dir, list_scenes, load_project, save_project, GameProject};
 pub use render::render_world;
 pub use scene::{
     load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneComponents,
-    SceneDisc, SceneSprite, SceneTransform,
+    SceneDisc, SceneSprite, SceneTilePalette, SceneTilemap, SceneTransform,
+};
+pub use tilemap::{
+    add_component_tilemap, ensure_tilemap, remove_component_tilemap, tilemap_fill,
+    tilemap_get_cell, tilemap_resize, tilemap_set_cell, tilemap_stamp, tilemap_stamp_ascii,
 };
 pub use undo::UndoStack;
 pub use wscn::{
     bake_scene_wscn, bake_scene_wscn_with_catalog, write_scene_wscn, write_scene_wscn_with_catalog,
-    KIND_DISC, KIND_NONE, KIND_SPRITE, WSCN_MAGIC,
+    KIND_DISC, KIND_NONE, KIND_SPRITE, KIND_TILEMAP, WSCN_MAGIC,
 };
