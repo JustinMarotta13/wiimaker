@@ -3,6 +3,7 @@
 use crate::color::Rgba8;
 use crate::draw::{Rect, TextureId};
 use crate::math::{Quat, Vec2, Vec3};
+use crate::tilemap::Tilemap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EntityId(pub u32);
@@ -118,6 +119,7 @@ struct Slot {
     sprite: Option<Sprite>,
     disc: Option<Disc>,
     camera: Option<Camera>,
+    tilemap: Option<Tilemap>,
 }
 
 /// Tiny entity world — Unity GameObject feel without a full ECS.
@@ -145,6 +147,7 @@ impl World {
             slot.sprite = None;
             slot.disc = None;
             slot.camera = None;
+            slot.tilemap = None;
             return EntityId(idx as u32);
         }
         let id = EntityId(self.slots.len() as u32);
@@ -156,6 +159,7 @@ impl World {
             sprite: None,
             disc: None,
             camera: None,
+            tilemap: None,
         });
         id
     }
@@ -284,6 +288,32 @@ impl World {
                 s.disc
                     .as_ref()
                     .map(|d| (EntityId(i as u32), &s.transform, d))
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn tilemap(&self, id: EntityId) -> Option<&Tilemap> {
+        self.slot(id).and_then(|s| s.tilemap.as_ref())
+    }
+
+    pub fn tilemap_mut(&mut self, id: EntityId) -> Option<&mut Tilemap> {
+        self.slot_mut(id).and_then(|s| s.tilemap.as_mut())
+    }
+
+    pub fn set_tilemap(&mut self, id: EntityId, tilemap: Option<Tilemap>) {
+        if let Some(slot) = self.slot_mut(id) {
+            slot.tilemap = tilemap;
+        }
+    }
+
+    pub fn iter_tilemaps(&self) -> impl Iterator<Item = (EntityId, &Transform, &Tilemap)> {
+        self.slots.iter().enumerate().filter_map(|(i, s)| {
+            if s.live {
+                s.tilemap
+                    .as_ref()
+                    .map(|tm| (EntityId(i as u32), &s.transform, tm))
             } else {
                 None
             }

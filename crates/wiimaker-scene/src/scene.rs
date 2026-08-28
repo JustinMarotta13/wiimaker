@@ -240,6 +240,8 @@ pub struct SceneComponents {
     pub disc: Option<SceneDisc>,
     #[serde(default, rename = "Camera", skip_serializing_if = "Option::is_none")]
     pub camera: Option<SceneCamera>,
+    #[serde(default, rename = "Tilemap", skip_serializing_if = "Option::is_none")]
+    pub tilemap: Option<SceneTilemap>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -307,6 +309,182 @@ fn default_true() -> bool {
 
 fn is_true(v: &bool) -> bool {
     *v
+}
+
+fn default_cell() -> f32 {
+    16.0
+}
+fn default_tm_w() -> u32 {
+    32
+}
+fn default_tm_h() -> u32 {
+    18
+}
+fn wall_color() -> [u8; 4] {
+    [48, 88, 176, 255]
+}
+
+/// Authoring tilemap (Unity Tilemap analogue). `cells` / `solid` are row-major.
+/// `solid` is 0/1 per cell (JSON-friendly); packed to bits at hydrate time.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SceneTilemap {
+    #[serde(default = "default_cell")]
+    pub cell: f32,
+    #[serde(default)]
+    pub origin: [f32; 2],
+    #[serde(default = "default_tm_w")]
+    pub width: u32,
+    #[serde(default = "default_tm_h")]
+    pub height: u32,
+    #[serde(default)]
+    pub cells: Vec<u16>,
+    /// 0/1 per cell, same order as `cells`.
+    #[serde(default)]
+    pub solid: Vec<u8>,
+    #[serde(default)]
+    pub palette: Vec<SceneTilePalette>,
+    #[serde(default)]
+    pub z: f32,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+}
+
+impl Default for SceneTilemap {
+    fn default() -> Self {
+        Self::new(default_tm_w(), default_tm_h(), default_cell())
+    }
+}
+
+impl SceneTilemap {
+    pub fn new(width: u32, height: u32, cell: f32) -> Self {
+        let n = (width as usize).saturating_mul(height as usize);
+        Self {
+            cell: if cell <= 0.0 { default_cell() } else { cell },
+            origin: [0.0, 0.0],
+            width,
+            height,
+            cells: vec![0; n],
+            solid: vec![0; n],
+            palette: vec![SceneTilePalette {
+                id: 1,
+                sprite: None,
+                color: wall_color(),
+            }],
+            z: -1.0,
+            enabled: true,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        (self.width as usize).saturating_mul(self.height as usize)
+    }
+
+    pub fn ensure_len(&mut self) {
+        let n = self.len();
+        if self.cells.len() < n {
+            self.cells.resize(n, 0);
+        } else if self.cells.len() > n {
+            self.cells.truncate(n);
+        }
+        if self.solid.len() < n {
+            self.solid.resize(n, 0);
+        } else if self.solid.len() > n {
+            self.solid.truncate(n);
+        }
+    }
+
+    pub fn in_bounds(&self, x: i32, y: i32) -> bool {
+        x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height
+    }
+
+    pub fn index(&self, x: i32, y: i32) -> Option<usize> {
+        if self.in_bounds(x, y) {
+            Some(y as usize * self.width as usize + x as usize)
+        } else {
+            None
+        }
+    }
+
+    pub fn get(&self, x: i32, y: i32) -> (u16, bool) {
+        match self.index(x, y) {
+            Some(i) => (
+                self.cells.get(i).copied().unwrap_or(0),
+                self.solid.get(i).copied().unwrap_or(0) != 0,
+            ),
+            None => (0, false),
+        }
+    }
+
+    pub fn set(&mut self, x: i32, y: i32, id: u16, solid: bool) -> bool {
+        self.ensure_len();
+        let Some(i) = self.index(x, y) else {
+            return false;
+        };
+        self.cells[i] = id;
+        self.solid[i] = if solid { 1 } else { 0 };
+        true
+    }
+
+    pub fn world_to_cell(&self, world: &SceneTransform, wx: f32, wy: f32) -> (i32, i32) {
+        let cell_x = (self.cell * world.scale[0]).abs().max(1e-6);
+        let cell_y = (self.cell * world.scale[1]).abs().max(1e-6);
+        let ox = world.translation[0] + self.origin[0] * world.scale[0];
+        let oy = world.translation[1] + self.origin[1] * world.scale[1];
+        (
+            ((wx - ox) / cell_x).floor() as i32,
+            ((wy - oy) / cell_y).floor() as i32,
+        )
+    }
+
+    pub fn world_rect(&self, world: &SceneTransform) -> ([f32; 2], [f32; 2]) {
+        let left = world.translation[0] + self.origin[0] * world.scale[0];
+        let top = world.translation[1] + self.origin[1] * world.scale[1];
+        let w = self.width as f32 * self.cell * world.scale[0];
+        let h = self.height as f32 * self.cell * world.scale[1];
+        ([left, top], [w, h])
+    }
+
+    /// Resize preserving the overlapping top-left region.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let old_w = self.width;
+        let old_h = self.height;
+        let old_cells = self.cells.clone();
+        let old_solid = self.solid.clone();
+        self.width = width.max(1);
+        self.height = height.max(1);
+        let n = self.len();
+        self.cells = vec![0; n];
+        self.solid = vec![0; n];
+        let copy_w = old_w.min(self.width) as usize;
+        let copy_h = old_h.min(self.height) as usize;
+        for y in 0..copy_h {
+            for x in 0..copy_w {
+                let oi = y * old_w as usize + x;
+                let ni = y * self.width as usize + x;
+                if oi < old_cells.len() {
+                    self.cells[ni] = old_cells[oi];
+                }
+                if oi < old_solid.len() {
+                    self.solid[ni] = old_solid[oi];
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SceneTilePalette {
+    pub id: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sprite: Option<String>,
+    #[serde(default = "wall_color")]
+    pub color: [u8; 4],
+}
+
+impl SceneTilePalette {
+    pub fn color_rgba(&self) -> Rgba8 {
+        Rgba8::new(self.color[0], self.color[1], self.color[2], self.color[3])
+    }
 }
 
 pub fn load_scene(path: &Path) -> Result<Scene> {

@@ -27,6 +27,7 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | GameObject | Entity (`name` + Transform + components) |
 | Transform | `transform.translation / rotation / scale` |
 | SpriteRenderer | `Sprite` component |
+| Tilemap / TilemapCollider2D | `Tilemap` component (cell ids + solid bits) |
 | Prefab | `.prefab.json` |
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
 | Play | `wiimaker run` / `cargo run -p <game>` |
@@ -57,6 +58,10 @@ wiimaker asset import my-game ./hero.png
 wiimaker asset slice my-game hero --cols 4 --rows 1
 wiimaker asset set-pivot my-game hero_2 --x 0.375 --y 0.375
 wiimaker entity add my-game --name Player --sprite hero_2 --x 320 --y 240
+wiimaker entity add-component my-game --name Maze Tilemap --cols 28 --rows 31 --cell 16
+wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'
+wiimaker tilemap set my-game --name Maze --x 1 --y 1 --id 0
+wiimaker tilemap get my-game --name Maze --x 1 --y 1 --json
 wiimaker cook my-game          # advanced / agents
 wiimaker doctor my-game
 wiimaker run my-game
@@ -81,7 +86,7 @@ wiimaker dolphin hello-orb     # or: ./tools/run-dolphin.sh target/wii/hello-orb
 wiimaker play-wii hello-orb
 ```
 
-`build` prepares `.wpack`, bakes `scene.wscn` (WSCN0002 with UV + pivot), and embeds both into the `.dol`. Editor toolbar: **Build** · **Play in Dolphin** · **Build & Run** (Cook is under ⋯).
+`build` prepares `.wpack`, bakes `scene.wscn` (WSCN0003 with UV + pivot + Tilemap), and embeds both into the `.dol`. Editor toolbar: **Build** · **Play in Dolphin** · **Build & Run** (Cook is under ⋯).
 
 ## Workspace layout
 

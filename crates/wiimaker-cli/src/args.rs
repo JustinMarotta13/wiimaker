@@ -57,11 +57,18 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: AssetCmd,
     },
+    /// Tilemap paint / query (solid cells)
+    Tilemap {
+        #[command(subcommand)]
+        cmd: TilemapCmd,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum SceneCmd {
-    List { game: String },
+    List {
+        game: String,
+    },
     Show {
         game: String,
         scene: Option<String>,
@@ -119,7 +126,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite or Disc
+        /// Component kind: Sprite, Disc, or Tilemap
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -129,6 +136,15 @@ pub enum EntityCmd {
         height: f32,
         #[arg(long, default_value_t = 36.0)]
         radius: f32,
+        /// Tilemap cell size in world units
+        #[arg(long, default_value_t = 16.0)]
+        cell: f32,
+        /// Tilemap grid width (cells)
+        #[arg(long, default_value_t = 32)]
+        cols: u32,
+        /// Tilemap grid height (cells)
+        #[arg(long, default_value_t = 18)]
+        rows: u32,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -170,7 +186,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite or Disc
+        /// Component kind: Sprite, Disc, or Tilemap
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -180,7 +196,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite or Disc
+        /// Component kind: Sprite, Disc, or Tilemap
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,
@@ -231,7 +247,9 @@ pub enum EntityCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum AssetCmd {
-    List { game: String },
+    List {
+        game: String,
+    },
     Import {
         game: String,
         path: PathBuf,
@@ -259,5 +277,80 @@ pub enum AssetCmd {
         y: f32,
     },
     /// List catalog sprite names (sheets + cells)
-    ListSprites { game: String },
+    ListSprites {
+        game: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TilemapCmd {
+    /// Set one cell id + solid flag
+    Set {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        x: i32,
+        #[arg(long)]
+        y: i32,
+        #[arg(long)]
+        id: u16,
+        /// Override solid (default: true when id != 0)
+        #[arg(long, action = clap::ArgAction::Set)]
+        solid: Option<bool>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Fill a rectangle of cells
+    Fill {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        x: i32,
+        #[arg(long)]
+        y: i32,
+        #[arg(long)]
+        w: i32,
+        #[arg(long)]
+        h: i32,
+        #[arg(long)]
+        id: u16,
+        #[arg(long, action = clap::ArgAction::Set)]
+        solid: Option<bool>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Stamp ASCII (`#` wall, `.` empty) or a flat `--cells` buffer
+    Stamp {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value_t = 0)]
+        x: i32,
+        #[arg(long, default_value_t = 0)]
+        y: i32,
+        /// ASCII rows separated by newlines
+        #[arg(long)]
+        ascii: Option<String>,
+        /// Comma-separated cell ids (row-major)
+        #[arg(long)]
+        cells: Option<String>,
+        #[arg(long)]
+        width: Option<u32>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Read one cell or dump the whole tilemap
+    Get {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        x: Option<i32>,
+        #[arg(long)]
+        y: Option<i32>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
 }

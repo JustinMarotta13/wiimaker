@@ -4,8 +4,10 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use wiimaker_assets::SpriteCatalog;
+use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::{Rect, TextureId};
 use wiimaker_core::math::Vec2;
+use wiimaker_core::tilemap::{TileVisual, Tilemap};
 use wiimaker_core::world::{Camera, Disc, Sprite, World};
 
 use crate::scene::{EntityData, Scene};
@@ -116,12 +118,13 @@ fn spawn_entity(
     }
 
     if let Some(cam) = &ent.components.camera {
-        world.set_camera(
-            id,
-            Some(Camera {
-                active: cam.active,
-            }),
-        );
+        world.set_camera(id, Some(Camera { active: cam.active }));
+    }
+
+    if let Some(tm) = &ent.components.tilemap {
+        if tm.enabled {
+            world.set_tilemap(id, Some(scene_tilemap_to_runtime(tm, textures, catalog)));
+        }
     }
 
     Ok(())
@@ -188,6 +191,71 @@ pub fn hydrate_lenient_with_catalog(
         if let Some(cam) = &ent.components.camera {
             world.set_camera(id, Some(Camera { active: cam.active }));
         }
+        if let Some(tm) = &ent.components.tilemap {
+            if tm.enabled {
+                world.set_tilemap(id, Some(scene_tilemap_to_runtime(tm, textures, catalog)));
+            }
+        }
     }
     world
+}
+
+fn scene_tilemap_to_runtime(
+    tm: &crate::scene::SceneTilemap,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+) -> Tilemap {
+    let mut out = Tilemap::new(tm.width.max(1), tm.height.max(1), tm.cell);
+    out.origin = Vec2::new(tm.origin[0], tm.origin[1]);
+    out.z = tm.z;
+    let n = out.len();
+    out.cells = tm.cells.clone();
+    if out.cells.len() < n {
+        out.cells.resize(n, 0);
+    } else if out.cells.len() > n {
+        out.cells.truncate(n);
+    }
+    out.solid = vec![0; (n + 7) / 8];
+    for (i, flag) in tm.solid.iter().take(n).enumerate() {
+        if *flag != 0 {
+            let byte = i / 8;
+            let bit = i % 8;
+            out.solid[byte] |= 1 << bit;
+        }
+    }
+    out.palette = tm
+        .palette
+        .iter()
+        .map(|p| {
+            let texture = p.sprite.as_ref().and_then(|name| {
+                let (tex_name, uv) = resolve_palette_sprite(name, catalog);
+                textures.get(&tex_name).map(|tex| (tex, uv))
+            });
+            TileVisual {
+                id: p.id,
+                texture,
+                color: p.color_rgba(),
+            }
+        })
+        .collect();
+    if out.palette.is_empty() {
+        out.palette.push(TileVisual {
+            id: 1,
+            texture: None,
+            color: Rgba8::rgb(48, 88, 176),
+        });
+    }
+    out
+}
+
+fn resolve_palette_sprite(name: &str, catalog: Option<&SpriteCatalog>) -> (String, Rect) {
+    if let Some(cat) = catalog {
+        if let Some(r) = cat.lookup(name) {
+            return (
+                r.sheet_texture.clone(),
+                Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]),
+            );
+        }
+    }
+    (name.to_string(), Rect::unit())
 }

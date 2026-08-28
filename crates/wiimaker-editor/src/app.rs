@@ -36,11 +36,26 @@ pub(crate) struct ViewportDrag {
     pub(crate) rot_z_start: f32,
 }
 
+#[derive(Clone)]
+pub(crate) struct TilePaintDrag {
+    pub(crate) entity: String,
+    pub(crate) last: Option<(i32, i32)>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EditTool {
     Translate,
     Scale,
     Rotate,
+    Paint,
+    Erase,
+    Pick,
+}
+
+impl EditTool {
+    pub(crate) fn is_tile_tool(self) -> bool {
+        matches!(self, Self::Paint | Self::Erase | Self::Pick)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +109,9 @@ pub(crate) struct EditorApp {
     pub(crate) snap_size: f32,
     pub(crate) edit_tool: EditTool,
     pub(crate) play_mode: PlayMode,
+    pub(crate) tile_brush_id: u16,
+    pub(crate) tile_brush_solid: bool,
+    pub(crate) tile_paint: Option<TilePaintDrag>,
 }
 
 #[derive(Clone)]
@@ -145,6 +163,9 @@ impl EditorApp {
             snap_size: 16.0,
             edit_tool: EditTool::Translate,
             play_mode: PlayMode::Edit,
+            tile_brush_id: 1,
+            tile_brush_solid: true,
+            tile_paint: None,
         };
         app.reload_assets()?;
         app.refresh_scenes();
@@ -670,8 +691,12 @@ impl EditorApp {
         match wiimaker_scene::load_prefab(&abs) {
             Ok(prefab) => {
                 self.push_undo();
-                let new_name =
-                    wiimaker_scene::instantiate_prefab(&mut self.scene, &prefab, Some(320.0), Some(240.0));
+                let new_name = wiimaker_scene::instantiate_prefab(
+                    &mut self.scene,
+                    &prefab,
+                    Some(320.0),
+                    Some(240.0),
+                );
                 self.select(Some(new_name.clone()));
                 self.sync_baseline();
                 self.mark_dirty();
@@ -771,11 +796,7 @@ impl EditorApp {
         let Some(id) = self.world.find_by_name("Player") else {
             return;
         };
-        let r = self
-            .world
-            .disc(id)
-            .map(|d| d.radius)
-            .unwrap_or(16.0);
+        let r = self.world.disc(id).map(|d| d.radius).unwrap_or(16.0);
         if let Some(xf) = self.world.transform_mut(id) {
             xf.translation.x = (xf.translation.x + dx * speed).clamp(r, 640.0 - r);
             xf.translation.y = (xf.translation.y + dy * speed).clamp(r, 480.0 - r);
@@ -818,6 +839,24 @@ impl EditorApp {
         self.status = "Build & Run…".into();
         let name = self.project.name.clone();
         self.spawn_wiimaker(&["play-wii", &name], "Build & Run started");
+    }
+
+    pub(crate) fn tilemap_target(&self) -> Option<String> {
+        if let Some(name) = self.primary_selected() {
+            if self
+                .scene
+                .find_entity(name)
+                .and_then(|e| e.components.tilemap.as_ref())
+                .is_some()
+            {
+                return Some(name.to_string());
+            }
+        }
+        self.scene
+            .entities
+            .iter()
+            .find(|e| e.components.tilemap.as_ref().is_some_and(|t| t.enabled))
+            .map(|e| e.name.clone())
     }
 
     fn show_unsaved_modal(&mut self, ctx: &egui::Context) {

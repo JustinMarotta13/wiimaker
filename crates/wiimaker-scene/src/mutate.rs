@@ -2,9 +2,7 @@
 
 use anyhow::{bail, Result};
 
-use crate::scene::{
-    EntityData, Scene, SceneComponents, SceneDisc, SceneSprite, SceneTransform,
-};
+use crate::scene::{EntityData, Scene, SceneComponents, SceneDisc, SceneSprite, SceneTransform};
 
 #[derive(Clone, Debug, Default)]
 pub struct MutateOpts {
@@ -54,10 +52,7 @@ pub fn add_entity(scene: &mut Scene, name: &str, opts: &MutateOpts) -> Result<()
     if let Some(tex) = &opts.sprite {
         components.sprite = Some(SceneSprite {
             texture: tex.clone(),
-            size: [
-                opts.sprite_w.unwrap_or(32.0),
-                opts.sprite_h.unwrap_or(32.0),
-            ],
+            size: [opts.sprite_w.unwrap_or(32.0), opts.sprite_h.unwrap_or(32.0)],
             color: opts.color.unwrap_or([255, 255, 255, 255]),
             z: 0.0,
             enabled: true,
@@ -97,7 +92,9 @@ pub fn remove_entity(scene: &mut Scene, name: &str) -> Result<()> {
         }
         i += 1;
     }
-    scene.entities.retain(|e| !kill.iter().any(|k| k == &e.name));
+    scene
+        .entities
+        .retain(|e| !kill.iter().any(|k| k == &e.name));
     Ok(())
 }
 
@@ -289,7 +286,12 @@ pub fn add_component_sprite(
     Ok(())
 }
 
-pub fn add_component_disc(scene: &mut Scene, name: &str, radius: f32, color: [u8; 4]) -> Result<()> {
+pub fn add_component_disc(
+    scene: &mut Scene,
+    name: &str,
+    radius: f32,
+    color: [u8; 4],
+) -> Result<()> {
     let ent = find_mut(scene, name)?;
     ent.components.disc = Some(SceneDisc {
         radius,
@@ -342,7 +344,15 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Disc"))?;
             d.enabled = enabled;
         }
-        other => bail!("unknown component kind '{other}' (Sprite|Disc)"),
+        "tilemap" => {
+            let tm = ent
+                .components
+                .tilemap
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Tilemap"))?;
+            tm.enabled = enabled;
+        }
+        other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap)"),
     }
     Ok(())
 }
@@ -515,7 +525,10 @@ mod tests {
         add_entity(&mut scene, "b", &MutateOpts::default()).unwrap();
         set_entity_parent(&mut scene, "b", Some("a")).unwrap();
         rename_entity(&mut scene, "a", "root").unwrap();
-        assert_eq!(scene.find_entity("b").unwrap().parent.as_deref(), Some("root"));
+        assert_eq!(
+            scene.find_entity("b").unwrap().parent.as_deref(),
+            Some("root")
+        );
     }
 
     #[test]
@@ -543,8 +556,14 @@ mod tests {
         .unwrap();
         set_entity_parent(&mut scene, "c", Some("p")).unwrap();
         set_entity_world_xy(&mut scene, "c", 150.0, 120.0).unwrap();
-        assert_eq!(scene.find_entity("c").unwrap().transform.translation[0], 50.0);
-        assert_eq!(scene.find_entity("c").unwrap().transform.translation[1], 20.0);
+        assert_eq!(
+            scene.find_entity("c").unwrap().transform.translation[0],
+            50.0
+        );
+        assert_eq!(
+            scene.find_entity("c").unwrap().transform.translation[1],
+            20.0
+        );
         let w = scene.world_transform("c").unwrap();
         assert_eq!(w.translation[0], 150.0);
         assert_eq!(w.translation[1], 120.0);
