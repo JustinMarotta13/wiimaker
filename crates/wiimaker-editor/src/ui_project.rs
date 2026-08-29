@@ -2,18 +2,18 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, RichText, Sense};
 
-use crate::app::{EditorApp, ProjectEntry};
+use crate::app::{BottomTab, EditorApp, ProjectEntry};
 use crate::theme;
 
 /// Vertical space reserved for header, prefab strip, card chrome, and footer inside the exact-height panel.
 /// Keep this generous — too small and the ScrollArea overlaps the Prefabs Instantate buttons.
-const PROJECT_CHROME: f32 = 175.0;
+const PROJECT_CHROME: f32 = 150.0;
 
 impl EditorApp {
-    pub(crate) fn ui_project(&mut self, ctx: &egui::Context) {
+    pub(crate) fn ui_bottom(&mut self, ctx: &egui::Context) {
         // exact_height + app-owned size: egui must not persist content rect as panel height
         // (that feedback loop expands the panel every frame).
-        let h = self.project_panel_height.clamp(140.0, 360.0);
+        let h = self.project_panel_height.clamp(140.0, 420.0);
         self.project_panel_height = h;
 
         egui::TopBottomPanel::bottom("project_explorer")
@@ -38,10 +38,25 @@ impl EditorApp {
                 }
                 if resize.dragged() {
                     self.project_panel_height =
-                        (self.project_panel_height - resize.drag_delta().y).clamp(140.0, 360.0);
+                        (self.project_panel_height - resize.drag_delta().y).clamp(140.0, 420.0);
                 }
 
-                theme::section_header(ui, "Project");
+                self.bottom_tab = theme::dock_tabs(
+                    ui,
+                    &[
+                        ("Project", BottomTab::Project),
+                        ("Console", BottomTab::Console),
+                    ],
+                    self.bottom_tab,
+                );
+                match self.bottom_tab {
+                    BottomTab::Project => self.ui_project_body(ui, h),
+                    BottomTab::Console => self.ui_console(ui),
+                }
+            });
+    }
+
+    pub(crate) fn ui_project_body(&mut self, ui: &mut egui::Ui, h: f32) {
                 ui.horizontal(|ui| {
                     theme::meta_chip(ui, "game", &self.project.name);
                     ui.separator();
@@ -163,7 +178,6 @@ impl EditorApp {
                         self.set_as_default_scene();
                     }
                 });
-            });
     }
 
     fn open_project_entry(&mut self, entry: &ProjectEntry) {

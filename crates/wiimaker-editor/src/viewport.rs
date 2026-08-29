@@ -7,7 +7,7 @@ use wiimaker_scene::{
     set_entity_scale, set_entity_world_xy, tilemap_set_cell, Scene,
 };
 
-use crate::app::{EditTool, EditorApp, PlayMode, TilePaintDrag, ViewportDrag};
+use crate::app::{CenterTab, EditTool, EditorApp, PlayMode, TilePaintDrag, ViewportDrag};
 use crate::theme;
 
 pub(crate) const VIEW_W: usize = 640;
@@ -18,59 +18,24 @@ impl EditorApp {
         egui::CentralPanel::default()
             .frame(theme::central_frame())
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Scene")
-                            .strong()
-                            .size(13.0)
-                            .color(theme::TEXT),
-                    );
-                    let accent = egui::Rect::from_min_size(
-                        egui::pos2(ui.cursor().left(), ui.cursor().center().y - 1.0),
-                        egui::vec2(20.0, 2.0),
-                    );
-                    ui.painter()
-                        .rect_filled(accent, egui::Rounding::same(1.0), theme::ACCENT);
-                    ui.add_space(28.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(format!("{VIEW_W}×{VIEW_H}"))
-                                .size(11.0)
-                                .color(theme::TEXT_DIM),
-                        );
-                        if self.play_mode != PlayMode::Edit {
-                            ui.add_space(8.0);
-                            let label = match self.play_mode {
-                                PlayMode::Playing => "PLAYING",
-                                PlayMode::Paused => "PAUSED",
-                                PlayMode::Edit => "",
-                            };
-                            ui.label(
-                                egui::RichText::new(label)
-                                    .strong()
-                                    .size(11.0)
-                                    .color(theme::ACCENT),
-                            );
-                        }
-                        ui.add_space(8.0);
-                        ui.add(
-                            egui::DragValue::new(&mut self.snap_size)
-                                .range(1.0..=128.0)
-                                .speed(1.0)
-                                .prefix("grid "),
-                        );
-                        ui.checkbox(&mut self.snap_enabled, "Snap");
-                        ui.add_space(8.0);
+                self.center_tab = theme::dock_tabs(
+                    ui,
+                    &[("Scene", CenterTab::Scene), ("Game", CenterTab::Game)],
+                    self.center_tab,
+                );
+
+                let is_scene = self.center_tab == CenterTab::Scene;
+                if is_scene {
+                    ui.horizontal(|ui| {
                         ui.add_enabled_ui(self.play_mode == PlayMode::Edit, |ui| {
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Pick, "Pick");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Erase, "Erase");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Paint, "Paint");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Rotate, "Rotate");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Scale, "Scale");
                             ui.selectable_value(&mut self.edit_tool, EditTool::Translate, "Move");
+                            ui.selectable_value(&mut self.edit_tool, EditTool::Scale, "Scale");
+                            ui.selectable_value(&mut self.edit_tool, EditTool::Rotate, "Rotate");
+                            ui.selectable_value(&mut self.edit_tool, EditTool::Paint, "Paint");
+                            ui.selectable_value(&mut self.edit_tool, EditTool::Erase, "Erase");
+                            ui.selectable_value(&mut self.edit_tool, EditTool::Pick, "Pick");
                         });
                         if self.edit_tool.is_tile_tool() {
-                            ui.add_space(6.0);
                             ui.label(
                                 egui::RichText::new(format!(
                                     "brush {}{}",
@@ -81,9 +46,51 @@ impl EditorApp {
                                 .color(theme::TEXT_DIM),
                             );
                         }
+                        ui.checkbox(&mut self.snap_enabled, "Snap");
+                        ui.add(
+                            egui::DragValue::new(&mut self.snap_size)
+                                .range(1.0..=128.0)
+                                .speed(1.0)
+                                .prefix("grid "),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{VIEW_W}×{VIEW_H}"))
+                                    .size(11.0)
+                                    .color(theme::TEXT_DIM),
+                            );
+                        });
                     });
-                });
-                ui.add_space(6.0);
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Game")
+                                .size(12.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{VIEW_W}×{VIEW_H}"))
+                                    .size(11.0)
+                                    .color(theme::TEXT_DIM),
+                            );
+                            if self.play_mode != PlayMode::Edit {
+                                let label = match self.play_mode {
+                                    PlayMode::Playing => "PLAYING",
+                                    PlayMode::Paused => "PAUSED",
+                                    PlayMode::Edit => "",
+                                };
+                                ui.label(
+                                    egui::RichText::new(label)
+                                        .strong()
+                                        .size(11.0)
+                                        .color(theme::ACCENT),
+                                );
+                            }
+                        });
+                    });
+                }
+                ui.add_space(4.0);
 
                 let mut draw = DrawList::new();
                 render_world(&self.world, &mut draw, self.scene.clear_rgba());
@@ -103,14 +110,13 @@ impl EditorApp {
                     .min(1.0);
                 let size = egui::vec2(VIEW_W as f32 * scale, VIEW_H as f32 * scale);
 
-                // Sunken well + centered framed viewport.
                 let well = ui.available_rect_before_wrap();
                 ui.painter()
-                    .rect_filled(well, egui::Rounding::same(6.0), theme::BG_SUNKEN);
+                    .rect_filled(well, egui::Rounding::same(2.0), theme::BG_SUNKEN);
                 ui.painter().rect_stroke(
                     well,
-                    egui::Rounding::same(6.0),
-                    egui::Stroke::new(1.0, theme::BORDER_SOFT),
+                    egui::Rounding::same(2.0),
+                    egui::Stroke::new(1.0, theme::BORDER),
                 );
 
                 let pad_x = ((avail.x - size.x) * 0.5).max(0.0);
@@ -120,33 +126,47 @@ impl EditorApp {
                 let mut viewport_response = None;
                 ui.horizontal(|ui| {
                     ui.add_space(pad_x);
-                    let frame_pad = 3.0;
+                    let frame_pad = 2.0;
                     let outer = egui::vec2(size.x + frame_pad * 2.0, size.y + frame_pad * 2.0);
                     let (outer_rect, _) = ui.allocate_exact_size(outer, egui::Sense::hover());
                     ui.painter().rect(
                         outer_rect,
-                        egui::Rounding::same(4.0),
+                        egui::Rounding::same(2.0),
                         theme::BG_RAISED,
                         egui::Stroke::new(1.0, theme::BORDER),
                     );
                     let image_rect = egui::Rect::from_center_size(outer_rect.center(), size);
-                    let image =
-                        egui::Image::new((tex_id, size)).sense(egui::Sense::click_and_drag());
+                    let sense = if is_scene {
+                        egui::Sense::click_and_drag()
+                    } else {
+                        egui::Sense::hover()
+                    };
+                    let image = egui::Image::new((tex_id, size)).sense(sense);
                     let response = ui.put(image_rect, image);
-                    paint_selection_outline(
-                        ui,
-                        response.rect,
-                        &self.scene,
-                        &self.selected,
-                        &self.catalog,
-                    );
-                    paint_collider_gizmos(ui, response.rect, &self.scene, &self.selected);
-                    if self.edit_tool.is_tile_tool() {
-                        if let Some(name) = self.tilemap_target() {
-                            paint_tilemap_overlay(ui, response.rect, &self.scene, &name);
+                    if is_scene {
+                        paint_selection_outline(
+                            ui,
+                            response.rect,
+                            &self.scene,
+                            &self.selected,
+                            &self.catalog,
+                        );
+                        paint_collider_gizmos(ui, response.rect, &self.scene, &self.selected);
+                        if self.edit_tool.is_tile_tool() {
+                            if let Some(name) = self.tilemap_target() {
+                                paint_tilemap_overlay(ui, response.rect, &self.scene, &name);
+                            }
                         }
+                        viewport_response = Some((response.clone(), response.rect));
+                    } else if self.play_mode == PlayMode::Edit {
+                        ui.painter().text(
+                            response.rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "Play to simulate  ·  WASD moves Player",
+                            egui::FontId::proportional(13.0),
+                            theme::TEXT_DIM,
+                        );
                     }
-                    viewport_response = Some((response.clone(), response.rect));
                 });
                 if let Some((response, rect)) = viewport_response {
                     self.handle_viewport_input(&response, rect);

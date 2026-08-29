@@ -6,7 +6,7 @@ use crate::theme;
 
 impl EditorApp {
     pub(crate) fn ui_hierarchy(&mut self, ui: &mut egui::Ui) {
-        theme::section_header(ui, "Hierarchy");
+        let _ = theme::dock_tabs(ui, &[("Hierarchy", ())], ());
         if self.selected.len() > 1 {
             theme::meta_chip(
                 ui,

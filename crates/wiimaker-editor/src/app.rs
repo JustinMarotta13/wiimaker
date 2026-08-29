@@ -9,9 +9,10 @@ use wiimaker_core::move_and_collide;
 use wiimaker_core::world::World;
 use wiimaker_host::{Framebuffer, TextureAtlas};
 use wiimaker_scene::{
-    add_component_sprite, diagnose, duplicate_entity, find_game_dir, hydrate_lenient_with_catalog,
-    insert_entity_clone, list_scenes, load_project, load_scene, rename_entity, save_project,
-    save_scene, EntityData, GameProject, Scene, UndoStack,
+    add_component_sprite, create_named_scene, diagnose, duplicate_entity, find_game_dir,
+    hydrate_lenient_with_catalog, insert_entity_clone, list_scenes, load_project, load_scene,
+    rename_entity, save_scene, set_default_scene, EntityData, GameProject, Scene, Severity,
+    UndoStack,
 };
 
 use crate::sprite_editor::{self, SpriteEditorState};
@@ -67,6 +68,31 @@ pub(crate) enum PlayMode {
     Paused,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CenterTab {
+    Scene,
+    Game,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BottomTab {
+    Project,
+    Console,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConsoleLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+#[derive(Clone)]
+pub(crate) struct ConsoleLine {
+    pub(crate) level: ConsoleLevel,
+    pub(crate) text: String,
+}
+
 pub(crate) struct EditorApp {
     pub(crate) root: PathBuf,
     pub(crate) game_dir: PathBuf,
@@ -114,6 +140,10 @@ pub(crate) struct EditorApp {
     pub(crate) tile_brush_id: u16,
     pub(crate) tile_brush_solid: bool,
     pub(crate) tile_paint: Option<TilePaintDrag>,
+    pub(crate) center_tab: CenterTab,
+    pub(crate) bottom_tab: BottomTab,
+    pub(crate) console: Vec<ConsoleLine>,
+    pub(crate) last_play_hit: Option<String>,
 }
 
 #[derive(Clone)]
@@ -168,6 +198,10 @@ impl EditorApp {
             tile_brush_id: 1,
             tile_brush_solid: true,
             tile_paint: None,
+            center_tab: CenterTab::Scene,
+            bottom_tab: BottomTab::Project,
+            console: Vec::new(),
+            last_play_hit: None,
         };
         app.reload_assets()?;
         app.refresh_scenes();
@@ -245,51 +279,59 @@ impl EditorApp {
         }
     }
 
+    pub(crate) fn log_line(&mut self, level: ConsoleLevel, text: impl Into<String>) {
+        let text = text.into();
+        self.status = text.clone();
+        self.console_push(level, text);
+    }
+
+    pub(crate) fn console_push(&mut self, level: ConsoleLevel, text: impl Into<String>) {
+        self.console.push(ConsoleLine {
+            level,
+            text: text.into(),
+        });
+        if self.console.len() > 200 {
+            let drain = self.console.len() - 200;
+            self.console.drain(0..drain);
+        }
+    }
+
     pub(crate) fn create_new_scene(&mut self) {
-        let name = self.new_scene_name.trim();
-        if name.is_empty() {
-            self.status = "new scene: name required".into();
-            return;
-        }
-        if name.contains('/') || name.contains('\\') || name.contains('.') {
-            self.status = "new scene: use a simple name (no path/ext)".into();
-            return;
-        }
-        let rel = PathBuf::from("scenes").join(format!("{name}.scene.json"));
-        let abs = self.game_dir.join(&rel);
-        if abs.exists() {
-            self.status = format!("scene already exists: {}", rel.display());
-            return;
-        }
-        let scene = Scene::new(name);
-        match save_scene(&abs, &scene) {
-            Ok(()) => {
+        match create_named_scene(&self.game_dir, self.new_scene_name.trim()) {
+            Ok(rel) => {
+                let abs = self.game_dir.join(&rel);
                 self.refresh_scenes();
                 self.refresh_project_tree();
                 if self.dirty {
                     self.pending_open = Some(abs);
-                    self.status =
-                        format!("created {}; save current scene to open it", rel.display());
+                    self.log_line(
+                        ConsoleLevel::Info,
+                        format!("created {}; save current scene to open it", rel.display()),
+                    );
                 } else {
                     self.open_scene_at(abs);
-                    self.status = format!("created {}", rel.display());
+                    self.log_line(ConsoleLevel::Info, format!("created {}", rel.display()));
                 }
             }
-            Err(e) => self.status = format!("create scene failed: {e}"),
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("new scene: {e}")),
         }
     }
 
     pub(crate) fn set_as_default_scene(&mut self) {
         let Ok(rel) = self.scene_path.strip_prefix(&self.game_dir) else {
-            self.status = "set default: scene outside game dir".into();
+            self.log_line(ConsoleLevel::Error, "set default: scene outside game dir");
             return;
         };
-        self.project.default_scene = rel.to_string_lossy().into_owned();
-        match save_project(&self.game_dir, &self.project) {
-            Ok(()) => {
-                self.status = format!("default scene → {}", self.project.default_scene);
+        let key = rel.to_string_lossy().replace('\\', "/");
+        match set_default_scene(&self.game_dir, &key) {
+            Ok(rel) => {
+                self.project.default_scene = rel.to_string_lossy().replace('\\', "/");
+                self.log_line(
+                    ConsoleLevel::Info,
+                    format!("default scene → {}", self.project.default_scene),
+                );
             }
-            Err(e) => self.status = format!("save project failed: {e}"),
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("save project failed: {e}")),
         }
     }
 
@@ -710,18 +752,32 @@ impl EditorApp {
 
     pub(crate) fn doctor(&mut self) {
         let diag = diagnose(&self.game_dir, &self.project);
-        self.status = if diag.ok {
-            format!("doctor ok ({} notes)", diag.issues.len())
+        if diag.issues.is_empty() {
+            self.log_line(ConsoleLevel::Info, "doctor ok");
         } else {
-            format!(
-                "doctor: {}",
-                diag.issues
-                    .iter()
-                    .map(|i| i.message.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )
-        };
+            for issue in &diag.issues {
+                let level = match issue.severity {
+                    Severity::Error => ConsoleLevel::Error,
+                    Severity::Warning => ConsoleLevel::Warn,
+                    Severity::Info => ConsoleLevel::Info,
+                };
+                self.console_push(level, format!("doctor: {}", issue.message));
+            }
+            let summary = if diag.ok {
+                format!("doctor ok ({} notes)", diag.issues.len())
+            } else {
+                format!(
+                    "doctor: {}",
+                    diag.issues
+                        .iter()
+                        .map(|i| i.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                )
+            };
+            self.status = summary;
+            self.bottom_tab = BottomTab::Console;
+        }
     }
 
     pub(crate) fn play(&mut self) {
@@ -730,15 +786,19 @@ impl EditorApp {
                 self.prepare_assets();
                 self.rehydrate();
                 self.play_mode = PlayMode::Playing;
-                self.status = "Play Mode · WASD/arrows move Player · Esc stops".into();
+                self.last_play_hit = None;
+                self.log_line(
+                    ConsoleLevel::Info,
+                    "Play Mode · WASD/arrows move Player · Esc stops",
+                );
             }
             PlayMode::Paused => {
                 self.play_mode = PlayMode::Playing;
-                self.status = "resumed".into();
+                self.log_line(ConsoleLevel::Info, "resumed");
             }
             PlayMode::Playing => {
                 self.play_mode = PlayMode::Paused;
-                self.status = "paused".into();
+                self.log_line(ConsoleLevel::Info, "paused");
             }
         }
     }
@@ -748,8 +808,9 @@ impl EditorApp {
             return;
         }
         self.play_mode = PlayMode::Edit;
+        self.last_play_hit = None;
         self.rehydrate();
-        self.status = "stopped · edits preserved".into();
+        self.log_line(ConsoleLevel::Info, "stopped · edits preserved");
     }
 
     pub(crate) fn play_external(&mut self) {
@@ -798,7 +859,23 @@ impl EditorApp {
         let Some(id) = self.world.find_by_name("Player") else {
             return;
         };
-        let _ = move_and_collide(&mut self.world, id, Vec2::new(dx * speed, dy * speed));
+        let hit = move_and_collide(&mut self.world, id, Vec2::new(dx * speed, dy * speed));
+        if let Some(hid) = hit.hit {
+            let name = self
+                .world
+                .name(hid)
+                .unwrap_or("?")
+                .to_string();
+            if self.last_play_hit.as_deref() != Some(name.as_str()) {
+                self.console_push(
+                    ConsoleLevel::Info,
+                    format!("Play collision · Player × {name}"),
+                );
+                self.last_play_hit = Some(name);
+            }
+        } else {
+            self.last_play_hit = None;
+        }
         let r = self.world.disc(id).map(|d| d.radius).unwrap_or(16.0);
         if let Some(xf) = self.world.transform_mut(id) {
             xf.translation.x = xf.translation.x.clamp(r, 640.0 - r);
@@ -1004,12 +1081,23 @@ impl eframe::App for EditorApp {
         }
 
         self.ui_toolbar(ctx);
-        self.ui_project(ctx);
+        self.ui_bottom(ctx);
         self.show_unsaved_modal(ctx);
 
-        // Inspector outermost on the right, then Hierarchy immediately to its left.
-        // Pin min/max width to the allocated size so content swaps (entity ↔ file ↔
-        // empty) cannot rewrite PanelState and flicker the viewport.
+        // Unity 6 default: Hierarchy left, Inspector right, Scene/Game center.
+        // Pin min/max width so content swaps cannot rewrite PanelState / flicker.
+        egui::SidePanel::left("hierarchy")
+            .default_width(240.0)
+            .width_range(180.0..=360.0)
+            .resizable(true)
+            .frame(theme::side_frame())
+            .show(ctx, |ui| {
+                let w = ui.available_width();
+                ui.set_min_width(w);
+                ui.set_max_width(w);
+                self.ui_hierarchy(ui);
+            });
+
         egui::SidePanel::right("inspector")
             .default_width(300.0)
             .width_range(260.0..=420.0)
@@ -1020,18 +1108,6 @@ impl eframe::App for EditorApp {
                 ui.set_min_width(w);
                 ui.set_max_width(w);
                 self.ui_inspector(ui);
-            });
-
-        egui::SidePanel::right("hierarchy")
-            .default_width(240.0)
-            .width_range(200.0..=360.0)
-            .resizable(true)
-            .frame(theme::side_frame())
-            .show(ctx, |ui| {
-                let w = ui.available_width();
-                ui.set_min_width(w);
-                ui.set_max_width(w);
-                self.ui_hierarchy(ui);
             });
 
         self.ui_viewport(ctx);

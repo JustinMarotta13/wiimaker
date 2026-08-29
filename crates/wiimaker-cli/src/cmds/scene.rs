@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use wiimaker_scene::{
-    find_game_dir, list_scenes, load_project, load_scene, save_scene, set_scene_clear, GameProject,
-    Scene,
+    create_named_scene, find_game_dir, list_scenes, load_project, load_scene, save_scene,
+    set_default_scene, set_scene_clear, GameProject, Scene,
 };
 
 use crate::args::SceneCmd;
@@ -54,6 +54,41 @@ pub fn scene_cmd(root: &Path, cmd: SceneCmd, json: bool) -> Result<()> {
                 }
             }
             Ok(())
+        }
+        SceneCmd::New { game, name } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let rel = create_named_scene(&game_dir, &name)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "message": format!("created {}", rel.display()),
+                        "path": rel.to_string_lossy(),
+                        "name": name,
+                    })
+                );
+                Ok(())
+            } else {
+                emit_ok(json, &format!("created {}", rel.display()))
+            }
+        }
+        SceneCmd::SetDefault { game, scene } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let rel = set_default_scene(&game_dir, &scene)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "message": format!("default scene → {}", rel.display()),
+                        "default_scene": rel.to_string_lossy(),
+                    })
+                );
+                Ok(())
+            } else {
+                emit_ok(json, &format!("default scene → {}", rel.display()))
+            }
         }
         SceneCmd::SetClear { game, rgb } => {
             let (_gd, _p, path, mut scene) = open_scene(root, &game, None)?;

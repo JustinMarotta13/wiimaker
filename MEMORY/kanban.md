@@ -27,7 +27,7 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera marker
 
 ## Now
 
-### 2. Trigger / collectible — **GUI + CLI**
+### 1. Trigger / collectible — **GUI + CLI**
 Unity: `isTrigger` + OnTriggerEnter. Dots, power pellets, fruit, ghost house door.
 
 - `Collider.trigger = true` or `Trigger { filter_tag }`.
@@ -36,7 +36,7 @@ Unity: `isTrigger` + OnTriggerEnter. Dots, power pellets, fruit, ghost house doo
 - **CLI:** `entity add-component … Trigger --filter 2` · `entity despawn`.
 - **Test:** walk over Dot_* → despawn + score; power pellet tag distinct from pellet.
 
-### 3. Sprite animation clips — **GUI + CLI**
+### 2. Sprite animation clips — **GUI + CLI**
 Unity: Animator / Animation window (2D). Chomp + ghost legs. Sheets + cells already exist.
 
 - `Animation { clip, fps, loop }` + `assets/<name>.anim.json` listing cell names.
@@ -54,7 +54,7 @@ Unity: LoadScene. Menu → maze → win. Today games hydrate once; `scene list/s
 
 - `load_scene_into(world, path, catalog)` already almost exists (`hydrate_into`). Add `App` helper + keep atlas.
 - **GUI:** Build Settings–style default + additive list on Project/Inspector for `game.toml`.
-- **CLI:** `scene new <game> --name win` · `scene set-default` · (runtime is game code, not CLI).
+- **CLI:** `scene new` / `scene set-default` already ship (chrome morning). Runtime load is game code.
 - **Test:** pac-man Start on `menu.scene.json`, Enter → `main`, all dots → `win`.
 
 ### 6. 4-way discrete / grid-snap mover — **GUI + CLI**
@@ -117,6 +117,7 @@ Shipped. Keep here so we do not rebuild them.
 - Parent local transforms (translate×scale; full rotation compose still open)
 - Tilemap + solid cells (scene `Tilemap`, viewport Paint/Erase/Pick, Inspector grid+palette, CLI `tilemap set|fill|stamp|get`, `tile_solid` / `world_to_cell`, WSCN0003 bake)
 - AABB/Circle collider + overlap (scene `Collider`, Inspector kind/size/solid, viewport seafoam outline gizmo, CLI `entity add-component … Collider --w --h`, `entity overlaps`, `overlaps` / `move_and_collide`; host-first, WSCN0003 unchanged)
+- Unity 6 editor chrome (dark Pro docks: Hierarchy left, Scene/Game center, Inspector right, Project/Console bottom; Play/Pause/Stop centered; component foldout cards). CLI `scene new` · `scene set-default`
 
 ### CLI commands (exact names)
 
@@ -133,7 +134,7 @@ Global: `--json`
 | `dolphin` | launch existing `boot.dol` |
 | `play-wii` | build then Dolphin |
 | `doctor` | validate |
-| `scene list` · `scene show` · `scene set-clear --rgb` | |
+| `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` | |
 | `entity list` · `entity add` · `entity set` · `entity remove` | `--name --sprite --x --y --sx --sy --rotation-deg` |
 | `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid`) |
 | `entity overlaps` | `--name` [ `--other` ] · pairwise or list hits |
@@ -144,16 +145,20 @@ Global: `--json`
 
 ### Editor chrome (exact control names)
 
-File: Save scene · Doctor · Play · Stop Play · Run external… · Build · Play in Dolphin · Build & Run · Instantiate \<prefab\>
+File: Save scene · Doctor · Play · Stop Play · Run external… · Build · Play in Dolphin · Build & Run · Instantiate <prefab>
 Edit: Undo · Redo · Duplicate · Copy · Paste
-Toolbar: Save · Play / Pause / Stop · Build · Play in Dolphin · Build & Run · Prefab / Instantiate · ⋯ (Cook assets… · Doctor · Refresh assets)
-Viewport: Move · Scale · Rotate · Paint · Erase · Pick · Snap · grid size
-Inspector: Edit Sprites… · Save as Prefab… · component enable checkbox · Remove · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/offset
+Window: Hierarchy · Inspector · Project · Console
+Toolbar (left): Save · Build · Play in Dolphin · Build & Run · ⋯ (Cook assets… · Doctor · Refresh assets)
+Toolbar (center): Play / Pause / Stop
+Center tabs: Scene · Game
+Scene view: Move · Scale · Rotate · Paint · Erase · Pick · Snap · grid size
+Bottom tabs: Project · Console
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/offset
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
-## Recommended first morning
+## Recommended next morning
 
-**Ship Trigger / collectible (Now #2).** Colliders overlap; games still poll `overlaps` themselves. Triggers unlock dots / pellets / fruit via `isTrigger` + a per-tick entered list. Test: walk over Dot_* → despawn + score.
+**Ship Trigger / collectible (Now #1).** Colliders overlap; games still poll `overlaps` themselves. Triggers unlock dots / pellets / fruit via `isTrigger` + a per-tick entered list. Test: walk over Dot_* → despawn + score.
 

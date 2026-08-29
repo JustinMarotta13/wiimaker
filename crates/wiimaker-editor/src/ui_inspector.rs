@@ -16,7 +16,7 @@ impl EditorApp {
         let slider_w = (ui.available_width() - 72.0).clamp(96.0, 180.0);
         ui.spacing_mut().slider_width = slider_w;
 
-        theme::section_header(ui, "Inspector");
+        let _ = theme::dock_tabs(ui, &[("Inspector", ())], ());
         egui::ScrollArea::vertical()
             .id_salt("inspector_scroll")
             .auto_shrink([false, false])
@@ -125,14 +125,9 @@ impl EditorApp {
             } else {
                 "Transform"
             };
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(xform_label)
-                    .strong()
-                    .size(12.0)
-                    .color(theme::TEXT_MUTED),
-            );
-            ui.add_space(4.0);
+            ui.add_space(6.0);
+            let xform_hdr = theme::component_card_header(ui, "transform", xform_label, None, false);
+            if xform_hdr.open {
             theme::card_frame().show(ui, |ui| {
                 let mut changed = false;
                 changed |= ui
@@ -157,37 +152,25 @@ impl EditorApp {
                     dirty = true;
                 }
             });
+            }
 
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new("Components")
-                    .strong()
-                    .size(12.0)
-                    .color(theme::TEXT_MUTED),
-            );
-            ui.add_space(4.0);
+            ui.add_space(6.0);
             if let Some(sp) = ent.components.sprite.as_mut() {
+                let hdr = theme::component_card_header(
+                    ui,
+                    "sprite",
+                    "Sprite",
+                    Some(sp.enabled),
+                    true,
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_sprite = Some(en);
+                }
+                if hdr.remove {
+                    remove_sprite = true;
+                }
+                if hdr.open {
                 theme::card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let mut en = sp.enabled;
-                        if ui.checkbox(&mut en, "").changed() {
-                            toggle_sprite = Some(en);
-                        }
-                        ui.label(RichText::new("Sprite").strong().color(theme::ACCENT));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new("Remove").size(11.0).color(theme::DANGER),
-                                    )
-                                    .fill(theme::BG_SUNKEN),
-                                )
-                                .clicked()
-                            {
-                                remove_sprite = true;
-                            }
-                        });
-                    });
                     let catalog_names = &catalog_names;
                     let mut tex_changed = false;
                     let mut new_tex = sp.texture.clone();
@@ -217,33 +200,20 @@ impl EditorApp {
                         .add(egui::Slider::new(&mut sp.z, -10.0..=10.0).text("z"))
                         .changed();
                 });
+                }
                 ui.add_space(4.0);
-            } else if ui.button("+ Sprite").clicked() {
-                add_sprite = true;
             }
 
             if let Some(d) = ent.components.disc.as_mut() {
+                let hdr = theme::component_card_header(ui, "disc", "Disc", Some(d.enabled), true);
+                if let Some(en) = hdr.toggle {
+                    toggle_disc = Some(en);
+                }
+                if hdr.remove {
+                    remove_disc = true;
+                }
+                if hdr.open {
                 theme::card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let mut en = d.enabled;
-                        if ui.checkbox(&mut en, "").changed() {
-                            toggle_disc = Some(en);
-                        }
-                        ui.label(RichText::new("Disc").strong().color(theme::ACCENT));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new("Remove").size(11.0).color(theme::DANGER),
-                                    )
-                                    .fill(theme::BG_SUNKEN),
-                                )
-                                .clicked()
-                            {
-                                remove_disc = true;
-                            }
-                        });
-                    });
                     dirty |= ui
                         .add(egui::Slider::new(&mut d.radius, 1.0..=200.0).text("radius"))
                         .changed();
@@ -251,32 +221,25 @@ impl EditorApp {
                         .add(egui::Slider::new(&mut d.z, -10.0..=10.0).text("z"))
                         .changed();
                 });
-            } else if ui.button("+ Disc").clicked() {
-                add_disc = true;
+                }
             }
 
             if let Some(tm) = ent.components.tilemap.as_mut() {
+                let hdr = theme::component_card_header(
+                    ui,
+                    "tilemap",
+                    "Tilemap",
+                    Some(tm.enabled),
+                    true,
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_tilemap = Some(en);
+                }
+                if hdr.remove {
+                    remove_tilemap = true;
+                }
+                if hdr.open {
                 theme::card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let mut en = tm.enabled;
-                        if ui.checkbox(&mut en, "").changed() {
-                            toggle_tilemap = Some(en);
-                        }
-                        ui.label(RichText::new("Tilemap").strong().color(theme::ACCENT));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new("Remove").size(11.0).color(theme::DANGER),
-                                    )
-                                    .fill(theme::BG_SUNKEN),
-                                )
-                                .clicked()
-                            {
-                                remove_tilemap = true;
-                            }
-                        });
-                    });
                     let mut w = tm.width;
                     let mut h = tm.height;
                     ui.horizontal(|ui| {
@@ -376,32 +339,25 @@ impl EditorApp {
                         dirty = true;
                     }
                 });
-            } else if ui.button("+ Tilemap").clicked() {
-                add_tilemap = true;
+                }
             }
 
             if let Some(c) = ent.components.collider.as_mut() {
+                let hdr = theme::component_card_header(
+                    ui,
+                    "collider",
+                    "Collider",
+                    Some(c.enabled),
+                    true,
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_collider = Some(en);
+                }
+                if hdr.remove {
+                    remove_collider = true;
+                }
+                if hdr.open {
                 theme::card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let mut en = c.enabled;
-                        if ui.checkbox(&mut en, "").changed() {
-                            toggle_collider = Some(en);
-                        }
-                        ui.label(RichText::new("Collider").strong().color(theme::ACCENT));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new("Remove").size(11.0).color(theme::DANGER),
-                                    )
-                                    .fill(theme::BG_SUNKEN),
-                                )
-                                .clicked()
-                            {
-                                remove_collider = true;
-                            }
-                        });
-                    });
                     let kind_label = match c.kind {
                         SceneColliderKind::Aabb => "Aabb",
                         SceneColliderKind::Circle => "Circle",
@@ -448,9 +404,42 @@ impl EditorApp {
                         .add(egui::Slider::new(&mut c.offset[1], -128.0..=128.0).text("offset y"))
                         .changed();
                 });
-            } else if ui.button("+ Collider").clicked() {
-                add_collider = true;
+                }
             }
+
+            let missing_sprite = ent.components.sprite.is_none();
+            let missing_disc = ent.components.disc.is_none();
+            let missing_tilemap = ent.components.tilemap.is_none();
+            let missing_collider = ent.components.collider.is_none();
+            ui.add_space(8.0);
+            ui.menu_button(
+                RichText::new("Add Component").strong().color(theme::TEXT),
+                |ui| {
+                    if missing_sprite && ui.button("Sprite").clicked() {
+                        add_sprite = true;
+                        ui.close_menu();
+                    }
+                    if missing_disc && ui.button("Disc").clicked() {
+                        add_disc = true;
+                        ui.close_menu();
+                    }
+                    if missing_tilemap && ui.button("Tilemap").clicked() {
+                        add_tilemap = true;
+                        ui.close_menu();
+                    }
+                    if missing_collider && ui.button("Collider").clicked() {
+                        add_collider = true;
+                        ui.close_menu();
+                    }
+                    if !missing_sprite && !missing_disc && !missing_tilemap && !missing_collider {
+                        ui.label(
+                            RichText::new("All components present")
+                                .size(12.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                    }
+                },
+            );
         }
 
         if let Some((tex, _)) = pending_sprite_tex {

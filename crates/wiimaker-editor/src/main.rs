@@ -1,10 +1,11 @@
 //! egui scene editor for wiimaker games.
 //!
-//! Unity-shaped panels: Hierarchy · Scene viewport · Inspector · Project
+//! Unity 6 docks: Hierarchy · Scene/Game · Inspector · Project/Console (dark Pro chrome)
 
 mod app;
 mod sprite_editor;
 mod theme;
+mod ui_console;
 mod ui_hierarchy;
 mod ui_inspector;
 mod ui_project;
@@ -27,7 +28,7 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 800.0])
+            .with_inner_size([1440.0, 900.0])
             .with_title(format!("wiimaker · {}", state.project.title)),
         ..Default::default()
     };
