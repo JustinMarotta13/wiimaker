@@ -164,6 +164,18 @@ fn check_scene_refs(scene: &Scene, sprites: &[String], issues: &mut Vec<Issue>) 
                 }
             }
         }
+        if let Some(c) = &ent.components.collider {
+            let empty = match c.kind {
+                crate::scene::SceneColliderKind::Aabb => c.size[0] <= 0.0 || c.size[1] <= 0.0,
+                crate::scene::SceneColliderKind::Circle => c.radius <= 0.0,
+            };
+            if empty {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!("entity '{}': Collider has zero size", ent.name),
+                });
+            }
+        }
     }
     let mut names = std::collections::HashSet::new();
     for ent in &scene.entities {

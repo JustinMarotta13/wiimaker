@@ -96,6 +96,12 @@ fn entity_hit_z(
             });
         }
     }
+    if let Some(c) = &ent.components.collider {
+        if c.enabled && c.contains_point(&world, sx, sy) {
+            // Collider-only entities are pickable; visuals still win on z.
+            hit_z = Some(hit_z.unwrap_or(0.0));
+        }
+    }
     hit_z
 }
 
@@ -287,5 +293,24 @@ mod tests {
         assert_eq!(pick_entity_at(&scene, 5.0, 5.0).as_deref(), Some("Maze"));
         assert_eq!(pick_entity_at(&scene, 39.0, 29.0).as_deref(), Some("Maze"));
         assert_eq!(pick_entity_at(&scene, 41.0, 5.0), None);
+    }
+
+    #[test]
+    fn collider_only_entity_is_pickable() {
+        use crate::scene::SceneCollider;
+        let mut scene = Scene::new("t");
+        scene.entities.push(EntityData {
+            name: "Wall".into(),
+            parent: None,
+            transform: SceneTransform::from_xy(100.0, 80.0),
+            components: SceneComponents {
+                collider: Some(SceneCollider::aabb(20.0, 10.0)),
+                ..Default::default()
+            },
+            tag: 0,
+        });
+        assert_eq!(pick_entity_at(&scene, 100.0, 80.0).as_deref(), Some("Wall"));
+        assert_eq!(pick_entity_at(&scene, 110.0, 85.0).as_deref(), Some("Wall"));
+        assert_eq!(pick_entity_at(&scene, 111.0, 80.0), None);
     }
 }

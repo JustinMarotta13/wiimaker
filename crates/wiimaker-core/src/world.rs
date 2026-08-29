@@ -1,5 +1,6 @@
-//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera).
+//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider).
 
+use crate::collider::Collider;
 use crate::color::Rgba8;
 use crate::draw::{Rect, TextureId};
 use crate::math::{Quat, Vec2, Vec3};
@@ -120,6 +121,7 @@ struct Slot {
     disc: Option<Disc>,
     camera: Option<Camera>,
     tilemap: Option<Tilemap>,
+    collider: Option<Collider>,
 }
 
 /// Tiny entity world — Unity GameObject feel without a full ECS.
@@ -148,6 +150,7 @@ impl World {
             slot.disc = None;
             slot.camera = None;
             slot.tilemap = None;
+            slot.collider = None;
             return EntityId(idx as u32);
         }
         let id = EntityId(self.slots.len() as u32);
@@ -160,6 +163,7 @@ impl World {
             disc: None,
             camera: None,
             tilemap: None,
+            collider: None,
         });
         id
     }
@@ -314,6 +318,32 @@ impl World {
                 s.tilemap
                     .as_ref()
                     .map(|tm| (EntityId(i as u32), &s.transform, tm))
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn collider(&self, id: EntityId) -> Option<&Collider> {
+        self.slot(id).and_then(|s| s.collider.as_ref())
+    }
+
+    pub fn collider_mut(&mut self, id: EntityId) -> Option<&mut Collider> {
+        self.slot_mut(id).and_then(|s| s.collider.as_mut())
+    }
+
+    pub fn set_collider(&mut self, id: EntityId, collider: Option<Collider>) {
+        if let Some(slot) = self.slot_mut(id) {
+            slot.collider = collider;
+        }
+    }
+
+    pub fn iter_colliders(&self) -> impl Iterator<Item = (EntityId, &Transform, &Collider)> {
+        self.slots.iter().enumerate().filter_map(|(i, s)| {
+            if s.live {
+                s.collider
+                    .as_ref()
+                    .map(|c| (EntityId(i as u32), &s.transform, c))
             } else {
                 None
             }

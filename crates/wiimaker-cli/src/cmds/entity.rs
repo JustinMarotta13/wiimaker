@@ -3,11 +3,13 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use serde::Serialize;
 use wiimaker_scene::{
-    add_component_disc, add_component_sprite, add_component_tilemap, add_entity, apply_prefab,
-    duplicate_entity, entity_to_prefab, instantiate_prefab, load_prefab, remove_component_disc,
-    remove_component_sprite, remove_component_tilemap, remove_entity, rename_entity, save_prefab,
-    save_scene, set_component_enabled, set_entity_parent, set_entity_rotation_z, set_entity_scale,
-    set_entity_transform, unpack_prefab_instance, MutateOpts, Scene,
+    add_component_collider, add_component_disc, add_component_sprite, add_component_tilemap,
+    add_entity, apply_prefab, duplicate_entity, entities_overlap, entity_overlaps,
+    entity_to_prefab, instantiate_prefab, load_prefab, remove_component_collider,
+    remove_component_disc, remove_component_sprite, remove_component_tilemap, remove_entity,
+    rename_entity, save_prefab, save_scene, set_component_enabled, set_entity_parent,
+    set_entity_rotation_z, set_entity_scale, set_entity_transform, unpack_prefab_instance,
+    MutateOpts, Scene, SceneColliderKind,
 };
 
 use crate::args::EntityCmd;
@@ -101,6 +103,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             cell,
             cols,
             rows,
+            shape,
+            solid,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -116,7 +120,15 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "tilemap" => {
                     add_component_tilemap(&mut sc, &name, cols, rows, cell)?;
                 }
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap)"),
+                "collider" => {
+                    let shape = match shape.to_ascii_lowercase().as_str() {
+                        "circle" => SceneColliderKind::Circle,
+                        "aabb" | "box" => SceneColliderKind::Aabb,
+                        other => bail!("unknown collider --shape '{other}' (Aabb|Circle)"),
+                    };
+                    add_component_collider(&mut sc, &name, shape, [width, height], radius, solid)?;
+                }
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("added {kind} to {name}"))
@@ -226,7 +238,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "sprite" => remove_component_sprite(&mut sc, &name)?,
                 "disc" => remove_component_disc(&mut sc, &name)?,
                 "tilemap" => remove_component_tilemap(&mut sc, &name)?,
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap)"),
+                "collider" => remove_component_collider(&mut sc, &name)?,
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed {kind} from {name}"))
@@ -248,6 +261,64 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     if enabled { "enabled" } else { "disabled" }
                 ),
             )
+        }
+        EntityCmd::Overlaps {
+            game,
+            name,
+            other,
+            scene,
+        } => {
+            let (_gd, _p, _path, sc) = open_scene(root, &game, scene.as_deref())?;
+            match other {
+                Some(other) => {
+                    let hit = entities_overlap(&sc, &name, &other)?;
+                    if json {
+                        #[derive(Serialize)]
+                        struct Out<'a> {
+                            ok: bool,
+                            name: &'a str,
+                            other: &'a str,
+                            overlaps: bool,
+                        }
+                        println!(
+                            "{}",
+                            serde_json::to_string(&Out {
+                                ok: true,
+                                name: &name,
+                                other: &other,
+                                overlaps: hit,
+                            })?
+                        );
+                    } else {
+                        println!("{name} overlaps {other}: {hit}");
+                    }
+                    Ok(())
+                }
+                None => {
+                    let hits = entity_overlaps(&sc, &name)?;
+                    if json {
+                        #[derive(Serialize)]
+                        struct Out<'a> {
+                            ok: bool,
+                            name: &'a str,
+                            overlaps: &'a [String],
+                        }
+                        println!(
+                            "{}",
+                            serde_json::to_string(&Out {
+                                ok: true,
+                                name: &name,
+                                overlaps: &hits,
+                            })?
+                        );
+                    } else if hits.is_empty() {
+                        println!("{name}: no overlaps");
+                    } else {
+                        println!("{name} overlaps: {}", hits.join(", "));
+                    }
+                    Ok(())
+                }
+            }
         }
         EntityCmd::CreatePrefab {
             game,
