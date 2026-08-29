@@ -242,6 +242,8 @@ pub struct SceneComponents {
     pub camera: Option<SceneCamera>,
     #[serde(default, rename = "Tilemap", skip_serializing_if = "Option::is_none")]
     pub tilemap: Option<SceneTilemap>,
+    #[serde(default, rename = "Collider", skip_serializing_if = "Option::is_none")]
+    pub collider: Option<SceneCollider>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -484,6 +486,125 @@ pub struct SceneTilePalette {
 impl SceneTilePalette {
     pub fn color_rgba(&self) -> Rgba8 {
         Rgba8::new(self.color[0], self.color[1], self.color[2], self.color[3])
+    }
+}
+
+/// Unity BoxCollider2D / CircleCollider2D analogue.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+pub enum SceneColliderKind {
+    #[default]
+    Aabb,
+    Circle,
+}
+
+fn default_collider_size() -> [f32; 2] {
+    [32.0, 32.0]
+}
+fn default_collider_radius() -> f32 {
+    16.0
+}
+fn is_zero2(v: &[f32; 2]) -> bool {
+    v[0] == 0.0 && v[1] == 0.0
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SceneCollider {
+    #[serde(default)]
+    pub kind: SceneColliderKind,
+    /// Full width/height when `kind` is Aabb.
+    #[serde(default = "default_collider_size")]
+    pub size: [f32; 2],
+    /// Radius when `kind` is Circle.
+    #[serde(default = "default_collider_radius")]
+    pub radius: f32,
+    /// Local offset from the entity transform.
+    #[serde(default, skip_serializing_if = "is_zero2")]
+    pub offset: [f32; 2],
+    /// Blocks [`wiimaker_core::move_and_collide`] when true.
+    #[serde(default = "default_true")]
+    pub solid: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+}
+
+impl Default for SceneCollider {
+    fn default() -> Self {
+        Self {
+            kind: SceneColliderKind::Aabb,
+            size: default_collider_size(),
+            radius: default_collider_radius(),
+            offset: [0.0, 0.0],
+            solid: true,
+            enabled: true,
+        }
+    }
+}
+
+impl SceneCollider {
+    pub fn aabb(width: f32, height: f32) -> Self {
+        Self {
+            kind: SceneColliderKind::Aabb,
+            size: [width.max(0.0), height.max(0.0)],
+            ..Default::default()
+        }
+    }
+
+    pub fn circle(radius: f32) -> Self {
+        Self {
+            kind: SceneColliderKind::Circle,
+            radius: radius.max(0.0),
+            ..Default::default()
+        }
+    }
+
+    /// World-space AABB (min xy, max xy) for gizmos / pick.
+    pub fn world_aabb(&self, world: &SceneTransform) -> ([f32; 2], [f32; 2]) {
+        let cx = world.translation[0] + self.offset[0] * world.scale[0];
+        let cy = world.translation[1] + self.offset[1] * world.scale[1];
+        let (hx, hy) = match self.kind {
+            SceneColliderKind::Aabb => (
+                (self.size[0] * 0.5 * world.scale[0]).abs(),
+                (self.size[1] * 0.5 * world.scale[1]).abs(),
+            ),
+            SceneColliderKind::Circle => {
+                let r = (self.radius * world.scale[0].abs().max(world.scale[1].abs())).abs();
+                (r, r)
+            }
+        };
+        ([cx - hx, cy - hy], [cx + hx, cy + hy])
+    }
+
+    pub fn world_center(&self, world: &SceneTransform) -> [f32; 2] {
+        [
+            world.translation[0] + self.offset[0] * world.scale[0],
+            world.translation[1] + self.offset[1] * world.scale[1],
+        ]
+    }
+
+    pub fn world_radius(&self, world: &SceneTransform) -> Option<f32> {
+        match self.kind {
+            SceneColliderKind::Circle => {
+                Some((self.radius * world.scale[0].abs().max(world.scale[1].abs())).abs())
+            }
+            SceneColliderKind::Aabb => None,
+        }
+    }
+
+    pub fn contains_point(&self, world: &SceneTransform, sx: f32, sy: f32) -> bool {
+        match self.kind {
+            SceneColliderKind::Aabb => {
+                let (min, max) = self.world_aabb(world);
+                sx >= min[0] && sx <= max[0] && sy >= min[1] && sy <= max[1]
+            }
+            SceneColliderKind::Circle => {
+                let c = self.world_center(world);
+                let r = self.world_radius(world).unwrap_or(0.0);
+                let dx = sx - c[0];
+                let dy = sy - c[1];
+                dx * dx + dy * dy <= r * r
+            }
+        }
     }
 }
 

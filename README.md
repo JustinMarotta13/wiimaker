@@ -28,6 +28,7 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | Transform | `transform.translation / rotation / scale` |
 | SpriteRenderer | `Sprite` component |
 | Tilemap / TilemapCollider2D | `Tilemap` component (cell ids + solid bits) |
+| BoxCollider2D / CircleCollider2D | `Collider` (`Aabb` / `Circle`, `solid`) |
 | Prefab | `.prefab.json` |
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
 | Play | `wiimaker run` / `cargo run -p <game>` |
@@ -62,6 +63,8 @@ wiimaker entity add-component my-game --name Maze Tilemap --cols 28 --rows 31 --
 wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'
 wiimaker tilemap set my-game --name Maze --x 1 --y 1 --id 0
 wiimaker tilemap get my-game --name Maze --x 1 --y 1 --json
+wiimaker entity add-component my-game --name Wall Collider --w 32 --h 16
+wiimaker entity overlaps my-game --name Player --other Wall
 wiimaker cook my-game          # advanced / agents
 wiimaker doctor my-game
 wiimaker run my-game

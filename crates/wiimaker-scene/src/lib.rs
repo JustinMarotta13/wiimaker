@@ -1,5 +1,6 @@
 //! Scene / project authoring types — source of truth for editor + CLI.
 
+mod collider;
 mod doctor;
 mod hydrate;
 mod mutate;
@@ -11,6 +12,9 @@ mod tilemap;
 mod undo;
 mod wscn;
 
+pub use collider::{
+    add_component_collider, entities_overlap, entity_overlaps, remove_component_collider,
+};
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use hydrate::{
     hydrate, hydrate_into, hydrate_into_with_catalog, hydrate_lenient,
@@ -27,8 +31,9 @@ pub use pick::{pick_entity_at, pick_entity_at_with_catalog, pointer_to_scene};
 pub use project::{find_game_dir, list_scenes, load_project, save_project, GameProject};
 pub use render::render_world;
 pub use scene::{
-    load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneComponents,
-    SceneDisc, SceneSprite, SceneTilePalette, SceneTilemap, SceneTransform,
+    load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneCollider,
+    SceneColliderKind, SceneComponents, SceneDisc, SceneSprite, SceneTilePalette, SceneTilemap,
+    SceneTransform,
 };
 pub use tilemap::{
     add_component_tilemap, ensure_tilemap, remove_component_tilemap, tilemap_fill,

@@ -352,7 +352,15 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Tilemap"))?;
             tm.enabled = enabled;
         }
-        other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap)"),
+        "collider" => {
+            let c = ent
+                .components
+                .collider
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Collider"))?;
+            c.enabled = enabled;
+        }
+        other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider)"),
     }
     Ok(())
 }

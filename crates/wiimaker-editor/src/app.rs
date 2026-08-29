@@ -4,6 +4,8 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use eframe::egui;
 use wiimaker_assets::{SpriteCatalog, WPack};
+use wiimaker_core::math::Vec2;
+use wiimaker_core::move_and_collide;
 use wiimaker_core::world::World;
 use wiimaker_host::{Framebuffer, TextureAtlas};
 use wiimaker_scene::{
@@ -796,10 +798,11 @@ impl EditorApp {
         let Some(id) = self.world.find_by_name("Player") else {
             return;
         };
+        let _ = move_and_collide(&mut self.world, id, Vec2::new(dx * speed, dy * speed));
         let r = self.world.disc(id).map(|d| d.radius).unwrap_or(16.0);
         if let Some(xf) = self.world.transform_mut(id) {
-            xf.translation.x = (xf.translation.x + dx * speed).clamp(r, 640.0 - r);
-            xf.translation.y = (xf.translation.y + dy * speed).clamp(r, 480.0 - r);
+            xf.translation.x = xf.translation.x.clamp(r, 640.0 - r);
+            xf.translation.y = xf.translation.y.clamp(r, 480.0 - r);
         }
         if let Some(shadow) = self.world.find_by_name("OrbShadow") {
             if let (Some(player), Some(sxf)) = (

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use wiimaker_assets::SpriteCatalog;
+use wiimaker_core::collider::{Collider, ColliderKind};
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::{Rect, TextureId};
 use wiimaker_core::math::Vec2;
@@ -127,6 +128,12 @@ fn spawn_entity(
         }
     }
 
+    if let Some(c) = &ent.components.collider {
+        if c.enabled {
+            world.set_collider(id, Some(scene_collider_to_runtime(c)));
+        }
+    }
+
     Ok(())
 }
 
@@ -196,6 +203,11 @@ pub fn hydrate_lenient_with_catalog(
                 world.set_tilemap(id, Some(scene_tilemap_to_runtime(tm, textures, catalog)));
             }
         }
+        if let Some(c) = &ent.components.collider {
+            if c.enabled {
+                world.set_collider(id, Some(scene_collider_to_runtime(c)));
+            }
+        }
     }
     world
 }
@@ -258,4 +270,19 @@ fn resolve_palette_sprite(name: &str, catalog: Option<&SpriteCatalog>) -> (Strin
         }
     }
     (name.to_string(), Rect::unit())
+}
+
+fn scene_collider_to_runtime(c: &crate::scene::SceneCollider) -> Collider {
+    Collider {
+        kind: match c.kind {
+            crate::scene::SceneColliderKind::Aabb => ColliderKind::Aabb {
+                size: Vec2::new(c.size[0].max(0.0), c.size[1].max(0.0)),
+            },
+            crate::scene::SceneColliderKind::Circle => ColliderKind::Circle {
+                radius: c.radius.max(0.0),
+            },
+        },
+        offset: Vec2::new(c.offset[0], c.offset[1]),
+        solid: c.solid,
+    }
 }

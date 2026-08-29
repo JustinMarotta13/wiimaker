@@ -140,6 +140,7 @@ impl EditorApp {
                         &self.selected,
                         &self.catalog,
                     );
+                    paint_collider_gizmos(ui, response.rect, &self.scene, &self.selected);
                     if self.edit_tool.is_tile_tool() {
                         if let Some(name) = self.tilemap_target() {
                             paint_tilemap_overlay(ui, response.rect, &self.scene, &name);
@@ -477,6 +478,54 @@ fn paint_tilemap_overlay(ui: &egui::Ui, image_rect: egui::Rect, scene: &Scene, n
     );
     ui.painter()
         .rect_stroke(r, 0.0, egui::Stroke::new(1.0, theme::ACCENT));
+}
+
+/// Collider gizmos: seafoam outline of the AABB or circle.
+/// All enabled colliders get a 1px stroke; the selection is 2px so walls read in screenshots.
+fn paint_collider_gizmos(
+    ui: &egui::Ui,
+    image_rect: egui::Rect,
+    scene: &Scene,
+    selected: &[String],
+) {
+    let to_screen = |sx: f32, sy: f32| -> egui::Pos2 {
+        egui::pos2(
+            image_rect.min.x + sx / VIEW_W as f32 * image_rect.width(),
+            image_rect.min.y + sy / VIEW_H as f32 * image_rect.height(),
+        )
+    };
+    let painter = ui.painter();
+    for ent in &scene.entities {
+        let Some(c) = &ent.components.collider else {
+            continue;
+        };
+        if !c.enabled {
+            continue;
+        }
+        let world = scene
+            .world_transform(&ent.name)
+            .unwrap_or_else(|| ent.transform.clone());
+        let selected = selected.iter().any(|n| n == &ent.name);
+        let stroke = if selected {
+            egui::Stroke::new(2.0_f32, theme::ACCENT)
+        } else {
+            egui::Stroke::new(1.0_f32, theme::ACCENT_DIM)
+        };
+        match c.kind {
+            wiimaker_scene::SceneColliderKind::Aabb => {
+                let (min, max) = c.world_aabb(&world);
+                let r =
+                    egui::Rect::from_min_max(to_screen(min[0], min[1]), to_screen(max[0], max[1]));
+                painter.rect_stroke(r, 0.0, stroke);
+            }
+            wiimaker_scene::SceneColliderKind::Circle => {
+                let center = c.world_center(&world);
+                let radius = c.world_radius(&world).unwrap_or(0.0);
+                let radius_px = radius / VIEW_W as f32 * image_rect.width();
+                painter.circle_stroke(to_screen(center[0], center[1]), radius_px, stroke);
+            }
+        }
+    }
 }
 
 fn paint_selection_outline(

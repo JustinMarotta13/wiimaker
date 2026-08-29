@@ -1,8 +1,9 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
-    add_component_disc, add_component_sprite, add_component_tilemap, remove_component_disc,
-    remove_component_sprite, remove_component_tilemap, save_project, set_component_enabled,
-    set_entity_parent, tilemap_resize,
+    add_component_collider, add_component_disc, add_component_sprite, add_component_tilemap,
+    remove_component_collider, remove_component_disc, remove_component_sprite,
+    remove_component_tilemap, save_project, set_component_enabled, set_entity_parent,
+    tilemap_resize, SceneColliderKind,
 };
 
 use crate::app::EditorApp;
@@ -54,12 +55,15 @@ impl EditorApp {
         let mut add_sprite = false;
         let mut add_disc = false;
         let mut add_tilemap = false;
+        let mut add_collider = false;
         let mut remove_sprite = false;
         let mut remove_disc = false;
         let mut remove_tilemap = false;
+        let mut remove_collider = false;
         let mut toggle_sprite: Option<bool> = None;
         let mut toggle_disc: Option<bool> = None;
         let mut toggle_tilemap: Option<bool> = None;
+        let mut toggle_collider: Option<bool> = None;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
@@ -375,6 +379,78 @@ impl EditorApp {
             } else if ui.button("+ Tilemap").clicked() {
                 add_tilemap = true;
             }
+
+            if let Some(c) = ent.components.collider.as_mut() {
+                theme::card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let mut en = c.enabled;
+                        if ui.checkbox(&mut en, "").changed() {
+                            toggle_collider = Some(en);
+                        }
+                        ui.label(RichText::new("Collider").strong().color(theme::ACCENT));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new("Remove").size(11.0).color(theme::DANGER),
+                                    )
+                                    .fill(theme::BG_SUNKEN),
+                                )
+                                .clicked()
+                            {
+                                remove_collider = true;
+                            }
+                        });
+                    });
+                    let kind_label = match c.kind {
+                        SceneColliderKind::Aabb => "Aabb",
+                        SceneColliderKind::Circle => "Circle",
+                    };
+                    egui::ComboBox::from_id_salt("collider_kind")
+                        .selected_text(kind_label)
+                        .width(120.0)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(c.kind == SceneColliderKind::Aabb, "Aabb")
+                                .clicked()
+                            {
+                                c.kind = SceneColliderKind::Aabb;
+                                dirty = true;
+                            }
+                            if ui
+                                .selectable_label(c.kind == SceneColliderKind::Circle, "Circle")
+                                .clicked()
+                            {
+                                c.kind = SceneColliderKind::Circle;
+                                dirty = true;
+                            }
+                        });
+                    match c.kind {
+                        SceneColliderKind::Aabb => {
+                            dirty |= ui
+                                .add(egui::Slider::new(&mut c.size[0], 1.0..=256.0).text("w"))
+                                .changed();
+                            dirty |= ui
+                                .add(egui::Slider::new(&mut c.size[1], 1.0..=256.0).text("h"))
+                                .changed();
+                        }
+                        SceneColliderKind::Circle => {
+                            dirty |= ui
+                                .add(egui::Slider::new(&mut c.radius, 1.0..=200.0).text("radius"))
+                                .changed();
+                        }
+                    }
+                    dirty |= ui.checkbox(&mut c.solid, "solid").changed();
+                    dirty |= ui
+                        .add(egui::Slider::new(&mut c.offset[0], -128.0..=128.0).text("offset x"))
+                        .changed();
+                    dirty |= ui
+                        .add(egui::Slider::new(&mut c.offset[1], -128.0..=128.0).text("offset y"))
+                        .changed();
+                });
+            } else if ui.button("+ Collider").clicked() {
+                add_collider = true;
+            }
         }
 
         if let Some((tex, _)) = pending_sprite_tex {
@@ -475,6 +551,43 @@ impl EditorApp {
         if let Some(en) = toggle_tilemap {
             self.push_undo();
             if set_component_enabled(&mut self.scene, &sel, "tilemap", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if add_collider {
+            let (kind, size, radius) = self
+                .scene
+                .find_entity(&sel)
+                .map(|e| {
+                    if let Some(sp) = &e.components.sprite {
+                        (SceneColliderKind::Aabb, sp.size, 16.0)
+                    } else if let Some(d) = &e.components.disc {
+                        (SceneColliderKind::Circle, [32.0, 32.0], d.radius)
+                    } else {
+                        (SceneColliderKind::Aabb, [32.0, 32.0], 16.0)
+                    }
+                })
+                .unwrap_or((SceneColliderKind::Aabb, [32.0, 32.0], 16.0));
+            self.push_undo();
+            let _ = add_component_collider(&mut self.scene, &sel, kind, size, radius, true);
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_collider {
+            self.push_undo();
+            if remove_component_collider(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_collider {
+            self.push_undo();
+            if set_component_enabled(&mut self.scene, &sel, "collider", en).is_ok() {
                 self.sync_baseline();
                 self.mark_dirty();
             } else {

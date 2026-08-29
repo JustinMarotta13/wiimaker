@@ -126,13 +126,15 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, or Tilemap
+        /// Component kind: Sprite, Disc, Tilemap, or Collider
         kind: String,
         #[arg(long)]
         texture: Option<String>,
-        #[arg(long, default_value_t = 32.0)]
+        /// Sprite / AABB collider width (`--w`)
+        #[arg(long, visible_alias = "w", default_value_t = 32.0)]
         width: f32,
-        #[arg(long, default_value_t = 32.0)]
+        /// Sprite / AABB collider height (`--h`)
+        #[arg(long, visible_alias = "h", default_value_t = 32.0)]
         height: f32,
         #[arg(long, default_value_t = 36.0)]
         radius: f32,
@@ -145,6 +147,12 @@ pub enum EntityCmd {
         /// Tilemap grid height (cells)
         #[arg(long, default_value_t = 18)]
         rows: u32,
+        /// Collider shape: Aabb (default) or Circle
+        #[arg(long, default_value = "Aabb")]
+        shape: String,
+        /// Collider is a wall (default true)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        solid: bool,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -186,7 +194,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, or Tilemap
+        /// Component kind: Sprite, Disc, Tilemap, or Collider
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -196,10 +204,20 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, or Tilemap
+        /// Component kind: Sprite, Disc, Tilemap, or Collider
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Query collider overlap (`--name` vs `--other`, or list all hits)
+    Overlaps {
+        game: String,
+        #[arg(long, visible_alias = "a")]
+        name: String,
+        #[arg(long, visible_alias = "b")]
+        other: Option<String>,
         #[arg(long)]
         scene: Option<String>,
     },
