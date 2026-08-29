@@ -28,7 +28,10 @@ pub use mutate::{
     set_entity_world_xy, set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{pick_entity_at, pick_entity_at_with_catalog, pointer_to_scene};
-pub use project::{find_game_dir, list_scenes, load_project, save_project, GameProject};
+pub use project::{
+    create_named_scene, find_game_dir, list_scenes, load_project, resolve_scene_rel, save_project,
+    set_default_scene, GameProject,
+};
 pub use render::render_world;
 pub use scene::{
     load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneCollider,

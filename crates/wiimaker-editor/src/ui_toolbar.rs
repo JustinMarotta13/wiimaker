@@ -1,7 +1,7 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::{EditorApp, PlayMode};
-use crate::theme;
+use crate::theme::{self, PlayBtn};
 
 impl EditorApp {
     pub(crate) fn ui_toolbar(&mut self, ctx: &egui::Context) {
@@ -12,10 +12,10 @@ impl EditorApp {
                     ui.label(
                         RichText::new("wiimaker")
                             .strong()
-                            .size(14.0)
+                            .size(13.0)
                             .color(theme::ACCENT),
                     );
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
                     ui.menu_button("File", |ui| {
                         if ui.button("Save scene").clicked() {
                             self.save();
@@ -120,147 +120,142 @@ impl EditorApp {
                             ui.close_menu();
                         }
                     });
-
-                    ui.separator();
-                    if ui
-                        .add_enabled(self.dirty, egui::Button::new("Save"))
-                        .on_hover_text("Cmd/Ctrl+S")
-                        .clicked()
-                    {
-                        self.save();
-                    }
-                    match self.play_mode {
-                        PlayMode::Edit => {
-                            if ui
-                                .button("Play")
-                                .on_hover_text("In-editor Play Mode (WASD)")
-                                .clicked()
-                            {
-                                self.play();
-                            }
-                        }
-                        PlayMode::Playing => {
-                            if ui.button("Pause").clicked() {
-                                self.play();
-                            }
-                            if ui.button("Stop").clicked() {
-                                self.stop_play();
-                            }
-                        }
-                        PlayMode::Paused => {
-                            if ui.button("Resume").clicked() {
-                                self.play();
-                            }
-                            if ui.button("Stop").clicked() {
-                                self.stop_play();
-                            }
-                        }
-                    }
-                    if ui.button("Build").on_hover_text("Wii .dol").clicked() {
-                        self.build_wii();
-                    }
-                    if ui
-                        .button("Play in Dolphin")
-                        .on_hover_text("Launch existing boot.dol")
-                        .clicked()
-                    {
-                        self.play_dolphin();
-                    }
-                    if ui
-                        .button("Build & Run")
-                        .on_hover_text("Build then Dolphin")
-                        .clicked()
-                    {
-                        self.build_and_run_wii();
-                    }
-                    {
-                        let prefab_rels: Vec<_> = self
-                            .project_entries
-                            .iter()
-                            .filter(|e| {
-                                !e.is_dir && e.rel.to_string_lossy().ends_with(".prefab.json")
-                            })
-                            .map(|e| e.rel.clone())
-                            .collect();
-                        if prefab_rels.len() == 1 {
-                            let rel = &prefab_rels[0];
-                            let stem = rel
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("prefab")
-                                .trim_end_matches(".prefab.json");
-                            if ui
-                                .button(format!("Instantiate {stem}"))
-                                .on_hover_text(rel.display().to_string())
-                                .clicked()
-                            {
-                                self.instantiate_prefab_rel(rel);
-                            }
-                        } else {
-                            ui.menu_button("Prefab", |ui| {
-                                if prefab_rels.is_empty() {
-                                    ui.label(
-                                        RichText::new(
-                                            "No prefabs yet — Save as Prefab… on an entity",
-                                        )
-                                        .size(12.0)
-                                        .color(theme::TEXT_MUTED),
-                                    );
-                                }
-                                for rel in &prefab_rels {
-                                    let stem = rel
-                                        .file_name()
-                                        .and_then(|s| s.to_str())
-                                        .unwrap_or("prefab")
-                                        .trim_end_matches(".prefab.json");
-                                    if ui
-                                        .button(format!("Instantiate {stem}"))
-                                        .on_hover_text(rel.display().to_string())
-                                        .clicked()
-                                    {
-                                        self.instantiate_prefab_rel(rel);
-                                        ui.close_menu();
-                                    }
-                                }
-                            });
-                        }
-                    }
-                    ui.menu_button("⋯", |ui| {
-                        if ui.button("Cook assets…").clicked() {
-                            self.cook();
+                    ui.menu_button("Window", |ui| {
+                        if ui.button("Hierarchy").clicked() {
                             ui.close_menu();
                         }
-                        if ui.button("Doctor").clicked() {
-                            self.doctor();
+                        if ui.button("Inspector").clicked() {
                             ui.close_menu();
                         }
-                        if ui.button("Refresh assets").clicked() {
-                            if let Err(e) = self.reload_assets() {
-                                self.status = format!("refresh failed: {e}");
-                            } else {
-                                self.rehydrate();
-                                self.status = "assets refreshed".into();
-                            }
+                        if ui.button("Project").clicked() {
+                            self.bottom_tab = crate::app::BottomTab::Project;
+                            ui.close_menu();
+                        }
+                        if ui.button("Console").clicked() {
+                            self.bottom_tab = crate::app::BottomTab::Console;
                             ui.close_menu();
                         }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(&self.status).size(12.0).color(theme::TEXT_MUTED));
-                        ui.separator();
+                        ui.label(
+                            RichText::new(&self.status)
+                                .size(11.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                    });
+                });
+            });
+
+        egui::TopBottomPanel::top("play_toolbar")
+            .exact_height(36.0)
+            .frame(theme::toolbar_frame())
+            .show(ctx, |ui| {
+                let full = ui.max_rect();
+                ui.set_clip_rect(full);
+                let _ = ui.allocate_rect(full, egui::Sense::hover());
+                let play_w = 120.0;
+                let mid = egui::Rect::from_center_size(
+                    full.center(),
+                    egui::vec2(play_w, full.height()),
+                );
+                let left = egui::Rect::from_min_max(
+                    full.left_top(),
+                    egui::pos2(mid.left() - 4.0, full.bottom()),
+                );
+                let right = egui::Rect::from_min_max(
+                    egui::pos2(mid.right() + 4.0, full.top()),
+                    full.right_bottom(),
+                );
+
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left), |ui| {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        if ui
+                            .add_enabled(self.dirty, egui::Button::new("Save"))
+                            .on_hover_text("Cmd/Ctrl+S")
+                            .clicked()
+                        {
+                            self.save();
+                        }
+                        if ui.button("Build").on_hover_text("Wii .dol").clicked() {
+                            self.build_wii();
+                        }
+                        if ui
+                            .button("Play in Dolphin")
+                            .on_hover_text("Launch existing boot.dol")
+                            .clicked()
+                        {
+                            self.play_dolphin();
+                        }
+                        if ui
+                            .button("Build & Run")
+                            .on_hover_text("Build then Dolphin")
+                            .clicked()
+                        {
+                            self.build_and_run_wii();
+                        }
+                        ui.menu_button("⋯", |ui| {
+                            if ui.button("Cook assets…").clicked() {
+                                self.cook();
+                                ui.close_menu();
+                            }
+                            if ui.button("Doctor").clicked() {
+                                self.doctor();
+                                ui.close_menu();
+                            }
+                            if ui.button("Refresh assets").clicked() {
+                                if let Err(e) = self.reload_assets() {
+                                    self.status = format!("refresh failed: {e}");
+                                } else {
+                                    self.rehydrate();
+                                    self.status = "assets refreshed".into();
+                                }
+                                ui.close_menu();
+                            }
+                        });
+                    });
+                });
+
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(mid), |ui| {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let playing = self.play_mode == PlayMode::Playing;
+                        let paused = self.play_mode == PlayMode::Paused;
+                        let in_play = self.play_mode != PlayMode::Edit;
+                        if theme::play_control(ui, PlayBtn::Play, playing, true)
+                            .on_hover_text("Play")
+                            .clicked()
+                            && self.play_mode != PlayMode::Playing
+                        {
+                            self.play();
+                        }
+                        if theme::play_control(ui, PlayBtn::Pause, paused, in_play)
+                            .on_hover_text("Pause")
+                            .clicked()
+                        {
+                            self.play();
+                        }
+                        if theme::play_control(ui, PlayBtn::Stop, false, in_play)
+                            .on_hover_text("Stop")
+                            .clicked()
+                        {
+                            self.stop_play();
+                        }
+                    });
+                });
+
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right), |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if self.dirty {
                             ui.label(
                                 RichText::new("unsaved")
                                     .strong()
-                                    .size(12.0)
+                                    .size(11.0)
                                     .color(theme::DIRTY),
                             );
                         } else {
-                            ui.label(
-                                RichText::new("saved")
-                                    .size(12.0)
-                                    .color(theme::SAVED),
-                            );
+                            ui.label(RichText::new("saved").size(11.0).color(theme::SAVED));
                         }
                     });
                 });

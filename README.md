@@ -58,6 +58,8 @@ wiimaker new my-game
 wiimaker asset import my-game ./hero.png
 wiimaker asset slice my-game hero --cols 4 --rows 1
 wiimaker asset set-pivot my-game hero_2 --x 0.375 --y 0.375
+wiimaker scene new my-game --name menu
+wiimaker scene set-default my-game --scene menu
 wiimaker entity add my-game --name Player --sprite hero_2 --x 320 --y 240
 wiimaker entity add-component my-game --name Maze Tilemap --cols 28 --rows 31 --cell 16
 wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'

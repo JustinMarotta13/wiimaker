@@ -73,6 +73,18 @@ pub enum SceneCmd {
         game: String,
         scene: Option<String>,
     },
+    /// Create `scenes/<name>.scene.json`
+    New {
+        game: String,
+        #[arg(long)]
+        name: String,
+    },
+    /// Persist `game.toml` default_scene (Build Settings analogue)
+    SetDefault {
+        game: String,
+        #[arg(long)]
+        scene: String,
+    },
     SetClear {
         game: String,
         #[arg(long, value_parser = parse_rgb)]

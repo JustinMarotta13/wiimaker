@@ -82,6 +82,68 @@ pub fn save_project(game_dir: &Path, project: &GameProject) -> Result<()> {
     Ok(())
 }
 
+/// Simple scene stem: no path separators or dots (extension lives on the file).
+pub fn validate_scene_stem(name: &str) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("scene name required");
+    }
+    if name.contains('/') || name.contains('\\') || name.contains('.') {
+        bail!("scene name must be a simple stem (no path or extension)");
+    }
+    Ok(())
+}
+
+/// Create `scenes/<name>.scene.json`. Returns the path relative to `game_dir`.
+pub fn create_named_scene(game_dir: &Path, name: &str) -> Result<PathBuf> {
+    validate_scene_stem(name)?;
+    let stem = name.trim();
+    let rel = PathBuf::from("scenes").join(format!("{stem}.scene.json"));
+    let abs = game_dir.join(&rel);
+    if abs.exists() {
+        bail!("scene already exists: {}", rel.display());
+    }
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    crate::scene::save_scene(&abs, &crate::scene::Scene::new(stem))?;
+    Ok(rel)
+}
+
+/// Resolve a scene stem or relative path to a path relative to `game_dir`.
+pub fn resolve_scene_rel(game_dir: &Path, scene: &str) -> Result<PathBuf> {
+    let scene = scene.trim();
+    if scene.is_empty() {
+        bail!("scene name required");
+    }
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if scene.ends_with(".scene.json") {
+        let as_path = PathBuf::from(scene);
+        candidates.push(as_path.clone());
+        if as_path.parent().map(|p| p.as_os_str().is_empty()).unwrap_or(true) {
+            candidates.push(PathBuf::from("scenes").join(&as_path));
+        }
+    } else {
+        candidates.push(PathBuf::from("scenes").join(format!("{scene}.scene.json")));
+        candidates.push(PathBuf::from(format!("{scene}.scene.json")));
+    }
+    for rel in &candidates {
+        if game_dir.join(rel).is_file() {
+            return Ok(rel.clone());
+        }
+    }
+    bail!("scene not found: {scene}");
+}
+
+/// Persist `game.toml` `default_scene` (Build Settings analogue).
+pub fn set_default_scene(game_dir: &Path, scene: &str) -> Result<PathBuf> {
+    let rel = resolve_scene_rel(game_dir, scene)?;
+    let mut project = load_project(game_dir)?;
+    project.default_scene = rel.to_string_lossy().replace('\\', "/");
+    save_project(game_dir, &project)?;
+    Ok(rel)
+}
+
 fn is_scene_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -192,6 +254,45 @@ mod tests {
         fs::write(dir.join("game.toml"), "name = \"t\"\n").unwrap();
         let listed = list_scenes(&dir).unwrap();
         assert!(listed.is_empty());
+    }
+
+    #[test]
+    fn create_named_scene_writes_json_under_scenes() {
+        let dir = tempfile_dir("create-named-scene");
+        fs::write(
+            dir.join("game.toml"),
+            "name = \"t\"\ndefault_scene = \"scenes/main.scene.json\"\n",
+        )
+        .unwrap();
+        let rel = create_named_scene(&dir, "win").unwrap();
+        assert_eq!(rel, PathBuf::from("scenes/win.scene.json"));
+        assert!(dir.join(&rel).is_file());
+        let scene = crate::scene::load_scene(&dir.join(&rel)).unwrap();
+        assert_eq!(scene.name, "win");
+        assert!(create_named_scene(&dir, "win").is_err());
+        assert!(create_named_scene(&dir, "bad.name").is_err());
+    }
+
+    #[test]
+    fn set_default_scene_updates_game_toml() {
+        let dir = tempfile_dir("set-default-scene");
+        fs::create_dir_all(dir.join("scenes")).unwrap();
+        fs::write(dir.join("scenes/main.scene.json"), "{\"name\":\"main\"}\n").unwrap();
+        fs::write(dir.join("scenes/menu.scene.json"), "{\"name\":\"menu\"}\n").unwrap();
+        fs::write(
+            dir.join("game.toml"),
+            "name = \"t\"\ndefault_scene = \"scenes/main.scene.json\"\n",
+        )
+        .unwrap();
+
+        let rel = set_default_scene(&dir, "menu").unwrap();
+        assert_eq!(rel, PathBuf::from("scenes/menu.scene.json"));
+        let project = load_project(&dir).unwrap();
+        assert_eq!(project.default_scene, "scenes/menu.scene.json");
+
+        let rel = set_default_scene(&dir, "scenes/main.scene.json").unwrap();
+        assert_eq!(rel, PathBuf::from("scenes/main.scene.json"));
+        assert!(set_default_scene(&dir, "missing").is_err());
     }
 
     fn tempfile_dir(label: &str) -> PathBuf {
