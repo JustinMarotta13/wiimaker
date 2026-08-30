@@ -20,6 +20,7 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 - `games/` is gitignored (local projects only); workspace still lists `games/hello-orb` for local cook/run.
 - Pivot lives on sheet meta (not SceneSprite override) for v0.
 - Tilemap cells: row-major `u16` ids + 0/1 `solid` in JSON; packed bits at runtime. Cell `(0,0)` is top-left of `transform + origin`. Occupied (`id != 0`) draw as palette sprite or colored quad (`TextureId(u32::MAX)` → white sample × tint). `tile_solid` treats OOB as solid when any tilemap exists.
+- Collider: AABB/Circle + `solid` / `trigger` / `filter_tag`. Triggers never block (`overlap_solid` / `move_and_collide`); poll `triggers_entered(world, id)` each tick. Filter 0 = any; else other entity `World::tag` must match.
 - Primary ship verbs are Build / Play in Dolphin / Build & Run; `cook` is advanced/agent-only.
 
 ## Open follow-ups

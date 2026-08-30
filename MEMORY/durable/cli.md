@@ -23,6 +23,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - CLI sources are modular: `main.rs` dispatch · `args.rs` (clap) · `cmds/{project,scene,entity,asset}.rs` · `util.rs` · `pipeline.rs` (ship helpers).
 - Wii embed uses `scene.wscn` **WSCN0003** (UV + pivot + length-prefixed Tilemap) rather than parsing JSON on console.
 - Tilemap: `tilemap set|fill|stamp|get` (`--name --x --y --id`, `--ascii` or `--cells --width`). Auto-creates a default Tilemap on the named entity if missing. `entity add-component … Tilemap --cols --rows --cell`.
+- Collider / Trigger: `entity add-component … Collider|--trigger|--filter` or kind `Trigger`; `entity triggers <game> <name>`; `entity despawn <game> <name>`; `entity set --tag N`.
 - Entity mutate twins stay in `wiimaker-scene` (`duplicate_entity`, `rename_entity`, `set_entity_parent`, `unique_entity_name`).
 - Sheet grid math / catalog live in `wiimaker-assets` — CLI and editor must not fork slice logic.
 - `cook` / `bake-wii` remain for agents; primary UX is `build` / `dolphin` / `play-wii`.

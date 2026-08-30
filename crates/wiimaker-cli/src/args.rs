@@ -131,6 +131,9 @@ pub enum EntityCmd {
         /// Z rotation in degrees (2D)
         #[arg(long)]
         rotation_deg: Option<f32>,
+        /// Entity gameplay tag (trigger filter counterpart)
+        #[arg(long)]
+        tag: Option<u32>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -138,7 +141,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, or Collider
+        /// Component kind: Sprite, Disc, Tilemap, Collider, or Trigger
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -162,9 +165,15 @@ pub enum EntityCmd {
         /// Collider shape: Aabb (default) or Circle
         #[arg(long, default_value = "Aabb")]
         shape: String,
-        /// Collider is a wall (default true)
+        /// Collider is a wall (default true; ignored when trigger)
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         solid: bool,
+        /// Mark collider as Unity-style isTrigger
+        #[arg(long, default_value_t = false)]
+        trigger: bool,
+        /// Trigger filter tag (0 = any)
+        #[arg(long, default_value_t = 0)]
+        filter: u32,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -230,6 +239,20 @@ pub enum EntityCmd {
         name: String,
         #[arg(long, visible_alias = "b")]
         other: Option<String>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// List trigger overlaps entered by an entity
+    Triggers {
+        game: String,
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Remove an entity from the scene (Unity Destroy / despawn)
+    Despawn {
+        game: String,
+        name: String,
         #[arg(long)]
         scene: Option<String>,
     },

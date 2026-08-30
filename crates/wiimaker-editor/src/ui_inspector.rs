@@ -397,6 +397,14 @@ impl EditorApp {
                         }
                     }
                     dirty |= ui.checkbox(&mut c.solid, "solid").changed();
+                    // trigger is independent of solid (Unity): trigger=true never blocks via overlap_solid.
+                    dirty |= ui.checkbox(&mut c.trigger, "Is Trigger").changed();
+                    ui.horizontal(|ui| {
+                        ui.label("Filter Tag");
+                        let r = ui.add(egui::DragValue::new(&mut c.filter_tag));
+                        r.clone().on_hover_text("0 = any");
+                        dirty |= r.changed();
+                    });
                     dirty |= ui
                         .add(egui::Slider::new(&mut c.offset[0], -128.0..=128.0).text("offset x"))
                         .changed();
@@ -561,7 +569,7 @@ impl EditorApp {
                 })
                 .unwrap_or((SceneColliderKind::Aabb, [32.0, 32.0], 16.0));
             self.push_undo();
-            let _ = add_component_collider(&mut self.scene, &sel, kind, size, radius, true);
+            let _ = add_component_collider(&mut self.scene, &sel, kind, size, radius, true, false, 0);
             self.sync_baseline();
             self.mark_dirty();
         }

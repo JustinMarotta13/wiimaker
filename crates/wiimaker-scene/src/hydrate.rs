@@ -284,5 +284,7 @@ fn scene_collider_to_runtime(c: &crate::scene::SceneCollider) -> Collider {
         },
         offset: Vec2::new(c.offset[0], c.offset[1]),
         solid: c.solid,
+        trigger: c.trigger,
+        filter_tag: c.filter_tag,
     }
 }

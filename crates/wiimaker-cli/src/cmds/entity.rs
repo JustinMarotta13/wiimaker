@@ -4,7 +4,7 @@ use anyhow::{bail, Result};
 use serde::Serialize;
 use wiimaker_scene::{
     add_component_collider, add_component_disc, add_component_sprite, add_component_tilemap,
-    add_entity, apply_prefab, duplicate_entity, entities_overlap, entity_overlaps,
+    add_entity, apply_prefab, duplicate_entity, entities_overlap, entity_overlaps, entity_triggers_entered,
     entity_to_prefab, instantiate_prefab, load_prefab, remove_component_collider,
     remove_component_disc, remove_component_sprite, remove_component_tilemap, remove_entity,
     rename_entity, save_prefab, save_scene, set_component_enabled, set_entity_parent,
@@ -68,12 +68,18 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             sx,
             sy,
             rotation_deg,
+            tag,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
-            if x.is_none() && y.is_none() && sx.is_none() && sy.is_none() && rotation_deg.is_none()
+            if x.is_none()
+                && y.is_none()
+                && sx.is_none()
+                && sy.is_none()
+                && rotation_deg.is_none()
+                && tag.is_none()
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -88,6 +94,14 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             }
             if let Some(deg) = rotation_deg {
                 set_entity_rotation_z(&mut sc, &name, deg.to_radians())?;
+            }
+            if let Some(tag) = tag {
+                let ent = sc
+                    .entities
+                    .iter_mut()
+                    .find(|e| e.name == name)
+                    .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
+                ent.tag = tag;
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("updated entity {name}"))
@@ -105,6 +119,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             rows,
             shape,
             solid,
+            trigger,
+            filter,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -120,15 +136,28 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "tilemap" => {
                     add_component_tilemap(&mut sc, &name, cols, rows, cell)?;
                 }
-                "collider" => {
+                "collider" | "trigger" => {
                     let shape = match shape.to_ascii_lowercase().as_str() {
                         "circle" => SceneColliderKind::Circle,
                         "aabb" | "box" => SceneColliderKind::Aabb,
                         other => bail!("unknown collider --shape '{other}' (Aabb|Circle)"),
                     };
-                    add_component_collider(&mut sc, &name, shape, [width, height], radius, solid)?;
+                    let is_trigger = trigger || kind.eq_ignore_ascii_case("trigger");
+                    let solid = if is_trigger { false } else { solid };
+                    add_component_collider(
+                        &mut sc,
+                        &name,
+                        shape,
+                        [width, height],
+                        radius,
+                        solid,
+                        is_trigger,
+                        filter,
+                    )?;
                 }
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider)"),
+                other => {
+                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger)")
+                }
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("added {kind} to {name}"))
@@ -319,6 +348,39 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     Ok(())
                 }
             }
+        }
+        EntityCmd::Triggers { game, name, scene } => {
+            let (_gd, _p, _path, sc) = open_scene(root, &game, scene.as_deref())?;
+            let hits = entity_triggers_entered(&sc, &name)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out<'a> {
+                    ok: bool,
+                    name: &'a str,
+                    triggers: &'a [String],
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&Out {
+                        ok: true,
+                        name: &name,
+                        triggers: &hits,
+                    })?
+                );
+                Ok(())
+            } else if hits.is_empty() {
+                println!("{name}: no triggers entered");
+                Ok(())
+            } else {
+                println!("{name} triggers: {}", hits.join(", "));
+                Ok(())
+            }
+        }
+        EntityCmd::Despawn { game, name, scene } => {
+            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            remove_entity(&mut sc, &name)?;
+            save_scene(&path, &sc)?;
+            emit_ok(json, &format!("despawned entity {name}"))
         }
         EntityCmd::CreatePrefab {
             game,

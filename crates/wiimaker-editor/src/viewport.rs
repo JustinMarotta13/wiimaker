@@ -500,7 +500,7 @@ fn paint_tilemap_overlay(ui: &egui::Ui, image_rect: egui::Rect, scene: &Scene, n
         .rect_stroke(r, 0.0, egui::Stroke::new(1.0, theme::ACCENT));
 }
 
-/// Collider gizmos: seafoam outline of the AABB or circle.
+/// Collider gizmos: accent outline of the AABB or circle (amber when `trigger`).
 /// All enabled colliders get a 1px stroke; the selection is 2px so walls read in screenshots.
 fn paint_collider_gizmos(
     ui: &egui::Ui,
@@ -526,10 +526,18 @@ fn paint_collider_gizmos(
             .world_transform(&ent.name)
             .unwrap_or_else(|| ent.transform.clone());
         let selected = selected.iter().any(|n| n == &ent.name);
-        let stroke = if selected {
-            egui::Stroke::new(2.0_f32, theme::ACCENT)
+        // Triggers draw amber/yellow; solid walls keep seafoam/accent blue.
+        let color = if c.trigger {
+            egui::Color32::from_rgb(220, 180, 60)
+        } else if selected {
+            theme::ACCENT
         } else {
-            egui::Stroke::new(1.0_f32, theme::ACCENT_DIM)
+            theme::ACCENT_DIM
+        };
+        let stroke = if selected {
+            egui::Stroke::new(2.0_f32, color)
+        } else {
+            egui::Stroke::new(1.0_f32, color)
         };
         match c.kind {
             wiimaker_scene::SceneColliderKind::Aabb => {
