@@ -313,6 +313,14 @@ fn is_true(v: &bool) -> bool {
     *v
 }
 
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
 fn default_cell() -> f32 {
     16.0
 }
@@ -521,9 +529,15 @@ pub struct SceneCollider {
     /// Local offset from the entity transform.
     #[serde(default, skip_serializing_if = "is_zero2")]
     pub offset: [f32; 2],
-    /// Blocks [`wiimaker_core::move_and_collide`] when true.
+    /// Blocks [`wiimaker_core::move_and_collide`] when true (ignored if `trigger`).
     #[serde(default = "default_true")]
     pub solid: bool,
+    /// Unity `isTrigger`: never blocks; use `triggers_entered` / `entity_triggers_entered`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub trigger: bool,
+    /// When non-zero on a trigger, the other entity's `tag` must match (0 = any).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub filter_tag: u32,
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled: bool,
 }
@@ -536,6 +550,8 @@ impl Default for SceneCollider {
             radius: default_collider_radius(),
             offset: [0.0, 0.0],
             solid: true,
+            trigger: false,
+            filter_tag: 0,
             enabled: true,
         }
     }

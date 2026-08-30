@@ -21,13 +21,21 @@ pub enum ColliderKind {
 }
 
 /// Physics shape on an entity. Not drawn; editor shows an outline gizmo.
+///
+/// `trigger` is independent of `solid` (Unity keeps both). When `trigger` is
+/// true, [`overlap_solid`] / [`move_and_collide`] never treat this collider as a
+/// wall — use [`triggers_entered`] to detect collectibles / sensors.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Collider {
     pub kind: ColliderKind,
     /// Local offset from the entity transform, scaled by the transform.
     pub offset: Vec2,
-    /// When true, [`move_and_collide`] treats this as a wall.
+    /// When true, [`move_and_collide`] treats this as a wall (unless `trigger`).
     pub solid: bool,
+    /// Unity `isTrigger`: never blocks movement; participates in [`triggers_entered`].
+    pub trigger: bool,
+    /// When non-zero on a trigger, the other entity's [`World::tag`] must match.
+    pub filter_tag: u32,
 }
 
 impl Collider {
@@ -38,6 +46,8 @@ impl Collider {
             },
             offset: Vec2::ZERO,
             solid: true,
+            trigger: false,
+            filter_tag: 0,
         }
     }
 
@@ -48,6 +58,8 @@ impl Collider {
             },
             offset: Vec2::ZERO,
             solid: true,
+            trigger: false,
+            filter_tag: 0,
         }
     }
 
@@ -123,6 +135,32 @@ pub fn overlapping(world: &World, id: EntityId) -> Vec<EntityId> {
     out
 }
 
+fn filter_ok(trigger_collider: &Collider, other_id: EntityId, world: &World) -> bool {
+    trigger_collider.filter_tag == 0 || world.tag(other_id) == Some(trigger_collider.filter_tag)
+}
+
+fn trigger_pair_matches(world: &World, id: EntityId, other: EntityId) -> bool {
+    let (Some(ca), Some(cb)) = (world.collider(id), world.collider(other)) else {
+        return false;
+    };
+    (ca.trigger && filter_ok(ca, other, world)) || (cb.trigger && filter_ok(cb, id, world))
+}
+
+/// Other entities that overlap `id` where at least one collider is a trigger
+/// and any non-zero `filter_tag` accepts the counterpart's world tag.
+pub fn triggers_entered(world: &World, id: EntityId) -> Vec<EntityId> {
+    let mut out = Vec::new();
+    for other in world.iter_entities() {
+        if other == id {
+            continue;
+        }
+        if overlaps(world, id, other) && trigger_pair_matches(world, id, other) {
+            out.push(other);
+        }
+    }
+    out
+}
+
 /// First *solid* collider overlapping `id`, excluding self.
 pub fn overlap_solid(world: &World, id: EntityId) -> Option<EntityId> {
     let (Some(ca), Some(xa)) = (world.collider(id), world.transform(id)) else {
@@ -135,7 +173,8 @@ pub fn overlap_solid(world: &World, id: EntityId) -> Option<EntityId> {
         let Some(cb) = world.collider(other) else {
             continue;
         };
-        if !cb.solid {
+        // Triggers never block, regardless of solid (Unity isTrigger).
+        if !cb.solid || cb.trigger {
             continue;
         }
         let Some(xb) = world.transform(other) else {
@@ -452,5 +491,66 @@ mod tests {
         let hit = move_and_collide(&mut world, id, Vec2::new(5.0, -3.0));
         assert!(hit.hit.is_none());
         assert_eq!(hit.applied, Vec2::new(5.0, -3.0));
+    }
+
+    #[test]
+    fn trigger_does_not_block_move_and_collide() {
+        let mut world = World::new();
+        let player = spawn_aabb(&mut world, "Player", 0.0, 0.0, 8.0, 8.0, true);
+        let mut coin = Collider::aabb(8.0, 8.0);
+        coin.solid = true; // even if solid, trigger skips blocking
+        coin.trigger = true;
+        let coin_id = world.spawn_named("Coin", Transform::from_xy(20.0, 0.0));
+        world.set_collider(coin_id, Some(coin));
+        let hit = move_and_collide(&mut world, player, Vec2::new(20.0, 0.0));
+        assert!(hit.hit.is_none());
+        assert!((world.transform(player).unwrap().translation.x - 20.0).abs() < 1e-4);
+        assert!(overlaps(&world, player, coin_id));
+    }
+
+    #[test]
+    fn triggers_entered_returns_collectible() {
+        let mut world = World::new();
+        let player = spawn_aabb(&mut world, "Player", 0.0, 0.0, 10.0, 10.0, true);
+        let mut coin = Collider::aabb(10.0, 10.0);
+        coin.solid = false;
+        coin.trigger = true;
+        let coin_id = world.spawn_named("Coin", Transform::from_xy(2.0, 0.0));
+        world.set_collider(coin_id, Some(coin));
+        let far = spawn_aabb(&mut world, "Far", 100.0, 0.0, 10.0, 10.0, true);
+        let entered = triggers_entered(&world, player);
+        assert_eq!(entered, vec![coin_id]);
+        assert!(triggers_entered(&world, far).is_empty());
+        // Coin also sees the player when coin is the query side.
+        assert_eq!(triggers_entered(&world, coin_id), vec![player]);
+    }
+
+    #[test]
+    fn filter_tag_filters_triggers_entered() {
+        let mut world = World::new();
+        let player = spawn_aabb(&mut world, "Player", 0.0, 0.0, 10.0, 10.0, true);
+        world.set_tag(player, 1);
+        let mut pellet = Collider::aabb(10.0, 10.0);
+        pellet.trigger = true;
+        pellet.filter_tag = 1;
+        let pellet_id = world.spawn_named("Pellet", Transform::from_xy(2.0, 0.0));
+        world.set_collider(pellet_id, Some(pellet));
+        let mut ghost_only = Collider::aabb(10.0, 10.0);
+        ghost_only.trigger = true;
+        ghost_only.filter_tag = 2;
+        let door = world.spawn_named("Door", Transform::from_xy(3.0, 0.0));
+        world.set_collider(door, Some(ghost_only));
+        let entered = triggers_entered(&world, player);
+        assert_eq!(entered, vec![pellet_id], "filter 2 must reject player tag 1");
+    }
+
+    #[test]
+    fn non_trigger_overlap_not_in_triggers_entered() {
+        let mut world = World::new();
+        let a = spawn_aabb(&mut world, "A", 0.0, 0.0, 10.0, 10.0, true);
+        let b = spawn_aabb(&mut world, "B", 2.0, 0.0, 10.0, 10.0, false);
+        assert!(overlaps(&world, a, b));
+        assert!(triggers_entered(&world, a).is_empty());
+        assert!(triggers_entered(&world, b).is_empty());
     }
 }

@@ -17,7 +17,8 @@ pub mod world;
 
 pub use app::{App, FrameCtx};
 pub use collider::{
-    move_and_collide, overlap_solid, overlapping, overlaps, Collider, ColliderKind, MoveHit,
+    move_and_collide, overlap_solid, overlapping, overlaps, triggers_entered, Collider,
+    ColliderKind, MoveHit,
 };
 pub use color::Rgba8;
 pub use draw::{DrawCmd, DrawList, MeshId, Rect, TextureId};

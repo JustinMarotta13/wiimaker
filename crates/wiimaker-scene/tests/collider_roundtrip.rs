@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use wiimaker_core::math::Vec2;
 use wiimaker_core::{move_and_collide, overlaps};
 use wiimaker_scene::{
-    add_component_collider, add_entity, entities_overlap, entity_overlaps, hydrate, load_scene,
-    save_scene, MutateOpts, SceneColliderKind, TextureMap,
+    add_component_collider, add_entity, entities_overlap, entity_overlaps, entity_triggers_entered,
+    hydrate, load_scene, save_scene, MutateOpts, SceneColliderKind, TextureMap,
 };
 
 fn tmp() -> PathBuf {
@@ -46,6 +46,8 @@ fn json_file_roundtrip_add_overlap_move() {
         [12.0, 12.0],
         6.0,
         true,
+        false,
+        0,
     )
     .unwrap();
     add_component_collider(
@@ -55,6 +57,8 @@ fn json_file_roundtrip_add_overlap_move() {
         [16.0, 48.0],
         8.0,
         true,
+        false,
+        0,
     )
     .unwrap();
 
@@ -84,4 +88,76 @@ fn json_file_roundtrip_add_overlap_move() {
     let x = world.transform(player).unwrap().translation.x;
     assert!(x > 20.0 && x < 26.1, "expected contact near 26, got {x}");
     assert!(!overlaps(&world, player, wall));
+}
+
+#[test]
+fn trigger_roundtrip_pass_through_and_entered() {
+    let mut scene = wiimaker_scene::Scene::new("dots");
+    add_entity(
+        &mut scene,
+        "Player",
+        &MutateOpts {
+            x: Some(0.0),
+            y: Some(0.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    add_entity(
+        &mut scene,
+        "Dot",
+        &MutateOpts {
+            x: Some(20.0),
+            y: Some(0.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    add_component_collider(
+        &mut scene,
+        "Player",
+        SceneColliderKind::Aabb,
+        [12.0, 12.0],
+        6.0,
+        true,
+        false,
+        0,
+    )
+    .unwrap();
+    add_component_collider(
+        &mut scene,
+        "Dot",
+        SceneColliderKind::Circle,
+        [0.0, 0.0],
+        8.0,
+        false,
+        true,
+        0,
+    )
+    .unwrap();
+
+    let path = tmp().with_file_name("dots.scene.json");
+    save_scene(&path, &scene).unwrap();
+    let loaded = load_scene(&path).unwrap();
+    let c = loaded
+        .find_entity("Dot")
+        .unwrap()
+        .components
+        .collider
+        .as_ref()
+        .unwrap();
+    assert!(c.trigger);
+    assert_eq!(c.filter_tag, 0);
+
+    let mut world = hydrate(&loaded, &TextureMap::new()).unwrap();
+    let player = world.find_by_name("Player").unwrap();
+    let hit = move_and_collide(&mut world, player, Vec2::new(20.0, 0.0));
+    assert!(hit.hit.is_none());
+
+    let mut close = loaded.clone();
+    close.entities[0].transform.translation[0] = 20.0;
+    assert_eq!(
+        entity_triggers_entered(&close, "Player").unwrap(),
+        vec!["Dot".to_string()]
+    );
 }

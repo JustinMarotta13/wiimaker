@@ -13,7 +13,8 @@ mod undo;
 mod wscn;
 
 pub use collider::{
-    add_component_collider, entities_overlap, entity_overlaps, remove_component_collider,
+    add_component_collider, entities_overlap, entity_overlaps, entity_triggers_entered,
+    remove_component_collider,
 };
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use hydrate::{

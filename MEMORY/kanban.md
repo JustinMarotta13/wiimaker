@@ -19,24 +19,15 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera marker, Tilemap, Collider, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide`.
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera marker, Tilemap, Collider, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered`.
 
-**Not present:** triggers, sprite clips, audio playback, camera used at render time, named sorting layers, prefab variants, runtime scene API, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
+**Not present:** sprite clips, audio playback, camera used at render time, named sorting layers, prefab variants, runtime scene API, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
 
 ---
 
 ## Now
 
-### 1. Trigger / collectible — **GUI + CLI**
-Unity: `isTrigger` + OnTriggerEnter. Dots, power pellets, fruit, ghost house door.
-
-- `Collider.trigger = true` or `Trigger { filter_tag }`.
-- `world.triggers_entered(id) -> [EntityId]` each tick (or callback list the game polls).
-- **GUI:** Inspector checkbox + tag filter.
-- **CLI:** `entity add-component … Trigger --filter 2` · `entity despawn`.
-- **Test:** walk over Dot_* → despawn + score; power pellet tag distinct from pellet.
-
-### 2. Sprite animation clips — **GUI + CLI**
+### 1. Sprite animation clips — **GUI + CLI**
 Unity: Animator / Animation window (2D). Chomp + ghost legs. Sheets + cells already exist.
 
 - `Animation { clip, fps, loop }` + `assets/<name>.anim.json` listing cell names.
@@ -118,6 +109,7 @@ Shipped. Keep here so we do not rebuild them.
 - Tilemap + solid cells (scene `Tilemap`, viewport Paint/Erase/Pick, Inspector grid+palette, CLI `tilemap set|fill|stamp|get`, `tile_solid` / `world_to_cell`, WSCN0003 bake)
 - AABB/Circle collider + overlap (scene `Collider`, Inspector kind/size/solid, viewport seafoam outline gizmo, CLI `entity add-component … Collider --w --h`, `entity overlaps`, `overlaps` / `move_and_collide`; host-first, WSCN0003 unchanged)
 - Unity 6 editor chrome (dark Pro docks: Hierarchy left, Scene/Game center, Inspector right, Project/Console bottom; Play/Pause/Stop centered; component foldout cards). CLI `scene new` · `scene set-default`
+- Trigger / collectible (GUI Is Trigger + Filter Tag; CLI Trigger/--trigger/--filter, entity triggers, entity despawn; `triggers_entered`; triggers skip `move_and_collide`)
 
 ### CLI commands (exact names)
 
@@ -135,9 +127,9 @@ Global: `--json`
 | `play-wii` | build then Dolphin |
 | `doctor` | validate |
 | `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` | |
-| `entity list` · `entity add` · `entity set` · `entity remove` | `--name --sprite --x --y --sx --sy --rotation-deg` |
-| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid`) |
-| `entity overlaps` | `--name` [ `--other` ] · pairwise or list hits |
+| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag` |
+| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) |
+| `entity overlaps` · `entity triggers` | `--name` [ `--other` ] · pairwise/list overlaps; `triggers <name>` lists entered triggers |
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
 | `entity create-prefab` · `entity instantiate-prefab` · `entity apply-prefab` · `entity unpack-prefab` | |
 | `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` | |
@@ -153,12 +145,12 @@ Toolbar (center): Play / Pause / Stop
 Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Paint · Erase · Pick · Snap · grid size
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/offset
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship Trigger / collectible (Now #1).** Colliders overlap; games still poll `overlaps` themselves. Triggers unlock dots / pellets / fruit via `isTrigger` + a per-tick entered list. Test: walk over Dot_* → despawn + score.
+**Ship Sprite animation clips (Now #1).** Sheets + cells already exist; games need chomp / ghost legs via clip + fps. Test: slice a 2-frame sheet, play clip on Player.
 
