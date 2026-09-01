@@ -46,7 +46,14 @@ impl EditorApp {
                                 .color(theme::TEXT_DIM),
                             );
                         }
-                        ui.checkbox(&mut self.snap_enabled, "Snap");
+                        if theme::enable_checkbox(ui, self.snap_enabled).clicked() {
+                            self.snap_enabled = !self.snap_enabled;
+                        }
+                        ui.label(
+                            egui::RichText::new("Snap")
+                                .size(12.0)
+                                .color(theme::TEXT),
+                        );
                         ui.add(
                             egui::DragValue::new(&mut self.snap_size)
                                 .range(1.0..=128.0)
@@ -55,7 +62,7 @@ impl EditorApp {
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                egui::RichText::new(format!("{VIEW_W}×{VIEW_H}"))
+                                egui::RichText::new(format!("{VIEW_W}x{VIEW_H}"))
                                     .size(11.0)
                                     .color(theme::TEXT_DIM),
                             );
@@ -70,7 +77,7 @@ impl EditorApp {
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                egui::RichText::new(format!("{VIEW_W}×{VIEW_H}"))
+                                egui::RichText::new(format!("{VIEW_W}x{VIEW_H}"))
                                     .size(11.0)
                                     .color(theme::TEXT_DIM),
                             );

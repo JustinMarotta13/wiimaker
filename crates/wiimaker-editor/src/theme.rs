@@ -4,7 +4,7 @@
 //! Geometric stand-ins only — no trademarked Unity icons.
 
 use eframe::egui::{
-    self, style::ScrollStyle, Align2, Color32, FontId, Frame, Margin, RichText, Rounding, Sense,
+    self, style::ScrollStyle, Color32, Frame, Margin, RichText, Rounding, Sense,
     Shadow, Shape, Stroke, Vec2, Visuals,
 };
 
@@ -311,13 +311,186 @@ pub fn dock_tabs<T: Copy + PartialEq>(ui: &mut egui::Ui, tabs: &[(&str, T)], cur
     selected
 }
 
+/// Two-face isometric cube. Geometric stand-in — not Unity's logo.
+pub fn paint_cube(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let r = rect.shrink(0.5);
+    if r.width() < 3.0 || r.height() < 3.0 {
+        return;
+    }
+    let ox = (r.width() * 0.30).max(2.0);
+    let oy = (r.height() * 0.32).max(2.0);
+    let p0 = egui::pos2(r.left(), r.top() + oy);
+    let p1 = egui::pos2(r.right() - ox, r.top() + oy);
+    let p2 = egui::pos2(r.right(), r.top());
+    let p3 = egui::pos2(r.left() + ox, r.top());
+    let p4 = egui::pos2(r.left(), r.bottom());
+    let p5 = egui::pos2(r.right() - ox, r.bottom());
+    let stroke = Stroke::new(1.0_f32, color);
+    let top_fill = Color32::from_rgb(92, 92, 92);
+    let front_fill = Color32::from_rgb(48, 48, 48);
+    painter.add(Shape::convex_polygon(vec![p3, p2, p1, p0], top_fill, stroke));
+    painter.add(Shape::convex_polygon(vec![p0, p1, p5, p4], front_fill, stroke));
+}
+
+pub fn cube_icon(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), Sense::hover());
+    paint_cube(ui.painter(), rect, color);
+}
+
+fn paint_foldout(painter: &egui::Painter, rect: egui::Rect, open: bool, color: Color32) {
+    let c = rect.center();
+    let s = (rect.height() * 0.22).clamp(3.0, 5.0);
+    let pts = if open {
+        vec![
+            egui::pos2(c.x - s, c.y - s * 0.55),
+            egui::pos2(c.x + s, c.y - s * 0.55),
+            egui::pos2(c.x, c.y + s * 0.75),
+        ]
+    } else {
+        vec![
+            egui::pos2(c.x - s * 0.45, c.y - s),
+            egui::pos2(c.x - s * 0.45, c.y + s),
+            egui::pos2(c.x + s * 0.80, c.y),
+        ]
+    };
+    painter.add(Shape::convex_polygon(pts, color, Stroke::NONE));
+}
+
+pub fn foldout_button(ui: &mut egui::Ui, open: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(14.0, 16.0), Sense::click());
+    if resp.hovered() {
+        ui.painter()
+            .rect_filled(rect, Rounding::same(2.0), Color32::from_white_alpha(16));
+    }
+    paint_foldout(ui.painter(), rect, open, TEXT_MUTED);
+    resp
+}
+
+fn paint_kebab(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let c = rect.center();
+    for i in [-1.0_f32, 0.0, 1.0] {
+        painter.circle_filled(egui::pos2(c.x, c.y + i * 4.0), 1.5, color);
+    }
+}
+
+fn paint_ellipsis(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let c = rect.center();
+    for i in [-1.0_f32, 0.0, 1.0] {
+        painter.circle_filled(egui::pos2(c.x + i * 4.5, c.y), 1.6, color);
+    }
+}
+
+/// Magnifying-glass stand-in (circle + handle).
+pub fn search_icon(ui: &mut egui::Ui, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), Sense::hover());
+    let c = rect.center();
+    let r = (rect.width() * 0.28).max(3.0);
+    let lens = egui::pos2(c.x - 1.0, c.y - 1.0);
+    ui.painter()
+        .circle_stroke(lens, r, Stroke::new(1.25_f32, TEXT_DIM));
+    ui.painter().line_segment(
+        [
+            egui::pos2(lens.x + r * 0.65, lens.y + r * 0.65),
+            egui::pos2(c.x + r * 1.05, c.y + r * 1.05),
+        ],
+        Stroke::new(1.4_f32, TEXT_DIM),
+    );
+}
+
+/// Enable checkbox drawn with painter geometry (no unicode box glyph).
+pub fn enable_checkbox(ui: &mut egui::Ui, checked: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), Sense::click());
+    let inner = rect.shrink(1.0);
+    ui.painter()
+        .rect_filled(inner, Rounding::same(2.0), BG_SUNKEN);
+    ui.painter()
+        .rect_stroke(inner, Rounding::same(2.0), Stroke::new(1.0_f32, BORDER_SOFT));
+    if checked {
+        let r = inner.shrink(2.5);
+        ui.painter().line_segment(
+            [
+                egui::pos2(r.left(), r.center().y),
+                egui::pos2(r.center().x - 0.5, r.bottom() - 0.5),
+            ],
+            Stroke::new(1.6_f32, TEXT),
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(r.center().x - 0.5, r.bottom() - 0.5),
+                egui::pos2(r.right(), r.top()),
+            ],
+            Stroke::new(1.6_f32, TEXT),
+        );
+    }
+    resp
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuIcon {
+    Kebab,
+    Ellipsis,
+}
+
+/// Popup menu triggered by a painter kebab / ellipsis (no unicode ⋮ / ⋯).
+pub fn icon_menu_button<R>(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    kind: MenuIcon,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<R> {
+    let size = match kind {
+        MenuIcon::Kebab => egui::vec2(18.0, 18.0),
+        MenuIcon::Ellipsis => egui::vec2(26.0, 22.0),
+    };
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let hovered = resp.hovered();
+    match kind {
+        MenuIcon::Ellipsis => {
+            let bg = if hovered {
+                Color32::from_rgb(80, 80, 80)
+            } else {
+                BG_RAISED
+            };
+            ui.painter().rect_filled(rect, Rounding::same(3.0), bg);
+            ui.painter()
+                .rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.0_f32, BORDER_SOFT));
+            paint_ellipsis(ui.painter(), rect, TEXT);
+        }
+        MenuIcon::Kebab => {
+            if hovered {
+                ui.painter().rect_filled(
+                    rect,
+                    Rounding::same(2.0),
+                    Color32::from_white_alpha(16),
+                );
+            }
+            paint_kebab(ui.painter(), rect, TEXT_MUTED);
+        }
+    }
+    let popup_id = ui.make_persistent_id(("icon_menu", id));
+    if resp.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup_id));
+    }
+    egui::popup::popup_below_widget(
+        ui,
+        popup_id,
+        &resp,
+        egui::popup::PopupCloseBehavior::CloseOnClick,
+        |ui| {
+            ui.set_min_width(140.0);
+            add_contents(ui)
+        },
+    )
+}
+
 pub struct CardHeaderOut {
     pub open: bool,
     pub toggle: Option<bool>,
     pub remove: bool,
 }
 
-/// Unity Inspector component header: foldout, enable checkbox, bold title, gear/Remove.
+/// Unity Inspector component header: foldout, enable checkbox, bold title, kebab/Remove.
 pub fn component_card_header(
     ui: &mut egui::Ui,
     id: impl std::hash::Hash,
@@ -337,40 +510,28 @@ pub fn component_card_header(
     header.show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            let arrow = if open { "▾" } else { "▸" };
-            if ui
-                .add(
-                    egui::Button::new(RichText::new(arrow).size(12.0).color(TEXT_MUTED))
-                        .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::NONE),
-                )
-                .clicked()
-            {
+            if foldout_button(ui, open).clicked() {
                 open = !open;
             }
             if let Some(en) = enabled {
-                let mut en = en;
-                if ui.checkbox(&mut en, "").changed() {
-                    toggle = Some(en);
+                if enable_checkbox(ui, en).clicked() {
+                    toggle = Some(!en);
                 }
             }
             ui.label(RichText::new(title).strong().size(13.0).color(TEXT));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if removable {
-                    ui.menu_button(RichText::new("⋮").size(14.0).color(TEXT_MUTED), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new("Remove Component").color(DANGER),
-                                )
+                    if let Some(clicked) = icon_menu_button(ui, persist, MenuIcon::Kebab, |ui| {
+                        ui.add(
+                            egui::Button::new(RichText::new("Remove Component").color(DANGER))
                                 .fill(BG_SUNKEN),
-                            )
-                            .clicked()
-                        {
+                        )
+                        .clicked()
+                    }) {
+                        if clicked {
                             remove = true;
-                            ui.close_menu();
                         }
-                    });
+                    }
                 }
             });
         });

@@ -340,7 +340,7 @@ fn entry_visuals(entry: &ProjectEntry, is_open_scene: bool) -> (&'static str, Co
     } else if name.ends_with(".sprites.json") {
         ("=", theme::TEXT, "Sprites")
     } else if name.ends_with(".anim.json") {
-        ("▶", theme::ACCENT, "Anim")
+        (">", theme::ACCENT, "Anim")
     } else if name == "game.toml" {
         ("@", theme::SELECT_STROKE, "Project")
     } else {

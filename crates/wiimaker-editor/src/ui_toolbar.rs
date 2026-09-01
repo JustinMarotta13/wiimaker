@@ -195,14 +195,12 @@ impl EditorApp {
                         {
                             self.build_and_run_wii();
                         }
-                        ui.menu_button("⋯", |ui| {
-                            if ui.button("Cook assets…").clicked() {
+                        theme::icon_menu_button(ui, "toolbar_overflow", theme::MenuIcon::Ellipsis, |ui| {
+                            if ui.button("Cook assets...").clicked() {
                                 self.cook();
-                                ui.close_menu();
                             }
                             if ui.button("Doctor").clicked() {
                                 self.doctor();
-                                ui.close_menu();
                             }
                             if ui.button("Refresh assets").clicked() {
                                 if let Err(e) = self.reload_assets() {
@@ -211,7 +209,6 @@ impl EditorApp {
                                     self.rehydrate();
                                     self.status = "assets refreshed".into();
                                 }
-                                ui.close_menu();
                             }
                         });
                     });
