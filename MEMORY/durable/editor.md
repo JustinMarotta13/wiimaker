@@ -21,7 +21,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Project panel height is **app-owned** (`project_panel_height` + `exact_height`). Do not let egui derive bottom-panel height from content. New panel id if old `PanelState` is corrupted. Manual top-edge drag to resize.
 - Hierarchy DnD payload is `String` entity name; drop on **Scene** row unparents; drop on a row parents under it. `set_entity_parent` rejects cycles and preserves world pose.
 - **Hierarchy click vs drag:** do **not** use `dnd_drag_source` for selectable rows. It overlays `Sense::drag()` on top of the row; egui then ignores click widgets underneath, so drag starts immediately and Inspector selection never fires. Use `Sense::click_and_drag()` + `dnd_set_drag_payload` (+ Tooltip layer ghost while `is_being_dragged`). Labels: `.selectable(false)` so text-select sense does not compete.
-- Toolbar primary: Save · Play · Build · Play in Dolphin · Build & Run. **Cook** lives under ⋯ only. Host Play and Wii Build auto-prepare assets.
+- Toolbar primary: Save · Play · Build · Play in Dolphin · Build & Run. **Cook** lives under the painter ellipsis menu only. Host Play and Wii Build auto-prepare assets.
 - Sprite / Disc Inspector: checkbox toggles `enabled` (skipped by hydrate/pick/bake); Remove uses `remove_component_*`. CLI: `entity remove-component` / `set-component-enabled --enabled true|false`.
 - Viewport: Snap checkbox + grid size; arrow keys nudge 1px (or snap size when Snap/Shift). Multi-select via Cmd-click (Hierarchy + viewport); drag moves whole selection; Delete on a selected row removes all selected.
 - Play toolbar = in-editor Play Mode (Play/Pause/Stop, WASD moves `Player`, Esc stops). Scene edits preserved on Stop. File → Run external… still shells `cargo run -p <game>`.
@@ -34,6 +34,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Sprite Editor: Project file (PNG / `.sprites.json`) → Inspector **Edit Sprites…**, or double-click / context menu; writes `.sprites.json` then refresh catalog.
 - Project panel is a **file explorer** (`game.toml`, `assets/`, `scenes/`). Click → `selected_file` (clears entity selection); Inspector shows path/type/size + type-specific actions.
 - Project rows: full-width painted hover/select (not `selectable_label`); folders use accent + strong text — never `TEXT_MUTED` for primary labels. ASCII type markers only (Unicode glyphs fail in this shell).
+- **Icons must be painter geometry** (`theme::{cube_icon, foldout_button, enable_checkbox, icon_menu_button, play_control, search_icon}`). egui default fonts on this Linux box do not rasterize `▾ ▸ ⋮ ⋯ ▶` (or a hollow `rect_stroke` cube, which reads as tofu). Do not use Unicode/emoji as icons. Geometric stand-ins only — never Unity cube/logo artwork.
 - Project row `new_child` text: always `set_clip_rect(row_rect.intersect(ui.clip_rect()))`. Replacing the ScrollArea clip lets scrolled-off labels paint over the Project header/meta chips.
 
 ## Decisions

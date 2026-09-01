@@ -70,12 +70,7 @@ impl EditorApp {
         // GameObject header — inspector.png (name row, then Tag).
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            let (icon, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-            ui.painter().rect_stroke(
-                icon,
-                2.0,
-                egui::Stroke::new(1.0_f32, theme::TEXT_MUTED),
-            );
+            theme::cube_icon(ui, 18.0, theme::TEXT_MUTED);
             let name_w = (ui.available_width() - 8.0).max(80.0);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.rename_draft).desired_width(name_w),

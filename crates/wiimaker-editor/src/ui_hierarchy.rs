@@ -20,6 +20,7 @@ impl EditorApp {
             if plus.clicked() {
                 self.hierarchy_create_empty(None);
             }
+            theme::search_icon(ui, 14.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.hierarchy_filter)
                     .desired_width(ui.available_width())
@@ -195,29 +196,20 @@ impl EditorApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 if has_kids {
-                    let arrow = if folded_open { "▾" } else { "▸" };
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new(arrow).size(11.0).color(theme::TEXT_MUTED))
-                                .fill(egui::Color32::TRANSPARENT)
-                                .stroke(egui::Stroke::NONE)
-                                .min_size(egui::vec2(14.0, 16.0)),
-                        )
-                        .clicked()
-                    {
+                    if theme::foldout_button(ui, folded_open).clicked() {
                         folded_open = !folded_open;
                     }
                 } else {
                     ui.add_space(14.0);
                 }
 
-                // Tiny geometric cube — not Unity's logo.
-                let (icon, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                ui.painter().rect_stroke(
-                    icon,
-                    1.0,
-                    egui::Stroke::new(1.0_f32, theme::TEXT_DIM),
-                );
+                // Tiny two-face isometric cube — not Unity's logo.
+                let cube_color = if selected {
+                    egui::Color32::from_rgb(230, 230, 230)
+                } else {
+                    theme::TEXT_MUTED
+                };
+                theme::cube_icon(ui, 11.0, cube_color);
 
                 let drag_id = egui::Id::new(("hier-drag", name));
                 let name_color = if selected {
