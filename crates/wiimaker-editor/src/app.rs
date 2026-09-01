@@ -3,14 +3,14 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use eframe::egui;
-use wiimaker_assets::{SpriteCatalog, WPack};
+use wiimaker_assets::{AnimClipCatalog, SpriteCatalog, WPack};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::move_and_collide;
 use wiimaker_core::world::World;
 use wiimaker_host::{Framebuffer, TextureAtlas};
 use wiimaker_scene::{
     add_component_sprite, create_named_scene, diagnose, duplicate_entity, find_game_dir,
-    hydrate_lenient_with_catalog, insert_entity_clone, list_scenes, load_project, load_scene,
+    animate_world, hydrate_lenient_with_catalogs, insert_entity_clone, list_scenes, load_project, load_scene,
     rename_entity, save_scene, set_default_scene, EntityData, GameProject, Scene, Severity,
     UndoStack,
 };
@@ -114,6 +114,7 @@ pub(crate) struct EditorApp {
     /// Cached relative paths under the game dir for the Project explorer.
     pub(crate) project_entries: Vec<ProjectEntry>,
     pub(crate) catalog: SpriteCatalog,
+    pub(crate) anim_catalog: AnimClipCatalog,
     pub(crate) sprite_editor: Option<SpriteEditorState>,
     pub(crate) sprite_editor_open: bool,
     /// Pending stem to open in Sprite Editor (set from context menu).
@@ -179,6 +180,7 @@ impl EditorApp {
             asset_names: Vec::new(),
             project_entries: Vec::new(),
             catalog: SpriteCatalog::empty(),
+            anim_catalog: AnimClipCatalog::empty(),
             sprite_editor: None,
             sprite_editor_open: false,
             open_sprite_editor_stem: None,
@@ -208,6 +210,24 @@ impl EditorApp {
         app.refresh_project_tree();
         app.rehydrate();
         app.status = format!("opened {}", app.project.name);
+        // Agent / screenshot helper: `WIIMAKER_EDITOR_SELECT=Player` selects an entity on open.
+        if let Ok(name) = std::env::var("WIIMAKER_EDITOR_SELECT") {
+            let name = name.trim().to_string();
+            if !name.is_empty() && app.scene.find_entity(&name).is_some() {
+                app.select(Some(name));
+            }
+            // More Inspector room for screenshot / agent OCR.
+            app.project_panel_height = 140.0;
+        }
+        if let Ok(rel) = std::env::var("WIIMAKER_EDITOR_SELECT_FILE") {
+            let rel = rel.trim();
+            if !rel.is_empty() {
+                app.select_file(Some(PathBuf::from(rel)));
+            }
+        }
+        if std::env::var("WIIMAKER_EDITOR_PLAY").ok().as_deref() == Some("1") {
+            app.play_mode = PlayMode::Playing;
+        }
         Ok(app)
     }
 
@@ -365,13 +385,18 @@ impl EditorApp {
         }
 
         self.catalog = SpriteCatalog::load_dir(&assets, |stem| self.atlas.size_of(stem))?;
+        self.anim_catalog = AnimClipCatalog::load_dir(&assets)?;
         self.refresh_project_tree();
         Ok(())
     }
 
     pub(crate) fn rehydrate(&mut self) {
-        self.world =
-            hydrate_lenient_with_catalog(&self.scene, self.atlas.map(), Some(&self.catalog));
+        self.world = hydrate_lenient_with_catalogs(
+            &self.scene,
+            self.atlas.map(),
+            Some(&self.catalog),
+            Some(&self.anim_catalog),
+        );
     }
 
     pub(crate) fn open_sprite_editor(&mut self, stem: &str, ctx: &egui::Context) {
@@ -835,6 +860,12 @@ impl EditorApp {
             return;
         }
         let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
+        animate_world(
+            &mut self.world,
+            &self.catalog,
+            self.atlas.map(),
+            dt,
+        );
         let (dx, dy) = ctx.input(|i| {
             let mut x = 0.0f32;
             let mut y = 0.0f32;

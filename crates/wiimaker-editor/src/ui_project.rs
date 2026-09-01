@@ -339,6 +339,8 @@ fn entry_visuals(entry: &ProjectEntry, is_open_scene: bool) -> (&'static str, Co
         ("P", theme::ACCENT, "Prefab")
     } else if name.ends_with(".sprites.json") {
         ("=", theme::TEXT, "Sprites")
+    } else if name.ends_with(".anim.json") {
+        ("▶", theme::ACCENT, "Anim")
     } else if name == "game.toml" {
         ("@", theme::SELECT_STROKE, "Project")
     } else {
@@ -402,6 +404,8 @@ pub(crate) fn file_kind_label(rel: &Path, is_dir: bool) -> &'static str {
         "Prefab"
     } else if name.ends_with(".sprites.json") {
         "Sprite sheet meta"
+    } else if name.ends_with(".anim.json") {
+        "Animation clip"
     } else if name == "game.toml" {
         "Project"
     } else {

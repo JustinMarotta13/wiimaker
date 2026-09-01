@@ -244,6 +244,8 @@ pub struct SceneComponents {
     pub tilemap: Option<SceneTilemap>,
     #[serde(default, rename = "Collider", skip_serializing_if = "Option::is_none")]
     pub collider: Option<SceneCollider>,
+    #[serde(default, rename = "Animation", skip_serializing_if = "Option::is_none")]
+    pub animation: Option<SceneAnimation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -494,6 +496,40 @@ pub struct SceneTilePalette {
 impl SceneTilePalette {
     pub fn color_rgba(&self) -> Rgba8 {
         Rgba8::new(self.color[0], self.color[1], self.color[2], self.color[3])
+    }
+}
+
+
+/// Sprite clip player (Unity Animator analogue). `clip` is `assets/<clip>.anim.json` stem.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SceneAnimation {
+    pub clip: String,
+    /// When set, overrides the clip file's fps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fps: Option<f32>,
+    #[serde(default = "default_true", rename = "loop", skip_serializing_if = "is_true")]
+    pub loop_: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+}
+
+impl Default for SceneAnimation {
+    fn default() -> Self {
+        Self {
+            clip: String::new(),
+            fps: None,
+            loop_: true,
+            enabled: true,
+        }
+    }
+}
+
+impl SceneAnimation {
+    pub fn new(clip: impl Into<String>) -> Self {
+        Self {
+            clip: clip.into(),
+            ..Default::default()
+        }
     }
 }
 

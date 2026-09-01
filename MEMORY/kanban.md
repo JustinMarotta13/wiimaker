@@ -19,26 +19,15 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera marker, Tilemap, Collider, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered`.
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera marker, Tilemap, Collider, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json`.
 
-**Not present:** sprite clips, audio playback, camera used at render time, named sorting layers, prefab variants, runtime scene API, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
+**Not present:** audio playback, camera used at render time, named sorting layers, prefab variants, runtime scene API, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
 
 ---
 
 ## Now
 
-### 1. Sprite animation clips — **GUI + CLI**
-Unity: Animator / Animation window (2D). Chomp + ghost legs. Sheets + cells already exist.
-
-- `Animation { clip, fps, loop }` + `assets/<name>.anim.json` listing cell names.
-- Tick in `render_world` or a `animate_world(world, dt)` the game/editor both call.
-- **GUI:** Sprite Editor “clips” row, or Inspector clip combo + preview.
-- **CLI:** `asset anim <game> chomp --cells player_0,player_1 --fps 10` · `entity set-anim`.
-- **Test:** slice a 2-frame sheet, play clip on Player; doctor warns missing cells.
-
----
-
-## Next
+**Recommended next morning:** Runtime scene load / switch (menu → maze → win for Pac-Man).
 
 ### 5. Runtime scene load / switch — **GUI + CLI**
 Unity: LoadScene. Menu → maze → win. Today games hydrate once; `scene list/show` is authoring-only. Editor can *preview* another scene but does not rewrite `game.toml`.
@@ -94,6 +83,8 @@ ARCHITECTURE M3. Cook WAV → `.wpack` is sketched; **no playback** on host or W
 
 Shipped. Keep here so we do not rebuild them.
 
+- **Sprite animation clips** (2026-08-31) — `AnimClipMeta` / `assets/<name>.anim.json`, runtime `Animation`, `animate_world`, Inspector Animation foldout (clip combo + fps/loop), CLI `asset anim` / `asset list-anims` / `entity set-anim` / `add-component Animation`; doctor warns missing clip cells. Host-first (not in WSCN bake).
+
 - Workspace + host hello-orb + Wii C bootstrap stubs
 - Sprites + Disc + DrawList IR + host software raster + texture atlas
 - Fixed 60 Hz tick, GCN-layout input (keyboard → stick/D-pad/A/B/Start)
@@ -128,11 +119,12 @@ Global: `--json`
 | `doctor` | validate |
 | `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` | |
 | `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag` |
-| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) |
+| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) |
+| `entity set-anim` | `--name --clip [--fps] [--loop]` |
 | `entity overlaps` · `entity triggers` | `--name` [ `--other` ] · pairwise/list overlaps; `triggers <name>` lists entered triggers |
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
 | `entity create-prefab` · `entity instantiate-prefab` · `entity apply-prefab` · `entity unpack-prefab` | |
-| `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` | |
+| `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` · `asset anim` · `asset list-anims` | `asset anim --name --cells a,b --fps --loop` |
 | `tilemap set` · `tilemap fill` · `tilemap stamp` · `tilemap get` | `--name --x --y --id` · `--ascii` / `--cells --width` · `--json` |
 
 ### Editor chrome (exact control names)
@@ -145,12 +137,12 @@ Toolbar (center): Play / Pause / Stop
 Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Paint · Erase · Pick · Snap · grid size
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship Sprite animation clips (Now #1).** Sheets + cells already exist; games need chomp / ghost legs via clip + fps. Test: slice a 2-frame sheet, play clip on Player.
+**Ship runtime scene load / switch (Now #5).** Games hydrate once today; Pac-Man fakes menu → maze → win in game code. Engine should expose `load_scene` + Build Settings scene list.
 

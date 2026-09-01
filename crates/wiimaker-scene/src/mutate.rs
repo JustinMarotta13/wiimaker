@@ -360,7 +360,15 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Collider"))?;
             c.enabled = enabled;
         }
-        other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider)"),
+        "animation" => {
+            let a = ent
+                .components
+                .animation
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animation"))?;
+            a.enabled = enabled;
+        }
+        other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation)"),
     }
     Ok(())
 }
@@ -380,6 +388,64 @@ pub fn set_entity_rotation_z(scene: &mut Scene, name: &str, radians: f32) -> Res
     ent.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
     Ok(())
 }
+
+pub fn add_component_animation(
+    scene: &mut Scene,
+    name: &str,
+    clip: &str,
+    fps: Option<f32>,
+    loop_: bool,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    ent.components.animation = Some(crate::scene::SceneAnimation {
+        clip: clip.to_string(),
+        fps,
+        loop_,
+        enabled: true,
+    });
+    Ok(())
+}
+
+pub fn remove_component_animation(scene: &mut Scene, name: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    if ent.components.animation.is_none() {
+        bail!("entity '{name}' has no Animation");
+    }
+    ent.components.animation = None;
+    Ok(())
+}
+
+pub fn set_entity_anim(
+    scene: &mut Scene,
+    name: &str,
+    clip: &str,
+    fps: Option<f32>,
+    loop_: Option<bool>,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    match ent.components.animation.as_mut() {
+        Some(a) => {
+            a.clip = clip.to_string();
+            if fps.is_some() {
+                a.fps = fps;
+            }
+            if let Some(l) = loop_ {
+                a.loop_ = l;
+            }
+            a.enabled = true;
+        }
+        None => {
+            ent.components.animation = Some(crate::scene::SceneAnimation {
+                clip: clip.to_string(),
+                fps,
+                loop_: loop_.unwrap_or(true),
+                enabled: true,
+            });
+        }
+    }
+    Ok(())
+}
+
 
 fn find_mut<'a>(scene: &'a mut Scene, name: &str) -> Result<&'a mut EntityData> {
     scene

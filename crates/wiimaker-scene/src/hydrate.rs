@@ -3,13 +3,13 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use wiimaker_assets::SpriteCatalog;
+use wiimaker_assets::{AnimClipCatalog, SpriteCatalog};
 use wiimaker_core::collider::{Collider, ColliderKind};
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::{Rect, TextureId};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::tilemap::{TileVisual, Tilemap};
-use wiimaker_core::world::{Camera, Disc, Sprite, World};
+use wiimaker_core::world::{Animation, Camera, Disc, Sprite, World};
 
 use crate::scene::{EntityData, Scene};
 
@@ -56,8 +56,17 @@ pub fn hydrate_with_catalog(
     textures: &TextureMap,
     catalog: Option<&SpriteCatalog>,
 ) -> Result<World> {
+    hydrate_with_catalogs(scene, textures, catalog, None)
+}
+
+pub fn hydrate_with_catalogs(
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+) -> Result<World> {
     let mut world = World::new();
-    hydrate_into_with_catalog(&mut world, scene, textures, catalog)?;
+    hydrate_into_with_catalogs(&mut world, scene, textures, catalog, anims)?;
     Ok(world)
 }
 
@@ -71,9 +80,19 @@ pub fn hydrate_into_with_catalog(
     textures: &TextureMap,
     catalog: Option<&SpriteCatalog>,
 ) -> Result<()> {
+    hydrate_into_with_catalogs(world, scene, textures, catalog, None)
+}
+
+pub fn hydrate_into_with_catalogs(
+    world: &mut World,
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+) -> Result<()> {
     world.clear();
     for ent in &scene.entities {
-        spawn_entity(world, scene, ent, textures, catalog)?;
+        spawn_entity(world, scene, ent, textures, catalog, anims)?;
     }
     Ok(())
 }
@@ -84,6 +103,7 @@ fn spawn_entity(
     ent: &EntityData,
     textures: &TextureMap,
     catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
 ) -> Result<()> {
     let xf = scene
         .world_transform(&ent.name)
@@ -134,6 +154,46 @@ fn spawn_entity(
         }
     }
 
+    if let Some(a) = &ent.components.animation {
+        if a.enabled {
+            let (cells, fps, loop_) = resolve_animation(a, anims);
+            if !cells.is_empty() {
+                let anim = Animation::new(a.clip.clone(), cells, fps, loop_);
+                // Apply first frame onto sprite when possible.
+                if let Some(cell) = anim.cell_name() {
+                    if let Some(cat) = catalog {
+                        if let Some(r) = cat.lookup(cell) {
+                            if let Some(tex) = textures.get(&r.sheet_texture) {
+                                if let Some(sp) = world.sprite_mut(id) {
+                                    sp.texture = tex;
+                                    sp.uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
+                                    sp.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
+                                    sp.size = Vec2::new(r.pixel_size[0], r.pixel_size[1]);
+                                } else {
+                                    let mut sprite = Sprite::new(
+                                        tex,
+                                        Vec2::new(r.pixel_size[0], r.pixel_size[1]),
+                                    );
+                                    sprite.uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
+                                    sprite.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
+                                    world.set_sprite(id, Some(sprite));
+                                }
+                            }
+                        }
+                    }
+                }
+                world.set_animation(id, Some(anim));
+            } else {
+                // Still attach stub so doctor/runtime see the clip name.
+                world.set_animation(
+                    id,
+                    Some(Animation::new(a.clip.clone(), Vec::new(), fps, loop_)),
+                );
+            }
+        }
+    }
+
+
     Ok(())
 }
 
@@ -167,6 +227,15 @@ pub fn hydrate_lenient_with_catalog(
     scene: &Scene,
     textures: &TextureMap,
     catalog: Option<&SpriteCatalog>,
+) -> World {
+    hydrate_lenient_with_catalogs(scene, textures, catalog, None)
+}
+
+pub fn hydrate_lenient_with_catalogs(
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
 ) -> World {
     let mut world = World::new();
     for ent in &scene.entities {
@@ -206,6 +275,35 @@ pub fn hydrate_lenient_with_catalog(
         if let Some(c) = &ent.components.collider {
             if c.enabled {
                 world.set_collider(id, Some(scene_collider_to_runtime(c)));
+            }
+        }
+        if let Some(a) = &ent.components.animation {
+            if a.enabled {
+                let (cells, fps, loop_) = resolve_animation(a, anims);
+                let anim = Animation::new(a.clip.clone(), cells, fps, loop_);
+                if let Some(cell) = anim.cell_name() {
+                    if let Some(cat) = catalog {
+                        if let Some(r) = cat.lookup(cell) {
+                            if let Some(tex) = textures.get(&r.sheet_texture) {
+                                if let Some(sp) = world.sprite_mut(id) {
+                                    sp.texture = tex;
+                                    sp.uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
+                                    sp.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
+                                    sp.size = Vec2::new(r.pixel_size[0], r.pixel_size[1]);
+                                } else {
+                                    let mut sprite = Sprite::new(
+                                        tex,
+                                        Vec2::new(r.pixel_size[0], r.pixel_size[1]),
+                                    );
+                                    sprite.uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
+                                    sprite.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
+                                    world.set_sprite(id, Some(sprite));
+                                }
+                            }
+                        }
+                    }
+                }
+                world.set_animation(id, Some(anim));
             }
         }
     }
@@ -270,6 +368,22 @@ fn resolve_palette_sprite(name: &str, catalog: Option<&SpriteCatalog>) -> (Strin
         }
     }
     (name.to_string(), Rect::unit())
+}
+
+
+fn resolve_animation(
+    a: &crate::scene::SceneAnimation,
+    anims: Option<&AnimClipCatalog>,
+) -> (Vec<String>, f32, bool) {
+    let meta = anims.and_then(|c| c.lookup(&a.clip));
+    let cells = meta.map(|m| m.cells.clone()).unwrap_or_default();
+    let fps = a
+        .fps
+        .filter(|f| *f > 0.0)
+        .or_else(|| meta.map(|m| m.fps))
+        .unwrap_or(10.0);
+    let loop_ = a.loop_;
+    (cells, fps, loop_)
 }
 
 fn scene_collider_to_runtime(c: &crate::scene::SceneCollider) -> Collider {

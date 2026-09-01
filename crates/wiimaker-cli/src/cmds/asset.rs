@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
-use wiimaker_assets::{set_sprite_pivot, slice_sheet, SpriteCatalog};
+use wiimaker_assets::{list_anim_clips, set_sprite_pivot, slice_sheet, write_anim_clip, SpriteCatalog};
 use wiimaker_scene::{find_game_dir, load_project};
 
 use crate::args::AssetCmd;
@@ -140,6 +140,68 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             let names = catalog.names();
             if json {
                 println!("{}", serde_json::to_string_pretty(names)?);
+            } else {
+                for n in names {
+                    println!("{n}");
+                }
+            }
+            Ok(())
+        }
+        AssetCmd::Anim {
+            game,
+            name,
+            cells,
+            fps,
+            r#loop,
+        } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let cell_list: Vec<String> = cells
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let (path, meta) = write_anim_clip(&assets, &name, cell_list, fps, r#loop)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    path: String,
+                    name: String,
+                    fps: f32,
+                    #[serde(rename = "loop")]
+                    loop_: bool,
+                    cells: Vec<String>,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Out {
+                        path: path.display().to_string(),
+                        name,
+                        fps: meta.fps,
+                        loop_: meta.loop_,
+                        cells: meta.cells,
+                    })?
+                );
+            } else {
+                println!(
+                    "wrote anim {} ({} cells @ {} fps, loop={}) → {}",
+                    name,
+                    meta.cells.len(),
+                    meta.fps,
+                    meta.loop_,
+                    path.display()
+                );
+            }
+            Ok(())
+        }
+        AssetCmd::ListAnims { game } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let names = list_anim_clips(&assets)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&names)?);
             } else {
                 for n in names {
                     println!("{n}");

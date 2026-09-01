@@ -1,5 +1,6 @@
 //! Scene / project authoring types — source of truth for editor + CLI.
 
+mod animate;
 mod collider;
 mod doctor;
 mod hydrate;
@@ -16,17 +17,20 @@ pub use collider::{
     add_component_collider, entities_overlap, entity_overlaps, entity_triggers_entered,
     remove_component_collider,
 };
+pub use animate::{animate_world, apply_animation_frame};
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use hydrate::{
-    hydrate, hydrate_into, hydrate_into_with_catalog, hydrate_lenient,
-    hydrate_lenient_with_catalog, hydrate_with_catalog, TextureMap,
+    hydrate, hydrate_into, hydrate_into_with_catalog, hydrate_into_with_catalogs, hydrate_lenient,
+    hydrate_lenient_with_catalog, hydrate_lenient_with_catalogs, hydrate_with_catalog,
+    hydrate_with_catalogs, TextureMap,
 };
 pub use mutate::{
-    add_component_disc, add_component_sprite, add_entity, apply_prefab, duplicate_entity,
-    entity_to_prefab, insert_entity_clone, instantiate_prefab, remove_component_disc,
-    remove_component_sprite, remove_entity, rename_entity, set_component_enabled,
-    set_entity_parent, set_entity_rotation_z, set_entity_scale, set_entity_transform,
-    set_entity_world_xy, set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
+    add_component_animation, add_component_disc, add_component_sprite, add_entity, apply_prefab,
+    duplicate_entity, entity_to_prefab, insert_entity_clone, instantiate_prefab,
+    remove_component_animation, remove_component_disc, remove_component_sprite, remove_entity,
+    rename_entity, set_component_enabled, set_entity_anim, set_entity_parent,
+    set_entity_rotation_z, set_entity_scale, set_entity_transform, set_entity_world_xy,
+    set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{pick_entity_at, pick_entity_at_with_catalog, pointer_to_scene};
 pub use project::{
@@ -35,9 +39,9 @@ pub use project::{
 };
 pub use render::render_world;
 pub use scene::{
-    load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneCollider,
-    SceneColliderKind, SceneComponents, SceneDisc, SceneSprite, SceneTilePalette, SceneTilemap,
-    SceneTransform,
+    load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneAnimation,
+    SceneCollider, SceneColliderKind, SceneComponents, SceneDisc, SceneSprite, SceneTilePalette,
+    SceneTilemap, SceneTransform,
 };
 pub use tilemap::{
     add_component_tilemap, ensure_tilemap, remove_component_tilemap, tilemap_fill,

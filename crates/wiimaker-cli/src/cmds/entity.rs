@@ -3,13 +3,14 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use serde::Serialize;
 use wiimaker_scene::{
-    add_component_collider, add_component_disc, add_component_sprite, add_component_tilemap,
-    add_entity, apply_prefab, duplicate_entity, entities_overlap, entity_overlaps, entity_triggers_entered,
-    entity_to_prefab, instantiate_prefab, load_prefab, remove_component_collider,
-    remove_component_disc, remove_component_sprite, remove_component_tilemap, remove_entity,
-    rename_entity, save_prefab, save_scene, set_component_enabled, set_entity_parent,
-    set_entity_rotation_z, set_entity_scale, set_entity_transform, unpack_prefab_instance,
-    MutateOpts, Scene, SceneColliderKind,
+    add_component_animation, add_component_collider, add_component_disc, add_component_sprite,
+    add_component_tilemap, add_entity, apply_prefab, duplicate_entity, entities_overlap,
+    entity_overlaps, entity_triggers_entered, entity_to_prefab, instantiate_prefab, load_prefab,
+    remove_component_animation, remove_component_collider, remove_component_disc,
+    remove_component_sprite, remove_component_tilemap, remove_entity, rename_entity, save_prefab,
+    save_scene, set_component_enabled, set_entity_anim, set_entity_parent, set_entity_rotation_z,
+    set_entity_scale, set_entity_transform, unpack_prefab_instance, MutateOpts, Scene,
+    SceneColliderKind,
 };
 
 use crate::args::EntityCmd;
@@ -121,6 +122,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             solid,
             trigger,
             filter,
+            clip,
+            fps,
+            r#loop,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -155,8 +159,12 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                         filter,
                     )?;
                 }
+                "animation" => {
+                    let clip = clip.ok_or_else(|| anyhow::anyhow!("--clip required for Animation"))?;
+                    add_component_animation(&mut sc, &name, &clip, fps, r#loop)?;
+                }
                 other => {
-                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger)")
+                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation)")
                 }
             }
             save_scene(&path, &sc)?;
@@ -268,7 +276,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "disc" => remove_component_disc(&mut sc, &name)?,
                 "tilemap" => remove_component_tilemap(&mut sc, &name)?,
                 "collider" => remove_component_collider(&mut sc, &name)?,
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider)"),
+                "animation" => remove_component_animation(&mut sc, &name)?,
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed {kind} from {name}"))
@@ -375,6 +384,19 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 println!("{name} triggers: {}", hits.join(", "));
                 Ok(())
             }
+        }
+        EntityCmd::SetAnim {
+            game,
+            name,
+            clip,
+            fps,
+            r#loop,
+            scene,
+        } => {
+            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            set_entity_anim(&mut sc, &name, &clip, fps, r#loop)?;
+            save_scene(&path, &sc)?;
+            emit_ok(json, &format!("set anim {name} → {clip}"))
         }
         EntityCmd::Despawn { game, name, scene } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
