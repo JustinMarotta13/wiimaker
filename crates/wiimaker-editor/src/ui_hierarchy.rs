@@ -7,93 +7,79 @@ use crate::theme;
 impl EditorApp {
     pub(crate) fn ui_hierarchy(&mut self, ui: &mut egui::Ui) {
         let _ = theme::dock_tabs(ui, &[("Hierarchy", ())], ());
-        if self.selected.len() > 1 {
-            theme::meta_chip(
-                ui,
-                "multi",
-                &format!("{} selected", self.selected.len()),
-            );
-            ui.add_space(4.0);
-        }
+
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
             ui.add(
-                egui::TextEdit::singleline(&mut self.new_entity_name)
-                    .desired_width(140.0)
-                    .hint_text("Entity name"),
+                egui::TextEdit::singleline(&mut self.hierarchy_filter)
+                    .desired_width(ui.available_width() - 28.0)
+                    .hint_text("Search"),
             );
-            if ui
-                .add(egui::Button::new(RichText::new("+ Add").strong()))
-                .clicked()
-            {
-                let name = unique_entity_name(&self.scene, &self.new_entity_name);
-                self.push_undo();
-                if add_entity(
-                    &mut self.scene,
-                    &name,
-                    &MutateOpts {
-                        x: Some(320.0),
-                        y: Some(240.0),
-                        ..Default::default()
-                    },
+            let plus = ui
+                .add_sized(
+                    [22.0, 18.0],
+                    egui::Button::new(RichText::new("+").size(14.0)).fill(theme::BG_RAISED),
                 )
-                .is_ok()
-                {
-                    self.select(Some(name.clone()));
-                    self.new_entity_name = unique_entity_name(&self.scene, "NewEntity");
-                    self.sync_baseline();
-                    self.mark_dirty();
-                } else {
-                    let _ = self.undo.undo(&mut self.scene);
-                }
+                .on_hover_text("Create Empty");
+            if plus.clicked() {
+                self.hierarchy_create_empty(None);
             }
         });
-        ui.add_space(4.0);
-        theme::muted(ui, "Cmd-click multi-select · drag row to parent · drop on Scene to unparent");
-        ui.add_space(4.0);
-        ui.separator();
         ui.add_space(4.0);
 
         let mut to_remove = None;
         let mut to_duplicate = None;
         let mut reparent: Option<(String, Option<String>)> = None;
+        let mut create_under: Option<Option<String>> = None;
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // Root drop target — unparent.
-            let root_frame = egui::Frame::none()
-                .fill(theme::BG_SUNKEN)
-                .rounding(egui::Rounding::same(4.0))
-                .inner_margin(egui::Margin::symmetric(8.0, 4.0));
-            let (_, dropped_root) = ui.dnd_drop_zone(root_frame, |ui| {
-                ui.label(
-                    RichText::new("Scene")
-                        .strong()
-                        .size(12.0)
-                        .color(theme::TEXT_MUTED),
-                );
-            });
-            if let Some(child) = dropped_root {
-                let child: std::sync::Arc<String> = child;
-                reparent = Some(((*child).clone(), None));
-            }
-            ui.add_space(4.0);
+        let filter = self.hierarchy_filter.clone();
+        let roots = self.scene.root_names();
 
-            let roots = self.scene.root_names();
-            if roots.is_empty() {
-                theme::muted(ui, "No entities yet");
-            } else {
-                for name in roots {
-                    self.hierarchy_row(
-                        ui,
-                        &name,
-                        0,
-                        &mut to_remove,
-                        &mut to_duplicate,
-                        &mut reparent,
-                    );
-                }
-            }
+        let drop_frame = egui::Frame::none();
+        let (scroll_out, dropped_empty) = ui.dnd_drop_zone(drop_frame, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("hierarchy_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if roots.is_empty() && filter.is_empty() {
+                        theme::muted(ui, "Scene is empty");
+                    } else {
+                        for name in &roots {
+                            if self.hierarchy_visible(name, &filter) {
+                                self.hierarchy_row(
+                                    ui,
+                                    name,
+                                    0,
+                                    &filter,
+                                    &mut to_remove,
+                                    &mut to_duplicate,
+                                    &mut reparent,
+                                    &mut create_under,
+                                );
+                            }
+                        }
+                    }
+                    let remain = ui.available_height().max(24.0);
+                    let (rect, resp) =
+                        ui.allocate_exact_size(egui::vec2(ui.available_width(), remain), egui::Sense::click());
+                    let _ = rect;
+                    resp.context_menu(|ui| {
+                        if ui.button("Create Empty").clicked() {
+                            create_under = Some(None);
+                            ui.close_menu();
+                        }
+                    });
+                });
         });
+        let _ = scroll_out;
+        if let Some(child) = dropped_empty {
+            let child: std::sync::Arc<String> = child;
+            reparent = Some(((*child).clone(), None));
+        }
 
+        if let Some(parent) = create_under {
+            self.hierarchy_create_empty(parent);
+        }
         if let Some((child, parent)) = reparent {
             if self.scene.find_entity(&child).map(|e| e.parent.clone()) != Some(parent.clone()) {
                 self.push_undo();
@@ -128,71 +114,123 @@ impl EditorApp {
         }
     }
 
+    fn hierarchy_visible(&self, name: &str, filter: &str) -> bool {
+        if filter.trim().is_empty() {
+            return true;
+        }
+        let f = filter.to_lowercase();
+        if name.to_lowercase().contains(&f) {
+            return true;
+        }
+        self.scene
+            .child_names(name)
+            .iter()
+            .any(|c| self.hierarchy_visible(c, filter))
+    }
+
+    fn hierarchy_create_empty(&mut self, parent: Option<String>) {
+        let name = unique_entity_name(&self.scene, "GameObject");
+        self.push_undo();
+        if add_entity(
+            &mut self.scene,
+            &name,
+            &MutateOpts {
+                x: Some(320.0),
+                y: Some(240.0),
+                ..Default::default()
+            },
+        )
+        .is_ok()
+        {
+            if let Some(p) = parent.as_deref() {
+                if set_entity_parent(&mut self.scene, &name, Some(p)).is_err() {
+                    let _ = self.undo.undo(&mut self.scene);
+                    return;
+                }
+            }
+            self.select(Some(name));
+            self.sync_baseline();
+            self.mark_dirty();
+        } else {
+            let _ = self.undo.undo(&mut self.scene);
+        }
+    }
+
     fn hierarchy_row(
         &mut self,
         ui: &mut egui::Ui,
         name: &str,
         depth: u32,
+        filter: &str,
         to_remove: &mut Option<String>,
         to_duplicate: &mut Option<String>,
         reparent: &mut Option<(String, Option<String>)>,
+        create_under: &mut Option<Option<String>>,
     ) {
         let selected = self.is_selected(name);
         let children = self.scene.child_names(name);
-        let indent = 8.0 + depth as f32 * 14.0;
+        let has_kids = !children.is_empty();
+        let indent = 6.0 + depth as f32 * 14.0;
 
+        let fold_id = ui.make_persistent_id(("hier_fold", name.to_string()));
+        let mut folded_open = ui.ctx().data_mut(|d| *d.get_temp_mut_or(fold_id, true));
+
+        let fill = if selected {
+            theme::SELECT_BG
+        } else {
+            egui::Color32::TRANSPARENT
+        };
         let row_frame = egui::Frame::none()
-            .fill(if selected {
-                theme::SELECT_BG
-            } else {
-                egui::Color32::TRANSPARENT
-            })
-            .rounding(egui::Rounding::same(4.0))
+            .fill(fill)
+            .rounding(egui::Rounding::ZERO)
             .inner_margin(egui::Margin {
                 left: indent,
                 right: 4.0,
-                top: 3.0,
-                bottom: 3.0,
+                top: 2.0,
+                bottom: 2.0,
             });
 
         let (inner, dropped) = ui.dnd_drop_zone(row_frame, |ui| {
             ui.horizontal(|ui| {
-                // Leave room for Duplicate + Delete.
-                let btn_reserve = 52.0;
-                let drag_w = (ui.available_width() - btn_reserve).max(48.0);
-                // Do not use `dnd_drag_source`: it overlays Sense::drag() on top of the
-                // row, and egui then ignores click widgets underneath (drag-only wins).
-                // click_and_drag postpones drag until the pointer moves, so click selects.
-                let drag_id = egui::Id::new(("hier-drag", name));
-                let is_primary = self.primary_selected() == Some(name);
-                let label = if selected && is_primary {
-                    RichText::new(format!("> {name}"))
-                        .strong()
-                        .color(theme::SELECT_STROKE)
-                } else if selected {
-                    RichText::new(format!("+ {name}"))
-                        .strong()
-                        .color(theme::ACCENT)
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if has_kids {
+                    let arrow = if folded_open { "▾" } else { "▸" };
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new(arrow).size(11.0).color(theme::TEXT_MUTED))
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE)
+                                .min_size(egui::vec2(14.0, 16.0)),
+                        )
+                        .clicked()
+                    {
+                        folded_open = !folded_open;
+                    }
                 } else {
-                    RichText::new(name).color(theme::TEXT)
+                    ui.add_space(14.0);
+                }
+
+                // Tiny geometric cube — not Unity's logo.
+                let (icon, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                ui.painter().rect_stroke(
+                    icon,
+                    1.0,
+                    egui::Stroke::new(1.0_f32, theme::TEXT_DIM),
+                );
+
+                let drag_id = egui::Id::new(("hier-drag", name));
+                let name_color = if selected {
+                    egui::Color32::from_rgb(235, 235, 235)
+                } else {
+                    theme::TEXT
                 };
+                let label = RichText::new(name).size(13.0).color(name_color);
                 if ui.ctx().is_being_dragged(drag_id) {
                     egui::DragAndDrop::set_payload(ui.ctx(), name.to_string());
                     let layer_id = egui::LayerId::new(egui::Order::Tooltip, drag_id);
                     let response = ui
                         .with_layer_id(layer_id, |ui| {
-                            ui.add(
-                                egui::Label::new(label)
-                                    .truncate()
-                                    .selectable(false),
-                            );
-                            let rest = (drag_w - ui.min_rect().width()).max(0.0);
-                            if rest > 0.0 {
-                                ui.allocate_exact_size(
-                                    egui::vec2(rest, ui.spacing().interact_size.y),
-                                    egui::Sense::hover(),
-                                );
-                            }
+                            ui.add(egui::Label::new(label).truncate().selectable(false));
                         })
                         .response;
                     if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
@@ -204,22 +242,20 @@ impl EditorApp {
                     }
                 } else {
                     let body = ui.scope(|ui| {
-                        ui.add(
-                            egui::Label::new(label)
-                                .truncate()
-                                .selectable(false),
-                        );
-                        let rest = (drag_w - ui.min_rect().width()).max(0.0);
-                        if rest > 0.0 {
-                            ui.allocate_exact_size(
-                                egui::vec2(rest, ui.spacing().interact_size.y),
-                                egui::Sense::hover(),
-                            );
-                        }
+                        let grow = ui.available_width().max(8.0);
+                        ui.add(egui::Label::new(label).truncate().selectable(false));
+                        ui.allocate_exact_size(egui::vec2(grow, 16.0), egui::Sense::hover());
                     });
                     let response = ui
                         .interact(body.response.rect, drag_id, egui::Sense::click_and_drag())
                         .on_hover_cursor(egui::CursorIcon::Grab);
+                    if response.hovered() && !selected {
+                        ui.painter().rect_filled(
+                            body.response.rect,
+                            0.0,
+                            egui::Color32::from_white_alpha(8),
+                        );
+                    }
                     if response.clicked() {
                         let cmd = ui.input(|i| i.modifiers.command);
                         if cmd {
@@ -228,43 +264,58 @@ impl EditorApp {
                             self.select(Some(name.to_string()));
                         }
                     }
+                    response.context_menu(|ui| {
+                        if ui.button("Create Empty").clicked() {
+                            *create_under = Some(Some(name.to_string()));
+                            ui.close_menu();
+                        }
+                        if ui.button("Duplicate").clicked() {
+                            *to_duplicate = Some(name.to_string());
+                            ui.close_menu();
+                        }
+                        if self.scene.find_entity(name).and_then(|e| e.parent.clone()).is_some()
+                            && ui.button("Unparent").clicked()
+                        {
+                            *reparent = Some((name.to_string(), None));
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui
+                            .add(egui::Button::new(RichText::new("Delete").color(theme::DANGER)))
+                            .clicked()
+                        {
+                            *to_remove = Some(name.to_string());
+                            ui.close_menu();
+                        }
+                    });
                     response.dnd_set_drag_payload(name.to_string());
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    let del = ui
-                        .add_sized(
-                            [22.0, 18.0],
-                            egui::Button::new(RichText::new("x").size(11.0).color(theme::DANGER))
-                                .fill(theme::BG_SUNKEN),
-                        )
-                        .on_hover_text("Delete (and children)");
-                    if del.clicked() {
-                        *to_remove = Some(name.to_string());
-                    }
-                    let dup = ui
-                        .add_sized(
-                            [22.0, 18.0],
-                            egui::Button::new(RichText::new("D").size(11.0)).fill(theme::BG_SUNKEN),
-                        )
-                        .on_hover_text("Duplicate");
-                    if dup.clicked() {
-                        *to_duplicate = Some(name.to_string());
-                    }
-                });
             });
         });
         let _ = inner;
+        ui.ctx().data_mut(|d| d.insert_temp(fold_id, folded_open));
         if let Some(child) = dropped {
             let child: std::sync::Arc<String> = child;
             if child.as_str() != name {
                 *reparent = Some(((*child).clone(), Some(name.to_string())));
             }
         }
-        ui.add_space(2.0);
 
-        for child in children {
-            self.hierarchy_row(ui, &child, depth + 1, to_remove, to_duplicate, reparent);
+        if folded_open {
+            for child in children {
+                if self.hierarchy_visible(&child, filter) {
+                    self.hierarchy_row(
+                        ui,
+                        &child,
+                        depth + 1,
+                        filter,
+                        to_remove,
+                        to_duplicate,
+                        reparent,
+                        create_under,
+                    );
+                }
+            }
         }
     }
 }

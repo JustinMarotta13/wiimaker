@@ -3,7 +3,7 @@ use wiimaker_scene::{
     add_component_animation, add_component_collider, add_component_disc, add_component_sprite,
     add_component_tilemap, remove_component_animation, remove_component_collider,
     remove_component_disc, remove_component_sprite, remove_component_tilemap, save_project,
-    set_component_enabled, set_entity_parent, tilemap_resize, SceneColliderKind,
+    set_component_enabled, tilemap_resize, SceneColliderKind,
 };
 
 use crate::app::EditorApp;
@@ -31,12 +31,8 @@ impl EditorApp {
             return;
         }
         let Some(sel) = self.primary_selected().map(|s| s.to_string()) else {
-            theme::card_frame().show(ui, |ui| {
-                theme::muted(
-                    ui,
-                    "Select an entity in the Hierarchy / Scene, or a file in Project",
-                );
-            });
+            ui.add_space(8.0);
+            theme::muted(ui, "None");
             return;
         };
         if self.selected.len() > 1 {
@@ -70,53 +66,26 @@ impl EditorApp {
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
-        let mut unparent = false;
 
-        let parent_name = self.scene.find_entity(&sel).and_then(|e| e.parent.clone());
-
-        theme::card_frame().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Name").size(12.0).color(theme::TEXT_MUTED));
-                let name_w = (ui.available_width() - 48.0).clamp(80.0, 200.0);
-                let resp = ui
-                    .add(egui::TextEdit::singleline(&mut self.rename_draft).desired_width(name_w));
-                if resp.lost_focus() {
-                    rename_committed = true;
-                }
-            });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Parent").size(12.0).color(theme::TEXT_MUTED));
-                match &parent_name {
-                    Some(p) => {
-                        ui.label(RichText::new(p).color(theme::TEXT));
-                        if ui
-                            .add(
-                                egui::Button::new(RichText::new("Unparent").size(11.0))
-                                    .fill(theme::BG_SUNKEN),
-                            )
-                            .clicked()
-                        {
-                            unparent = true;
-                        }
-                    }
-                    None => {
-                        ui.label(RichText::new("Scene (root)").color(theme::TEXT_DIM));
-                    }
-                }
-            });
+        ui.horizontal(|ui| {
+            let name_w = (ui.available_width() - 8.0).clamp(80.0, 280.0);
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut self.rename_draft)
+                    .desired_width(name_w)
+                    .font(egui::TextStyle::Body),
+            );
+            if resp.lost_focus() {
+                rename_committed = true;
+            }
+        });
+        ui.horizontal(|ui| {
+            theme::inspector_label(ui, "Tag");
+            if let Some(ent) = self.scene.entities.iter_mut().find(|e| e.name == sel) {
+                dirty |= ui.add(egui::DragValue::new(&mut ent.tag)).changed();
+            }
         });
         if rename_committed {
             self.commit_rename();
-        }
-        if unparent {
-            self.push_undo();
-            if set_entity_parent(&mut self.scene, &sel, None).is_ok() {
-                self.sync_baseline();
-                self.mark_dirty();
-            } else {
-                let _ = self.undo.undo(&mut self.scene);
-            }
         }
 
         let catalog_names: Vec<String> = self.catalog.names().to_vec();
@@ -128,32 +97,22 @@ impl EditorApp {
             } else {
                 "Transform"
             };
-            ui.add_space(6.0);
+            ui.add_space(4.0);
             let xform_hdr = theme::component_card_header(ui, "transform", xform_label, None, false);
             if xform_hdr.open {
-            theme::card_frame().show(ui, |ui| {
-                let mut changed = false;
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut ent.transform.translation[0], -640.0..=640.0)
-                            .text("x"),
-                    )
-                    .changed();
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut ent.transform.translation[1], -480.0..=480.0)
-                            .text("y"),
-                    )
-                    .changed();
-                changed |= ui
-                    .add(egui::Slider::new(&mut ent.transform.scale[0], 0.1..=8.0).text("scale x"))
-                    .changed();
-                changed |= ui
-                    .add(egui::Slider::new(&mut ent.transform.scale[1], 0.1..=8.0).text("scale y"))
-                    .changed();
-                if changed {
-                    dirty = true;
-                }
+            theme::inspector_props().show(ui, |ui| {
+                dirty |= theme::vec2_row(ui, "Position", &mut ent.transform.translation[..2], 1.0);
+                let rot = ent.transform.rotation;
+                let mut deg = (2.0 * rot[2] * rot[3]).atan2(rot[3] * rot[3] - rot[2] * rot[2]).to_degrees();
+                ui.horizontal(|ui| {
+                    theme::inspector_label(ui, "Rotation");
+                    if theme::axis_drag(ui, 'Z', &mut deg, 0.5) {
+                        let half = deg.to_radians() * 0.5;
+                        ent.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
+                        dirty = true;
+                    }
+                });
+                dirty |= theme::vec2_row(ui, "Scale", &mut ent.transform.scale[..2], 0.01);
             });
             }
 
@@ -173,7 +132,7 @@ impl EditorApp {
                     remove_sprite = true;
                 }
                 if hdr.open {
-                theme::card_frame().show(ui, |ui| {
+                theme::inspector_props().show(ui, |ui| {
                     let catalog_names = &catalog_names;
                     let mut tex_changed = false;
                     let mut new_tex = sp.texture.clone();
@@ -193,15 +152,8 @@ impl EditorApp {
                         // Size looked up after borrow ends via pending.
                         pending_sprite_tex = Some((new_tex, [0.0, 0.0]));
                     }
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut sp.size[0], 1.0..=256.0).text("w"))
-                        .changed();
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut sp.size[1], 1.0..=256.0).text("h"))
-                        .changed();
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut sp.z, -10.0..=10.0).text("z"))
-                        .changed();
+                    dirty |= theme::vec2_row(ui, "Size", &mut sp.size, 0.5);
+                    dirty |= theme::labeled_drag(ui, "Z", &mut sp.z, 0.05);
                 });
                 }
                 ui.add_space(4.0);
@@ -224,7 +176,7 @@ impl EditorApp {
                 // Always expand Animation when agent-selected (screenshot OCR).
                 let force_open = std::env::var("WIIMAKER_EDITOR_SELECT").is_ok();
                 if hdr.open || force_open {
-                theme::card_frame().show(ui, |ui| {
+                theme::inspector_props().show(ui, |ui| {
                     let clip_names: Vec<String> = self.anim_catalog.names().to_vec();
                     let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
                     let mut clip_changed = false;
@@ -259,9 +211,7 @@ impl EditorApp {
                         dirty = true;
                     }
                     if let Some(fps) = a.fps.as_mut() {
-                        dirty |= ui
-                            .add(egui::Slider::new(fps, 1.0..=60.0).text("fps"))
-                            .changed();
+                        dirty |= theme::labeled_drag(ui, "Fps", fps, 0.25);
                     } else if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
                         ui.label(
                             RichText::new(format!("clip fps · {:.1}", meta.fps))
@@ -291,13 +241,9 @@ impl EditorApp {
                     remove_disc = true;
                 }
                 if hdr.open {
-                theme::card_frame().show(ui, |ui| {
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut d.radius, 1.0..=200.0).text("radius"))
-                        .changed();
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut d.z, -10.0..=10.0).text("z"))
-                        .changed();
+                theme::inspector_props().show(ui, |ui| {
+                    dirty |= theme::labeled_drag(ui, "Radius", &mut d.radius, 0.5);
+                    dirty |= theme::labeled_drag(ui, "Z", &mut d.z, 0.05);
                 });
                 }
             }
@@ -317,7 +263,7 @@ impl EditorApp {
                     remove_tilemap = true;
                 }
                 if hdr.open {
-                theme::card_frame().show(ui, |ui| {
+                theme::inspector_props().show(ui, |ui| {
                     let mut w = tm.width;
                     let mut h = tm.height;
                     ui.horizontal(|ui| {
@@ -328,18 +274,9 @@ impl EditorApp {
                             pending_tm_resize = Some((w, h));
                         }
                     });
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut tm.cell, 4.0..=64.0).text("cell"))
-                        .changed();
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut tm.origin[0], -640.0..=640.0).text("origin x"))
-                        .changed();
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut tm.origin[1], -480.0..=480.0).text("origin y"))
-                        .changed();
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut tm.z, -10.0..=10.0).text("z"))
-                        .changed();
+                    dirty |= theme::labeled_drag(ui, "Cell", &mut tm.cell, 0.25);
+                    dirty |= theme::vec2_row(ui, "Origin", &mut tm.origin, 1.0);
+                    dirty |= theme::labeled_drag(ui, "Z", &mut tm.z, 0.05);
                     let occupied = tm.cells.iter().filter(|c| **c != 0).count();
                     ui.label(
                         RichText::new(format!(
@@ -435,7 +372,7 @@ impl EditorApp {
                     remove_collider = true;
                 }
                 if hdr.open {
-                theme::card_frame().show(ui, |ui| {
+                theme::inspector_props().show(ui, |ui| {
                     let kind_label = match c.kind {
                         SceneColliderKind::Aabb => "Aabb",
                         SceneColliderKind::Circle => "Circle",
@@ -461,17 +398,10 @@ impl EditorApp {
                         });
                     match c.kind {
                         SceneColliderKind::Aabb => {
-                            dirty |= ui
-                                .add(egui::Slider::new(&mut c.size[0], 1.0..=256.0).text("w"))
-                                .changed();
-                            dirty |= ui
-                                .add(egui::Slider::new(&mut c.size[1], 1.0..=256.0).text("h"))
-                                .changed();
+                            dirty |= theme::vec2_row(ui, "Size", &mut c.size, 0.5);
                         }
                         SceneColliderKind::Circle => {
-                            dirty |= ui
-                                .add(egui::Slider::new(&mut c.radius, 1.0..=200.0).text("radius"))
-                                .changed();
+                            dirty |= theme::labeled_drag(ui, "Radius", &mut c.radius, 0.5);
                         }
                     }
                     dirty |= ui.checkbox(&mut c.solid, "solid").changed();
@@ -483,12 +413,7 @@ impl EditorApp {
                         r.clone().on_hover_text("0 = any");
                         dirty |= r.changed();
                     });
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut c.offset[0], -128.0..=128.0).text("offset x"))
-                        .changed();
-                    dirty |= ui
-                        .add(egui::Slider::new(&mut c.offset[1], -128.0..=128.0).text("offset y"))
-                        .changed();
+                    dirty |= theme::vec2_row(ui, "Offset", &mut c.offset, 0.5);
                 });
                 }
             }
@@ -499,7 +424,13 @@ impl EditorApp {
             let missing_tilemap = ent.components.tilemap.is_none();
             let missing_collider = ent.components.collider.is_none();
             let missing_animation = ent.components.animation.is_none();
-            ui.add_space(8.0);
+            ui.add_space(12.0);
+            let add_w = ui.available_width();
+            ui.allocate_ui_with_layout(
+                egui::vec2(add_w, 28.0),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+            ui.set_min_width(add_w);
             ui.menu_button(
                 RichText::new("Add Component").strong().color(theme::TEXT),
                 |ui| {
@@ -535,6 +466,8 @@ impl EditorApp {
                                 .color(theme::TEXT_MUTED),
                         );
                     }
+                },
+            );
                 },
             );
         }

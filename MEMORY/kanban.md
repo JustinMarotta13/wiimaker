@@ -83,6 +83,8 @@ ARCHITECTURE M3. Cook WAV → `.wpack` is sketched; **no playback** on host or W
 
 Shipped. Keep here so we do not rebuild them.
 
+- **Unity Hierarchy + Inspector chrome** (2026-09-01) — Hierarchy search, + Create Empty, right-click Duplicate/Delete/Unparent, no per-row D/x; Inspector GameObject name+Tag, Transform Position/Rotation/Scale as XYZ DragValues, ⋮ Remove Component, full-width Add Component. Dark Pro only.
+
 - **Sprite animation clips** (2026-08-31) — `AnimClipMeta` / `assets/<name>.anim.json`, runtime `Animation`, `animate_world`, Inspector Animation foldout (clip combo + fps/loop), CLI `asset anim` / `asset list-anims` / `entity set-anim` / `add-component Animation`; doctor warns missing clip cells. Host-first (not in WSCN bake).
 
 - Workspace + host hello-orb + Wii C bootstrap stubs

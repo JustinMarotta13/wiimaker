@@ -4,8 +4,8 @@
 //! Geometric stand-ins only — no trademarked Unity icons.
 
 use eframe::egui::{
-    self, style::ScrollStyle, Color32, Frame, Margin, RichText, Rounding, Sense, Shadow, Shape,
-    Stroke, Vec2, Visuals,
+    self, style::ScrollStyle, Align2, Color32, FontId, Frame, Margin, RichText, Rounding, Sense,
+    Shadow, Shape, Stroke, Vec2, Visuals,
 };
 
 /// Workspace behind the Scene/Game well (Unity Pro ~#191919).
@@ -39,6 +39,11 @@ pub const DIRTY: Color32 = Color32::from_rgb(232, 168, 56);
 pub const SAVED: Color32 = Color32::from_rgb(90, 168, 130);
 pub const DANGER: Color32 = Color32::from_rgb(220, 96, 96);
 pub const WARN_OUTLINE: Color32 = Color32::from_rgb(255, 200, 64);
+
+/// Unity inspector axis tints (not brand marks).
+pub const AXIS_X: Color32 = Color32::from_rgb(219, 62, 62);
+pub const AXIS_Y: Color32 = Color32::from_rgb(90, 168, 62);
+pub const AXIS_Z: Color32 = Color32::from_rgb(86, 156, 214);
 
 pub fn apply(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
@@ -154,7 +159,74 @@ pub fn card_frame() -> Frame {
         .fill(BG_RAISED)
         .inner_margin(Margin::symmetric(8.0, 6.0))
         .rounding(Rounding::same(2.0))
-        .stroke(Stroke::new(1.0, BORDER))
+        .stroke(Stroke::new(1.0_f32, BORDER))
+}
+
+/// Inspector property block: no extra card chrome (Unity draws fields on the panel).
+pub fn inspector_props() -> Frame {
+    Frame::none().inner_margin(Margin::symmetric(8.0, 4.0))
+}
+
+pub fn inspector_label(ui: &mut egui::Ui, text: &str) {
+    ui.add_sized(
+        [78.0, 18.0],
+        egui::Label::new(RichText::new(text).size(12.0).color(TEXT_MUTED)).selectable(false),
+    );
+}
+
+fn axis_color(axis: char) -> Color32 {
+    match axis {
+        'X' | 'x' => AXIS_X,
+        'Y' | 'y' => AXIS_Y,
+        _ => AXIS_Z,
+    }
+}
+
+/// Unity-style `X`/`Y` drag field.
+pub fn axis_drag(ui: &mut egui::Ui, axis: char, v: &mut f32, speed: f32) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 18.0), Sense::hover());
+        ui.painter().rect_filled(rect, Rounding::same(2.0), axis_color(axis));
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            axis.to_string(),
+            egui::FontId::proportional(11.0),
+            Color32::WHITE,
+        );
+        changed = ui
+            .add(egui::DragValue::new(v).speed(speed).max_decimals(2))
+            .changed();
+    });
+    changed
+}
+
+/// Label + X/Y drags on one row (Position / Scale). `xy` must be at least 2 long.
+pub fn vec2_row(ui: &mut egui::Ui, label: &str, xy: &mut [f32], speed: f32) -> bool {
+    let mut changed = false;
+    if xy.len() < 2 {
+        return false;
+    }
+    ui.horizontal(|ui| {
+        inspector_label(ui, label);
+        changed |= axis_drag(ui, 'X', &mut xy[0], speed);
+        changed |= axis_drag(ui, 'Y', &mut xy[1], speed);
+    });
+    changed
+}
+
+/// Label + one DragValue.
+pub fn labeled_drag(ui: &mut egui::Ui, label: &str, v: &mut f32, speed: f32) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        inspector_label(ui, label);
+        changed = ui
+            .add(egui::DragValue::new(v).speed(speed).max_decimals(2))
+            .changed();
+    });
+    changed
 }
 
 pub fn section_header(ui: &mut egui::Ui, title: &str) {
@@ -244,7 +316,7 @@ pub fn component_card_header(
     let header = Frame::none()
         .fill(BG_COMP)
         .inner_margin(Margin::symmetric(6.0, 3.0))
-        .rounding(Rounding::same(2.0));
+        .rounding(Rounding::ZERO);
     header.show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -268,7 +340,7 @@ pub fn component_card_header(
             ui.label(RichText::new(title).strong().size(13.0).color(TEXT));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if removable {
-                    ui.menu_button(RichText::new("⚙").size(12.0).color(TEXT_MUTED), |ui| {
+                    ui.menu_button(RichText::new("⋮").size(14.0).color(TEXT_MUTED), |ui| {
                         if ui
                             .add(
                                 egui::Button::new(

@@ -110,6 +110,7 @@ pub(crate) struct EditorApp {
     pub(crate) texture_handle: Option<egui::TextureHandle>,
     pub(crate) status: String,
     pub(crate) new_entity_name: String,
+    pub(crate) hierarchy_filter: String,
     pub(crate) asset_names: Vec<String>,
     /// Cached relative paths under the game dir for the Project explorer.
     pub(crate) project_entries: Vec<ProjectEntry>,
@@ -177,6 +178,7 @@ impl EditorApp {
             texture_handle: None,
             status: String::new(),
             new_entity_name: "NewEntity".into(),
+            hierarchy_filter: String::new(),
             asset_names: Vec::new(),
             project_entries: Vec::new(),
             catalog: SpriteCatalog::empty(),
