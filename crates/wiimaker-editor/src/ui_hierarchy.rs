@@ -39,31 +39,37 @@ impl EditorApp {
 
         let drop_frame = egui::Frame::none();
         let (scroll_out, dropped_empty) = ui.dnd_drop_zone(drop_frame, |ui| {
+            // Virtualize: a 309-entity scene (Dots + 301 pellets) must not instantiate
+            // every row or later docks (Inspector, Scene) never tessellate.
+            let rows = self.hierarchy_flat_rows(ui.ctx(), &filter);
+            let row_h = 22.0;
             egui::ScrollArea::vertical()
                 .id_salt("hierarchy_scroll")
                 .auto_shrink([false, false])
-                .show(ui, |ui| {
+                .show_rows(ui, row_h, rows.len().max(1), |ui, range| {
                     if roots.is_empty() && filter.is_empty() {
                         theme::muted(ui, "Scene is empty");
-                    } else {
-                        for name in &roots {
-                            if self.hierarchy_visible(name, &filter) {
-                                self.hierarchy_row(
-                                    ui,
-                                    name,
-                                    0,
-                                    &filter,
-                                    &mut to_remove,
-                                    &mut to_duplicate,
-                                    &mut reparent,
-                                    &mut create_under,
-                                );
-                            }
+                        return;
+                    }
+                    for i in range {
+                        if let Some((name, depth)) = rows.get(i) {
+                            self.hierarchy_row(
+                                ui,
+                                name,
+                                *depth,
+                                &filter,
+                                &mut to_remove,
+                                &mut to_duplicate,
+                                &mut reparent,
+                                &mut create_under,
+                            );
                         }
                     }
-                    let remain = ui.available_height().max(24.0);
-                    let (rect, resp) =
-                        ui.allocate_exact_size(egui::vec2(ui.available_width(), remain), egui::Sense::click());
+                    let remain = ui.available_height().clamp(4.0, 24.0);
+                    let (rect, resp) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width().min(220.0), remain),
+                        egui::Sense::click(),
+                    );
                     let _ = rect;
                     resp.context_menu(|ui| {
                         if ui.button("Create Empty").clicked() {
@@ -174,8 +180,8 @@ impl EditorApp {
         let has_kids = !children.is_empty();
         let indent = 6.0 + depth as f32 * 14.0;
 
-        let fold_id = ui.make_persistent_id(("hier_fold", name.to_string()));
-        let mut folded_open = ui.ctx().data_mut(|d| *d.get_temp_mut_or(fold_id, true));
+        let fold_id = Self::hierarchy_fold_id(name);
+        let mut folded_open = ui.ctx().data_mut(|d| *d.get_temp_mut_or(fold_id, false));
 
         let fill = if selected {
             theme::SELECT_BG
@@ -235,7 +241,7 @@ impl EditorApp {
                     }
                 } else {
                     let body = ui.scope(|ui| {
-                        let grow = ui.available_width().max(8.0);
+                        let grow = ui.available_width().clamp(8.0, 220.0);
                         ui.add(egui::Label::new(label).truncate().selectable(false));
                         ui.allocate_exact_size(egui::vec2(grow, 16.0), egui::Sense::hover());
                     });
@@ -294,20 +300,54 @@ impl EditorApp {
             }
         }
 
-        if folded_open {
+        let _ = folded_open;
+        let _ = filter;
+    }
+
+    fn hierarchy_fold_id(name: &str) -> egui::Id {
+        egui::Id::new(("hier_fold", name))
+    }
+
+    /// Flattened (name, depth) rows respecting fold state. Selected nodes with
+    /// children and ancestors of the selection stay open so Dot0.. is reachable.
+    fn hierarchy_flat_rows(&self, ctx: &egui::Context, filter: &str) -> Vec<(String, u32)> {
+        let mut out = Vec::new();
+        for name in self.scene.root_names() {
+            self.hierarchy_collect_flat(ctx, &name, 0, filter, &mut out);
+        }
+        out
+    }
+
+    fn hierarchy_collect_flat(
+        &self,
+        ctx: &egui::Context,
+        name: &str,
+        depth: u32,
+        filter: &str,
+        out: &mut Vec<(String, u32)>,
+    ) {
+        if !self.hierarchy_visible(name, filter) {
+            return;
+        }
+        out.push((name.to_string(), depth));
+        let children = self.scene.child_names(name);
+        if children.is_empty() {
+            return;
+        }
+        let fold_id = Self::hierarchy_fold_id(name);
+        let stored = ctx.data(|d| d.get_temp::<bool>(fold_id).unwrap_or(false));
+        let selected_here = self.is_selected(name);
+        let child_selected = self
+            .selected
+            .iter()
+            .any(|s| s != name && self.scene.is_descendant_of(s, name));
+        let open = stored
+            || child_selected
+            || (selected_here && !children.is_empty())
+            || !filter.trim().is_empty();
+        if open {
             for child in children {
-                if self.hierarchy_visible(&child, filter) {
-                    self.hierarchy_row(
-                        ui,
-                        &child,
-                        depth + 1,
-                        filter,
-                        to_remove,
-                        to_duplicate,
-                        reparent,
-                        create_under,
-                    );
-                }
+                self.hierarchy_collect_flat(ctx, &child, depth + 1, filter, out);
             }
         }
     }
