@@ -3,11 +3,12 @@
 Operational notes for `wiimaker-editor` and shared `wiimaker-scene` mutate UX.
 
 Canonical rules: `.cursor/rules/wiimaker-editor.mdc`.
+Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 
 ## Gotchas
 
 - After mutate helpers, always set dirty + `rehydrate()` before relying on World/viewport.
-- Inspector sliders: push undo from `undo_baseline` once per gesture (`begin_inspector_gesture`), not every frame; sync baseline when pointer released / after discrete mutates.
+- Inspector numeric fields are Unity-style XYZ DragValues (not sliders). Undo: `begin_inspector_gesture` once per drag; sync baseline on release / after discrete mutates.
 - Discrete edits (add/remove/rename/duplicate/paste/components/reparent): `push_undo()` then mutate, then `sync_baseline()`.
 - Viewport blit is letterboxed via uniform scale `min(avail/VIEW, 1)`; map picks with `pointer_to_scene` using the **image response rect**, not the full CentralPanel.
 - Sprites use catalog pivot (default center): dest = translation − pivot × size × scale. Hit-tests / selection outline must match `render_world`.
@@ -28,7 +29,7 @@ Canonical rules: `.cursor/rules/wiimaker-editor.mdc`.
 - Tilemap: viewport **Paint / Erase / Pick** (right-click erases while Painting). Inspector **+ Tilemap** (32×18, cell 16) · grid w/h · cell · origin · palette (id/color/sprite) · **Brush**. Selected tilemap AABB outlined; paint stamps `tile_brush_id` + solid onto the targeted grid.
 - Collider Inspector: solid · **Is Trigger** · **Filter Tag** (0 = any). Viewport gizmos: accent for walls, amber (`220,180,60`) for triggers. Keep dark theme.
 - Prefabs: Inspector **Save as Prefab…**; Project strip + toolbar **Instantiate <name>** (or Prefab menu when many); File → Instantiate; **Cmd/Ctrl+I** first `.prefab.json`. Double-click / context menu also instantiate. CLI: `entity create-prefab` / `instantiate-prefab` / `apply-prefab` / `unpack-prefab`.
-- Multi-select: status `selected N: A, B`; Hierarchy primary `> name`, secondary `+ name`; Inspector `selection N entities` chip.
+- Multi-select: status `selected N: A, B`; Hierarchy uses full-width blue selection (Unity), not `>`/`+` prefixes.
 - Drop PNG anywhere in the editor window → copy into `assets/` + cook refresh.
 - Sprite Editor: Project file (PNG / `.sprites.json`) → Inspector **Edit Sprites…**, or double-click / context menu; writes `.sprites.json` then refresh catalog.
 - Project panel is a **file explorer** (`game.toml`, `assets/`, `scenes/`). Click → `selected_file` (clears entity selection); Inspector shows path/type/size + type-specific actions.
@@ -40,7 +41,7 @@ Canonical rules: `.cursor/rules/wiimaker-editor.mdc`.
 - Editor sources are modular: `main.rs` entry · `app.rs` (`EditorApp` state / mutate / `update` orchestrator) · `ui_toolbar` · `ui_hierarchy` · `ui_inspector` · `ui_project` · `viewport` · `workspace` · `theme` · `sprite_editor`. Panel methods are `impl EditorApp` in sibling files.
 - `UndoStack` lives in `wiimaker-scene` (snapshot of `Scene`, depth 50).
 - Duplicate/paste share `insert_entity_clone` (+16,+16, `unique_entity_name`).
-- Hierarchy Duplicate control is the `D` button (ASCII; Unicode glyphs failed to render); shortcuts Cmd/Ctrl+D/C/V/Z/Shift+Z/Y.
+- Hierarchy: Search + Create Empty / right-click Duplicate·Delete; shortcuts Cmd/Ctrl+D/C/V/Z/Shift+Z/Y. No per-row D/x (see unity-chrome crops).
 - Editor chrome: `theme.rs` teal-accent charcoal Visuals; panel frames, section headers, centered viewport well. Apply via `theme::apply` in eframe CreationContext.
 - P0 viewport pick/drag lives in `wiimaker-scene` (`pick.rs`) + editor `handle_viewport_input`. Topmost = highest component z, then later entity index.
 - Translate gizmo P0 = drag-on-entity (no separate handle).

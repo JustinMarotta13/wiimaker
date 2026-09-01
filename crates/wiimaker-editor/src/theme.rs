@@ -169,7 +169,7 @@ pub fn inspector_props() -> Frame {
 
 pub fn inspector_label(ui: &mut egui::Ui, text: &str) {
     ui.add_sized(
-        [78.0, 18.0],
+        [64.0, 18.0],
         egui::Label::new(RichText::new(text).size(12.0).color(TEXT_MUTED)).selectable(false),
     );
 }
@@ -182,37 +182,54 @@ fn axis_color(axis: char) -> Color32 {
     }
 }
 
-/// Unity-style `X`/`Y` drag field.
+/// Colored axis chip + drag. Call *inside* a `horizontal` — do not nest another row
+/// (nested `horizontal` expands to full width and stacks X/Y, unlike Unity).
 pub fn axis_drag(ui: &mut egui::Ui, axis: char, v: &mut f32, speed: f32) -> bool {
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 18.0), Sense::hover());
-        ui.painter().rect_filled(rect, Rounding::same(2.0), axis_color(axis));
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            axis.to_string(),
-            egui::FontId::proportional(11.0),
-            Color32::WHITE,
-        );
-        changed = ui
-            .add(egui::DragValue::new(v).speed(speed).max_decimals(2))
-            .changed();
-    });
-    changed
+    ui.spacing_mut().item_spacing.x = 2.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 18.0), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, Rounding::same(2.0), axis_color(axis));
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        axis.to_string(),
+        egui::FontId::proportional(10.0),
+        Color32::WHITE,
+    );
+    ui.add_sized(
+        [40.0, 18.0],
+        egui::DragValue::new(v).speed(speed).max_decimals(2),
+    )
+    .changed()
 }
 
-/// Label + X/Y drags on one row (Position / Scale). `xy` must be at least 2 long.
+/// One Unity Transform line: label + X + Y on the same row.
 pub fn vec2_row(ui: &mut egui::Ui, label: &str, xy: &mut [f32], speed: f32) -> bool {
     let mut changed = false;
     if xy.len() < 2 {
         return false;
     }
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         inspector_label(ui, label);
         changed |= axis_drag(ui, 'X', &mut xy[0], speed);
         changed |= axis_drag(ui, 'Y', &mut xy[1], speed);
+    });
+    changed
+}
+
+/// One Unity Transform line: label + X + Y + Z. `xyz` must be at least 3 long.
+pub fn vec3_row(ui: &mut egui::Ui, label: &str, xyz: &mut [f32], speed: f32) -> bool {
+    let mut changed = false;
+    if xyz.len() < 3 {
+        return false;
+    }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        inspector_label(ui, label);
+        changed |= axis_drag(ui, 'X', &mut xyz[0], speed);
+        changed |= axis_drag(ui, 'Y', &mut xyz[1], speed);
+        changed |= axis_drag(ui, 'Z', &mut xyz[2], speed);
     });
     changed
 }

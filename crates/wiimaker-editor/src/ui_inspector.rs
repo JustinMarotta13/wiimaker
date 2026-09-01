@@ -67,12 +67,18 @@ impl EditorApp {
         let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
 
+        // GameObject header — inspector.png (name row, then Tag).
         ui.horizontal(|ui| {
-            let name_w = (ui.available_width() - 8.0).clamp(80.0, 280.0);
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let (icon, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            ui.painter().rect_stroke(
+                icon,
+                2.0,
+                egui::Stroke::new(1.0_f32, theme::TEXT_MUTED),
+            );
+            let name_w = (ui.available_width() - 8.0).max(80.0);
             let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.rename_draft)
-                    .desired_width(name_w)
-                    .font(egui::TextStyle::Body),
+                egui::TextEdit::singleline(&mut self.rename_draft).desired_width(name_w),
             );
             if resp.lost_focus() {
                 rename_committed = true;
@@ -101,18 +107,19 @@ impl EditorApp {
             let xform_hdr = theme::component_card_header(ui, "transform", xform_label, None, false);
             if xform_hdr.open {
             theme::inspector_props().show(ui, |ui| {
-                dirty |= theme::vec2_row(ui, "Position", &mut ent.transform.translation[..2], 1.0);
+                dirty |= theme::vec3_row(ui, "Position", &mut ent.transform.translation, 1.0);
                 let rot = ent.transform.rotation;
-                let mut deg = (2.0 * rot[2] * rot[3]).atan2(rot[3] * rot[3] - rot[2] * rot[2]).to_degrees();
-                ui.horizontal(|ui| {
-                    theme::inspector_label(ui, "Rotation");
-                    if theme::axis_drag(ui, 'Z', &mut deg, 0.5) {
-                        let half = deg.to_radians() * 0.5;
-                        ent.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
-                        dirty = true;
-                    }
-                });
-                dirty |= theme::vec2_row(ui, "Scale", &mut ent.transform.scale[..2], 0.01);
+                let mut euler = [
+                    0.0_f32,
+                    0.0_f32,
+                    (2.0 * rot[2] * rot[3]).atan2(rot[3] * rot[3] - rot[2] * rot[2]).to_degrees(),
+                ];
+                if theme::vec3_row(ui, "Rotation", &mut euler, 0.5) {
+                    let half = euler[2].to_radians() * 0.5;
+                    ent.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
+                    dirty = true;
+                }
+                dirty |= theme::vec3_row(ui, "Scale", &mut ent.transform.scale, 0.01);
             });
             }
 

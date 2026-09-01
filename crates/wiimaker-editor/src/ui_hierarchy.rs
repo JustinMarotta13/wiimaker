@@ -8,13 +8,9 @@ impl EditorApp {
     pub(crate) fn ui_hierarchy(&mut self, ui: &mut egui::Ui) {
         let _ = theme::dock_tabs(ui, &[("Hierarchy", ())], ());
 
+        // Unity 6 Hierarchy toolbar: + then search (see MEMORY/durable/unity-chrome/hierarchy.png).
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            ui.add(
-                egui::TextEdit::singleline(&mut self.hierarchy_filter)
-                    .desired_width(ui.available_width() - 28.0)
-                    .hint_text("Search"),
-            );
             let plus = ui
                 .add_sized(
                     [22.0, 18.0],
@@ -24,6 +20,11 @@ impl EditorApp {
             if plus.clicked() {
                 self.hierarchy_create_empty(None);
             }
+            ui.add(
+                egui::TextEdit::singleline(&mut self.hierarchy_filter)
+                    .desired_width(ui.available_width())
+                    .hint_text("Search"),
+            );
         });
         ui.add_space(4.0);
 

@@ -48,3 +48,21 @@ Play shells `wiimaker run` / `cargo run -p <game>` — do not fold egui into the
 ## Out of scope (v0)
 
 Visual scripting, full ECS UI, TEV materials, Wiimote IR picking, editing C/GX bootstrap.
+
+## Visual chrome (1:1 Unity 6 dark)
+
+Match these crops — not memory, not a light skin, not extra widgets:
+
+- `MEMORY/durable/unity-chrome/hierarchy.png`
+- `MEMORY/durable/unity-chrome/inspector.png`
+
+Rules that fail a review if broken:
+
+1. **Dark Pro only.** Never Unity Personal light grey.
+2. **Hierarchy toolbar** is `+` then Search. No per-row Duplicate/Delete buttons; those are right-click / shortcuts. Selection is a full-width blue row, no `>`/`+` name prefixes. (`hierarchy.png`)
+3. **Inspector GameObject header** is name (+ Tag). Parenting lives in Hierarchy, not an Unparent button. (`inspector.png`)
+4. **Transform** is Position / Rotation / Scale, **one row per property**, X/Y/Z DragValues with axis chips — not sliders stacked per axis. (`inspector.png`)
+5. **Add Component** is a wide button under the stack. Component ⋮ menu is Remove Component. (`inspector.png`)
+6. Icons are geometric stand-ins. Do not copy Unity’s cube/logo artwork.
+
+If a chrome change disagrees with a crop, the crop wins.
