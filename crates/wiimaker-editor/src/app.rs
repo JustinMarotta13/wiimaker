@@ -1120,26 +1120,16 @@ impl eframe::App for EditorApp {
         // Unity 6 default: Hierarchy left, Inspector right, Scene/Game center.
         // Pin min/max width so content swaps cannot rewrite PanelState / flicker.
         egui::SidePanel::left("hierarchy")
-            .default_width(240.0)
-            .width_range(180.0..=360.0)
-            .resizable(true)
+            .exact_width(240.0)
             .frame(theme::side_frame())
             .show(ctx, |ui| {
-                let w = ui.available_width();
-                ui.set_min_width(w);
-                ui.set_max_width(w);
                 self.ui_hierarchy(ui);
             });
 
         egui::SidePanel::right("inspector")
-            .default_width(300.0)
-            .width_range(260.0..=420.0)
-            .resizable(true)
+            .exact_width(300.0)
             .frame(theme::side_frame())
             .show(ctx, |ui| {
-                let w = ui.available_width();
-                ui.set_min_width(w);
-                ui.set_max_width(w);
                 self.ui_inspector(ui);
             });
 

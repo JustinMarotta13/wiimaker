@@ -103,80 +103,88 @@ impl EditorApp {
                 render_world(&self.world, &mut draw, self.scene.clear_rgba());
                 flush_with_atlas(&draw, &mut self.fb, Some(&self.atlas));
 
-                let color_image =
-                    egui::ColorImage::from_rgb([VIEW_W, VIEW_H], &fb_to_rgb(&self.fb));
+                let rgb = fb_to_rgb(&self.fb);
+                debug_assert_eq!(self.fb.width, VIEW_W);
+                debug_assert_eq!(self.fb.height, VIEW_H);
+                debug_assert_eq!(rgb.len(), VIEW_W * VIEW_H * 3);
+                let color_image = egui::ColorImage::from_rgb([VIEW_W, VIEW_H], &rgb);
+                let tex_filter = egui::TextureOptions::NEAREST;
                 let tex = self.texture_handle.get_or_insert_with(|| {
-                    ctx.load_texture("viewport", color_image.clone(), Default::default())
+                    ctx.load_texture("viewport", color_image.clone(), tex_filter)
                 });
-                tex.set(color_image, Default::default());
-                let tex_id = tex.id();
+                tex.set(color_image, tex_filter);
 
-                let avail = ui.available_size();
-                let scale = (avail.x / VIEW_W as f32)
-                    .min(avail.y / VIEW_H as f32)
-                    .min(1.0);
+                // Remaining well is allocated first, then an egui Image is put on a
+                // contain-fit rect inside a child ui clipped to that well. Do not nest
+                // add_space+horizontal (0-size child) or rely on painter.image.
+                let well_size = ui.available_size();
+                let (well, _) = ui.allocate_exact_size(well_size, egui::Sense::hover());
+                let mut scale = (well.width() / VIEW_W as f32).min(well.height() / VIEW_H as f32);
+                if !scale.is_finite() || scale <= 0.0 {
+                    scale = 1.0;
+                }
                 let size = egui::vec2(VIEW_W as f32 * scale, VIEW_H as f32 * scale);
+                let image_rect = egui::Rect::from_center_size(well.center(), size);
 
-                let well = ui.available_rect_before_wrap();
-                ui.painter()
-                    .rect_filled(well, egui::Rounding::same(2.0), theme::BG_SUNKEN);
-                ui.painter().rect_stroke(
+                let sense = if is_scene {
+                    egui::Sense::click_and_drag()
+                } else {
+                    egui::Sense::hover()
+                };
+                // Dedicated layer so the blit is not clipped by CentralPanel leftover
+                // clip (the well was a native-clear hole) and not stolen by Inspector
+                // widgets sharing put()'s default id_salt "child".
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Middle,
+                    egui::Id::new("wiimaker_viewport_fb"),
+                ));
+                painter.rect_filled(well, egui::Rounding::same(2.0), theme::BG_SUNKEN);
+                painter.rect_stroke(
                     well,
                     egui::Rounding::same(2.0),
-                    egui::Stroke::new(1.0, theme::BORDER),
+                    egui::Stroke::new(1.0_f32, theme::BORDER),
                 );
-
-                let pad_x = ((avail.x - size.x) * 0.5).max(0.0);
-                let pad_y = ((avail.y - size.y) * 0.5).max(0.0);
-                ui.add_space(pad_y);
-
-                let mut viewport_response = None;
-                ui.horizontal(|ui| {
-                    ui.add_space(pad_x);
-                    let frame_pad = 2.0;
-                    let outer = egui::vec2(size.x + frame_pad * 2.0, size.y + frame_pad * 2.0);
-                    let (outer_rect, _) = ui.allocate_exact_size(outer, egui::Sense::hover());
-                    ui.painter().rect(
-                        outer_rect,
-                        egui::Rounding::same(2.0),
-                        theme::BG_RAISED,
-                        egui::Stroke::new(1.0, theme::BORDER),
+                painter.rect(
+                    image_rect.expand(2.0),
+                    egui::Rounding::same(2.0),
+                    theme::BG_RAISED,
+                    egui::Stroke::new(1.0_f32, theme::BORDER),
+                );
+                let image = egui::Image::new((tex.id(), size))
+                    .texture_options(tex_filter)
+                    .fit_to_exact_size(size)
+                    .maintain_aspect_ratio(true);
+                image.paint_at(ui, image_rect);
+                painter.image(
+                    tex.id(),
+                    image_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+                let response = ui.interact(image_rect, ui.id().with("viewport_fb"), sense);
+                if is_scene {
+                    paint_selection_outline(
+                        ui,
+                        image_rect,
+                        &self.scene,
+                        &self.selected,
+                        &self.catalog,
                     );
-                    let image_rect = egui::Rect::from_center_size(outer_rect.center(), size);
-                    let sense = if is_scene {
-                        egui::Sense::click_and_drag()
-                    } else {
-                        egui::Sense::hover()
-                    };
-                    let image = egui::Image::new((tex_id, size)).sense(sense);
-                    let response = ui.put(image_rect, image);
-                    if is_scene {
-                        paint_selection_outline(
-                            ui,
-                            response.rect,
-                            &self.scene,
-                            &self.selected,
-                            &self.catalog,
-                        );
-                        paint_collider_gizmos(ui, response.rect, &self.scene, &self.selected);
-                        if self.edit_tool.is_tile_tool() {
-                            if let Some(name) = self.tilemap_target() {
-                                paint_tilemap_overlay(ui, response.rect, &self.scene, &name);
-                            }
+                    paint_collider_gizmos(ui, image_rect, &self.scene, &self.selected);
+                    if self.edit_tool.is_tile_tool() {
+                        if let Some(name) = self.tilemap_target() {
+                            paint_tilemap_overlay(ui, image_rect, &self.scene, &name);
                         }
-                        viewport_response = Some((response.clone(), response.rect));
-                    } else if self.play_mode == PlayMode::Edit {
-                        ui.painter().text(
-                            response.rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "Play to simulate  ·  WASD moves Player",
-                            egui::FontId::proportional(13.0),
-                            theme::TEXT_DIM,
-                        );
                     }
-                });
-                if let Some((response, rect)) = viewport_response {
-                    self.handle_viewport_input(&response, rect);
+                    self.handle_viewport_input(&response, image_rect);
+                } else if self.play_mode == PlayMode::Edit {
+                    ui.painter().text(
+                        image_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "Play to simulate  ·  WASD moves Player",
+                        egui::FontId::proportional(13.0),
+                        theme::TEXT_DIM,
+                    );
                 }
             });
     }

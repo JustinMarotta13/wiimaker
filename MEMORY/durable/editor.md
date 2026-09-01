@@ -10,7 +10,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - After mutate helpers, always set dirty + `rehydrate()` before relying on World/viewport.
 - Inspector numeric fields are Unity-style XYZ DragValues (not sliders). Undo: `begin_inspector_gesture` once per drag; sync baseline on release / after discrete mutates.
 - Discrete edits (add/remove/rename/duplicate/paste/components/reparent): `push_undo()` then mutate, then `sync_baseline()`.
-- Viewport blit is letterboxed via uniform scale `min(avail/VIEW, 1)`; map picks with `pointer_to_scene` using the **image response rect**, not the full CentralPanel.
+- Viewport blit contain-fits 640×480 into the remaining Scene well (upscale allowed). Map picks with `pointer_to_scene` using the **image rect**, not the full CentralPanel. Never `set_min_width(available_width())` on Hierarchy — a long tree expands PanelState and steals the Scene well. Pin Hierarchy/Inspector widths. Virtualize Hierarchy rows when a parent has hundreds of children.
 - Sprites use catalog pivot (default center): dest = translation − pivot × size × scale. Hit-tests / selection outline must match `render_world`.
 - Viewport drag translate: push one undo snapshot at drag **start** only (not per frame). Use `set_entity_world_xy` so children keep correct local pose under parents.
 - After open-scene: set `scene`/`scene_path`, `dirty = false`, clear selection + undo stack, then `rehydrate()`. Do not rewrite `game.toml` just to preview another scene.
