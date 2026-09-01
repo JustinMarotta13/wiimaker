@@ -13,8 +13,10 @@ use anyhow::{bail, Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
 
+mod anim;
 mod sprites;
 
+pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
 pub use sprites::{
     grid_by_cell_count, set_sprite_pivot, slice_sheet, ResolvedSprite, SpriteCatalog, SpriteCell,
     SpriteSheetMeta, PixelRect, Pivot,

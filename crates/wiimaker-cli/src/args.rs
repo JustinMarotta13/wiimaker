@@ -141,7 +141,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, or Trigger
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, or Animation
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -174,6 +174,15 @@ pub enum EntityCmd {
         /// Trigger filter tag (0 = any)
         #[arg(long, default_value_t = 0)]
         filter: u32,
+        /// Animation clip stem (`assets/<clip>.anim.json`)
+        #[arg(long)]
+        clip: Option<String>,
+        /// Animation fps override (omit to use clip file)
+        #[arg(long)]
+        fps: Option<f32>,
+        /// Animation loop (default true)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        r#loop: bool,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -215,7 +224,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, or Collider
+        /// Component kind: Sprite, Disc, Tilemap, Collider, or Animation
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -225,7 +234,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, or Collider
+        /// Component kind: Sprite, Disc, Tilemap, Collider, or Animation
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,
@@ -246,6 +255,20 @@ pub enum EntityCmd {
     Triggers {
         game: String,
         name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Attach or update Animation clip on an entity
+    SetAnim {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        clip: String,
+        #[arg(long)]
+        fps: Option<f32>,
+        #[arg(long, action = clap::ArgAction::Set)]
+        r#loop: Option<bool>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -331,6 +354,24 @@ pub enum AssetCmd {
     },
     /// List catalog sprite names (sheets + cells)
     ListSprites {
+        game: String,
+    },
+    /// Create / overwrite `assets/<name>.anim.json`
+    Anim {
+        game: String,
+        /// Clip stem (e.g. chomp)
+        name: String,
+        /// Comma-separated cell names
+        #[arg(long)]
+        cells: String,
+        #[arg(long, default_value_t = 10.0)]
+        fps: f32,
+        /// Loop playback (default true)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        r#loop: bool,
+    },
+    /// List `*.anim.json` clip stems
+    ListAnims {
         game: String,
     },
 }

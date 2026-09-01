@@ -1,9 +1,9 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
-    add_component_collider, add_component_disc, add_component_sprite, add_component_tilemap,
-    remove_component_collider, remove_component_disc, remove_component_sprite,
-    remove_component_tilemap, save_project, set_component_enabled, set_entity_parent,
-    tilemap_resize, SceneColliderKind,
+    add_component_animation, add_component_collider, add_component_disc, add_component_sprite,
+    add_component_tilemap, remove_component_animation, remove_component_collider,
+    remove_component_disc, remove_component_sprite, remove_component_tilemap, save_project,
+    set_component_enabled, set_entity_parent, tilemap_resize, SceneColliderKind,
 };
 
 use crate::app::EditorApp;
@@ -56,14 +56,17 @@ impl EditorApp {
         let mut add_disc = false;
         let mut add_tilemap = false;
         let mut add_collider = false;
+        let mut add_animation = false;
         let mut remove_sprite = false;
         let mut remove_disc = false;
         let mut remove_tilemap = false;
         let mut remove_collider = false;
+        let mut remove_animation = false;
         let mut toggle_sprite: Option<bool> = None;
         let mut toggle_disc: Option<bool> = None;
         let mut toggle_tilemap: Option<bool> = None;
         let mut toggle_collider: Option<bool> = None;
+        let mut toggle_animation: Option<bool> = None;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
@@ -199,6 +202,81 @@ impl EditorApp {
                     dirty |= ui
                         .add(egui::Slider::new(&mut sp.z, -10.0..=10.0).text("z"))
                         .changed();
+                });
+                }
+                ui.add_space(4.0);
+            }
+
+            if let Some(a) = ent.components.animation.as_mut() {
+                let hdr = theme::component_card_header(
+                    ui,
+                    "animation",
+                    "Animation",
+                    Some(a.enabled),
+                    true,
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_animation = Some(en);
+                }
+                if hdr.remove {
+                    remove_animation = true;
+                }
+                // Always expand Animation when agent-selected (screenshot OCR).
+                let force_open = std::env::var("WIIMAKER_EDITOR_SELECT").is_ok();
+                if hdr.open || force_open {
+                theme::card_frame().show(ui, |ui| {
+                    let clip_names: Vec<String> = self.anim_catalog.names().to_vec();
+                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                    let mut clip_changed = false;
+                    let mut new_clip = a.clip.clone();
+                    egui::ComboBox::from_id_salt("anim_clip")
+                        .selected_text(if a.clip.is_empty() { "(none)" } else { &a.clip })
+                        .width(combo_w)
+                        .show_ui(ui, |ui| {
+                            for name in &clip_names {
+                                if ui.selectable_label(a.clip == *name, name).clicked() {
+                                    new_clip = name.clone();
+                                    clip_changed = true;
+                                }
+                            }
+                        });
+                    if clip_changed {
+                        a.clip = new_clip;
+                        dirty = true;
+                    }
+                    let mut use_override = a.fps.is_some();
+                    if ui.checkbox(&mut use_override, "Override FPS").changed() {
+                        if use_override {
+                            let default_fps = self
+                                .anim_catalog
+                                .lookup(&a.clip)
+                                .map(|m| m.fps)
+                                .unwrap_or(10.0);
+                            a.fps = Some(default_fps);
+                        } else {
+                            a.fps = None;
+                        }
+                        dirty = true;
+                    }
+                    if let Some(fps) = a.fps.as_mut() {
+                        dirty |= ui
+                            .add(egui::Slider::new(fps, 1.0..=60.0).text("fps"))
+                            .changed();
+                    } else if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
+                        ui.label(
+                            RichText::new(format!("clip fps · {:.1}", meta.fps))
+                                .size(11.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                    }
+                    dirty |= ui.checkbox(&mut a.loop_, "Loop").changed();
+                    if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
+                        ui.label(
+                            RichText::new(format!("{} cells · {}", meta.cells.len(), meta.cells.join(", ")))
+                                .size(11.0)
+                                .color(theme::TEXT_DIM),
+                        );
+                    }
                 });
                 }
                 ui.add_space(4.0);
@@ -415,10 +493,12 @@ impl EditorApp {
                 }
             }
 
+
             let missing_sprite = ent.components.sprite.is_none();
             let missing_disc = ent.components.disc.is_none();
             let missing_tilemap = ent.components.tilemap.is_none();
             let missing_collider = ent.components.collider.is_none();
+            let missing_animation = ent.components.animation.is_none();
             ui.add_space(8.0);
             ui.menu_button(
                 RichText::new("Add Component").strong().color(theme::TEXT),
@@ -439,7 +519,16 @@ impl EditorApp {
                         add_collider = true;
                         ui.close_menu();
                     }
-                    if !missing_sprite && !missing_disc && !missing_tilemap && !missing_collider {
+                    if missing_animation && ui.button("Animation").clicked() {
+                        add_animation = true;
+                        ui.close_menu();
+                    }
+                    if !missing_sprite
+                        && !missing_disc
+                        && !missing_tilemap
+                        && !missing_collider
+                        && !missing_animation
+                    {
                         ui.label(
                             RichText::new("All components present")
                                 .size(12.0)
@@ -591,6 +680,37 @@ impl EditorApp {
                 let _ = self.undo.undo(&mut self.scene);
             }
         }
+        if add_animation {
+            let clip = self
+                .anim_catalog
+                .names()
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "chomp".into());
+            self.push_undo();
+            let _ = add_component_animation(&mut self.scene, &sel, &clip, None, true);
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_animation {
+            self.push_undo();
+            if remove_component_animation(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_animation {
+            self.push_undo();
+            if set_component_enabled(&mut self.scene, &sel, "animation", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+
         if let Some((w, h)) = pending_tm_resize {
             self.begin_inspector_gesture();
             if tilemap_resize(&mut self.scene, &sel, w, h).is_ok() {

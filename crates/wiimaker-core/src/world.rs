@@ -1,4 +1,4 @@
-//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider).
+//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation).
 
 use crate::collider::Collider;
 use crate::color::Rgba8;
@@ -96,6 +96,39 @@ pub struct Camera {
     pub active: bool,
 }
 
+/// Sprite clip playback (Unity Animator / AnimationClip analogue for 2D cells).
+#[derive(Clone, Debug)]
+pub struct Animation {
+    /// Clip asset stem (`assets/<clip>.anim.json`).
+    pub clip: String,
+    /// Resolved cell names from the clip (catalog lookups).
+    pub cells: Vec<String>,
+    pub fps: f32,
+    pub loop_: bool,
+    /// Accumulated seconds in the current cycle.
+    pub time: f32,
+    /// Current cell index into `cells`.
+    pub frame: usize,
+}
+
+impl Animation {
+    pub fn new(clip: impl Into<String>, cells: Vec<String>, fps: f32, loop_: bool) -> Self {
+        Self {
+            clip: clip.into(),
+            cells,
+            fps: fps.max(0.001),
+            loop_,
+            time: 0.0,
+            frame: 0,
+        }
+    }
+
+    pub fn cell_name(&self) -> Option<&str> {
+        self.cells.get(self.frame).map(|s| s.as_str())
+    }
+}
+
+
 #[cfg(feature = "std")]
 mod alloc_types {
     pub use std::string::String;
@@ -122,6 +155,7 @@ struct Slot {
     camera: Option<Camera>,
     tilemap: Option<Tilemap>,
     collider: Option<Collider>,
+    animation: Option<Animation>,
 }
 
 /// Tiny entity world — Unity GameObject feel without a full ECS.
@@ -151,6 +185,7 @@ impl World {
             slot.camera = None;
             slot.tilemap = None;
             slot.collider = None;
+            slot.animation = None;
             return EntityId(idx as u32);
         }
         let id = EntityId(self.slots.len() as u32);
@@ -164,6 +199,7 @@ impl World {
             camera: None,
             tilemap: None,
             collider: None,
+            animation: None,
         });
         id
     }
@@ -344,6 +380,33 @@ impl World {
                 s.collider
                     .as_ref()
                     .map(|c| (EntityId(i as u32), &s.transform, c))
+            } else {
+                None
+            }
+        })
+    }
+
+
+    pub fn animation(&self, id: EntityId) -> Option<&Animation> {
+        self.slot(id).and_then(|s| s.animation.as_ref())
+    }
+
+    pub fn animation_mut(&mut self, id: EntityId) -> Option<&mut Animation> {
+        self.slot_mut(id).and_then(|s| s.animation.as_mut())
+    }
+
+    pub fn set_animation(&mut self, id: EntityId, animation: Option<Animation>) {
+        if let Some(slot) = self.slot_mut(id) {
+            slot.animation = animation;
+        }
+    }
+
+    pub fn iter_animations(&self) -> impl Iterator<Item = (EntityId, &Animation)> {
+        self.slots.iter().enumerate().filter_map(|(i, s)| {
+            if s.live {
+                s.animation
+                    .as_ref()
+                    .map(|a| (EntityId(i as u32), a))
             } else {
                 None
             }

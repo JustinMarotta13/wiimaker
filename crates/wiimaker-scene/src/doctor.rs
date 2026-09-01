@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::project::GameProject;
 use crate::scene::{load_scene, Scene};
-use wiimaker_assets::SpriteCatalog;
+use wiimaker_assets::{list_anim_clips, AnimClipMeta, SpriteCatalog};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -98,8 +98,38 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         sprite_names = texture_names.clone();
     }
 
+
+    let anim_names = list_anim_clips(&assets).unwrap_or_default();
+    for aname in &anim_names {
+        let path = AnimClipMeta::path(&assets, aname);
+        match AnimClipMeta::load(&path) {
+            Ok(meta) => {
+                if meta.cells.is_empty() {
+                    issues.push(Issue {
+                        severity: Severity::Warning,
+                        message: format!("anim '{aname}': no cells listed"),
+                    });
+                }
+                for cell in &meta.cells {
+                    if !sprite_names.iter().any(|t| t == cell) {
+                        issues.push(Issue {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "anim '{aname}': cell '{cell}' missing from sprite catalog"
+                            ),
+                        });
+                    }
+                }
+            }
+            Err(e) => issues.push(Issue {
+                severity: Severity::Error,
+                message: format!("anim '{aname}': {e}"),
+            }),
+        }
+    }
+
     if let Some(scene) = &scene {
-        check_scene_refs(scene, &sprite_names, &mut issues);
+        check_scene_refs(scene, &sprite_names, &anim_names, &assets, &mut issues);
     }
 
     let wpack = project.wpack_path(game_dir);
@@ -122,7 +152,13 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
     }
 }
 
-fn check_scene_refs(scene: &Scene, sprites: &[String], issues: &mut Vec<Issue>) {
+fn check_scene_refs(
+    scene: &Scene,
+    sprites: &[String],
+    anims: &[String],
+    assets: &Path,
+    issues: &mut Vec<Issue>,
+) {
     for ent in &scene.entities {
         if let Some(sp) = &ent.components.sprite {
             if !sprites.iter().any(|t| t == &sp.texture) {
@@ -174,6 +210,38 @@ fn check_scene_refs(scene: &Scene, sprites: &[String], issues: &mut Vec<Issue>) 
                     severity: Severity::Warning,
                     message: format!("entity '{}': Collider has zero size", ent.name),
                 });
+            }
+        }
+
+        if let Some(a) = &ent.components.animation {
+            if a.clip.is_empty() {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!("entity '{}': Animation has empty clip name", ent.name),
+                });
+            } else if !anims.iter().any(|n| n == &a.clip) {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "entity '{}': Animation clip '{}' missing (expected assets/{}.anim.json)",
+                        ent.name, a.clip, a.clip
+                    ),
+                });
+            } else {
+                let path = AnimClipMeta::path(assets, &a.clip);
+                if let Ok(meta) = AnimClipMeta::load(&path) {
+                    for cell in &meta.cells {
+                        if !sprites.iter().any(|t| t == cell) {
+                            issues.push(Issue {
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "entity '{}': Animation clip '{}' cell '{}' missing from assets/",
+                                    ent.name, a.clip, cell
+                                ),
+                            });
+                        }
+                    }
+                }
             }
         }
     }
