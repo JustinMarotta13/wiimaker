@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 egui = { workspace = true }
+egui_dock = { workspace = true }
 eframe = { workspace = true }
 image = { workspace = true }
 wiimaker-core = { workspace = true }

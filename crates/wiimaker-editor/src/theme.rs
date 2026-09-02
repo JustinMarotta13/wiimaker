@@ -134,6 +134,7 @@ pub fn toolbar_frame() -> Frame {
         .stroke(Stroke::new(1.0, BORDER))
 }
 
+#[allow(dead_code)]
 pub fn side_frame() -> Frame {
     Frame::none()
         .fill(BG_PANEL)
@@ -141,6 +142,7 @@ pub fn side_frame() -> Frame {
         .stroke(Stroke::new(1.0, BORDER))
 }
 
+#[allow(dead_code)]
 pub fn bottom_frame() -> Frame {
     Frame::none()
         .fill(BG_PANEL)
@@ -148,6 +150,7 @@ pub fn bottom_frame() -> Frame {
         .stroke(Stroke::new(1.0, BORDER))
 }
 
+#[allow(dead_code)]
 pub fn central_frame() -> Frame {
     Frame::none()
         .fill(BG_DEEP)
@@ -246,6 +249,7 @@ pub fn labeled_drag(ui: &mut egui::Ui, label: &str, v: &mut f32, speed: f32) -> 
     changed
 }
 
+#[allow(dead_code)]
 pub fn section_header(ui: &mut egui::Ui, title: &str) {
     ui.add_space(2.0);
     ui.label(RichText::new(title).strong().size(13.0).color(TEXT));
@@ -265,6 +269,7 @@ pub fn meta_chip(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 /// Unity-style dock tab strip. Selected tab gets a blue underline.
+#[allow(dead_code)]
 pub fn dock_tabs<T: Copy + PartialEq>(ui: &mut egui::Ui, tabs: &[(&str, T)], current: T) -> T {
     let mut selected = current;
     let tab_h = 22.0;

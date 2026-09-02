@@ -3,6 +3,7 @@
 //! Unity 6 docks: Hierarchy · Scene/Game · Inspector · Project/Console (dark Pro chrome)
 
 mod app;
+mod dock;
 mod sprite_editor;
 mod theme;
 mod ui_console;

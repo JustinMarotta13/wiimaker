@@ -16,7 +16,6 @@ impl EditorApp {
         let slider_w = (ui.available_width() - 72.0).clamp(96.0, 180.0);
         ui.spacing_mut().slider_width = slider_w;
 
-        let _ = theme::dock_tabs(ui, &[("Inspector", ())], ());
         egui::ScrollArea::vertical()
             .id_salt("inspector_scroll")
             .auto_shrink([false, false])

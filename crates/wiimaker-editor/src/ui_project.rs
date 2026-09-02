@@ -2,61 +2,11 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, RichText, Sense};
 
-use crate::app::{BottomTab, EditorApp, ProjectEntry};
+use crate::app::{EditorApp, ProjectEntry};
 use crate::theme;
 
-/// Vertical space reserved for header, prefab strip, card chrome, and footer inside the exact-height panel.
-/// Keep this generous — too small and the ScrollArea overlaps the Prefabs Instantate buttons.
-const PROJECT_CHROME: f32 = 150.0;
-
 impl EditorApp {
-    pub(crate) fn ui_bottom(&mut self, ctx: &egui::Context) {
-        // exact_height + app-owned size: egui must not persist content rect as panel height
-        // (that feedback loop expands the panel every frame).
-        let h = self.project_panel_height.clamp(140.0, 560.0);
-        self.project_panel_height = h;
-
-        egui::TopBottomPanel::bottom("project_explorer")
-            .exact_height(h)
-            .resizable(false)
-            .frame(theme::bottom_frame())
-            .show(ctx, |ui| {
-                // Drag the top edge to resize (replaces egui's content-driven resize).
-                let top = ui.max_rect().top();
-                let resize_rect = egui::Rect::from_x_y_ranges(
-                    ui.max_rect().x_range(),
-                    (top - 4.0)..=(top + 4.0),
-                );
-                let resize = ui.interact(
-                    resize_rect,
-                    ui.id().with("project_resize"),
-                    Sense::drag(),
-                );
-                if resize.hovered() || resize.dragged() {
-                    ui.ctx()
-                        .set_cursor_icon(egui::CursorIcon::ResizeVertical);
-                }
-                if resize.dragged() {
-                    self.project_panel_height =
-                        (self.project_panel_height - resize.drag_delta().y).clamp(140.0, 560.0);
-                }
-
-                self.bottom_tab = theme::dock_tabs(
-                    ui,
-                    &[
-                        ("Project", BottomTab::Project),
-                        ("Console", BottomTab::Console),
-                    ],
-                    self.bottom_tab,
-                );
-                match self.bottom_tab {
-                    BottomTab::Project => self.ui_project_body(ui, h),
-                    BottomTab::Console => self.ui_console(ui),
-                }
-            });
-    }
-
-    pub(crate) fn ui_project_body(&mut self, ui: &mut egui::Ui, h: f32) {
+    pub(crate) fn ui_project_body(&mut self, ui: &mut egui::Ui) {
                 ui.horizontal(|ui| {
                     theme::meta_chip(ui, "game", &self.project.name);
                     ui.separator();
@@ -121,11 +71,11 @@ impl EditorApp {
                 }
                 ui.add_space(4.0);
 
-                let list_h = (h - PROJECT_CHROME).max(48.0);
+                let list_h = (ui.available_height() - 36.0).max(48.0);
                 theme::card_frame().show(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("project_tree")
-                        .auto_shrink([false, true])
+                        .auto_shrink([false, false])
                         .max_height(list_h)
                         .show(ui, |ui| {
                             let entries = self.project_entries.clone();

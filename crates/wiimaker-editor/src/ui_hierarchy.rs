@@ -6,9 +6,7 @@ use crate::theme;
 
 impl EditorApp {
     pub(crate) fn ui_hierarchy(&mut self, ui: &mut egui::Ui) {
-        let _ = theme::dock_tabs(ui, &[("Hierarchy", ())], ());
-
-        // Unity 6 Hierarchy toolbar: + then search (see MEMORY/durable/unity-chrome/hierarchy.png).
+        // Dock tab title is the name — search + tree only (no inner Hierarchy strip).
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let plus = ui
