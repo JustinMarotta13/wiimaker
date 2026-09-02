@@ -134,6 +134,10 @@ pub(crate) struct EditorApp {
     pub(crate) new_scene_name: String,
     /// Owned Project panel height — egui PanelState must not derive this from content.
     pub(crate) project_panel_height: f32,
+    /// Owned Hierarchy width — edge-drag splitter; never derive from content.
+    pub(crate) hierarchy_width: f32,
+    /// Owned Inspector width — edge-drag splitter; never derive from content.
+    pub(crate) inspector_width: f32,
     /// Snap world translate to grid when dragging / nudging with Shift.
     pub(crate) snap_enabled: bool,
     pub(crate) snap_size: f32,
@@ -195,6 +199,8 @@ impl EditorApp {
             pending_open: None,
             new_scene_name: "menu".into(),
             project_panel_height: 200.0,
+            hierarchy_width: 240.0,
+            inspector_width: 300.0,
             snap_enabled: false,
             snap_size: 16.0,
             edit_tool: EditTool::Translate,
@@ -1118,18 +1124,63 @@ impl eframe::App for EditorApp {
         self.show_unsaved_modal(ctx);
 
         // Unity 6 default: Hierarchy left, Inspector right, Scene/Game center.
-        // Pin min/max width so content swaps cannot rewrite PanelState / flicker.
-        egui::SidePanel::left("hierarchy")
-            .exact_width(240.0)
+        // App-owned exact sizes + edge drag. New ids discard stale PanelState.
+        // Never set_min_width(available_width()) — a long tree steals the Scene well.
+        let hier_w = self.hierarchy_width.clamp(180.0, 520.0);
+        self.hierarchy_width = hier_w;
+        egui::SidePanel::left("hierarchy_dock")
+            .exact_width(hier_w)
+            .resizable(false)
             .frame(theme::side_frame())
             .show(ctx, |ui| {
+                // Drag the right edge (4px hit) to change hierarchy_width.
+                let right = ui.max_rect().right();
+                let resize_rect = egui::Rect::from_x_y_ranges(
+                    (right - 4.0)..=(right + 4.0),
+                    ui.max_rect().y_range(),
+                );
+                let resize = ui.interact(
+                    resize_rect,
+                    ui.id().with("hierarchy_resize"),
+                    egui::Sense::drag(),
+                );
+                if resize.hovered() || resize.dragged() {
+                    ui.ctx()
+                        .set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                if resize.dragged() {
+                    self.hierarchy_width =
+                        (self.hierarchy_width + resize.drag_delta().x).clamp(180.0, 520.0);
+                }
                 self.ui_hierarchy(ui);
             });
 
-        egui::SidePanel::right("inspector")
-            .exact_width(300.0)
+        let insp_w = self.inspector_width.clamp(220.0, 520.0);
+        self.inspector_width = insp_w;
+        egui::SidePanel::right("inspector_dock")
+            .exact_width(insp_w)
+            .resizable(false)
             .frame(theme::side_frame())
             .show(ctx, |ui| {
+                // Drag the left edge; width += -drag_delta.x.
+                let left = ui.max_rect().left();
+                let resize_rect = egui::Rect::from_x_y_ranges(
+                    (left - 4.0)..=(left + 4.0),
+                    ui.max_rect().y_range(),
+                );
+                let resize = ui.interact(
+                    resize_rect,
+                    ui.id().with("inspector_resize"),
+                    egui::Sense::drag(),
+                );
+                if resize.hovered() || resize.dragged() {
+                    ui.ctx()
+                        .set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                if resize.dragged() {
+                    self.inspector_width =
+                        (self.inspector_width - resize.drag_delta().x).clamp(220.0, 520.0);
+                }
                 self.ui_inspector(ui);
             });
 
