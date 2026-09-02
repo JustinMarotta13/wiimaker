@@ -13,7 +13,7 @@ impl EditorApp {
     pub(crate) fn ui_bottom(&mut self, ctx: &egui::Context) {
         // exact_height + app-owned size: egui must not persist content rect as panel height
         // (that feedback loop expands the panel every frame).
-        let h = self.project_panel_height.clamp(140.0, 420.0);
+        let h = self.project_panel_height.clamp(140.0, 560.0);
         self.project_panel_height = h;
 
         egui::TopBottomPanel::bottom("project_explorer")
@@ -38,7 +38,7 @@ impl EditorApp {
                 }
                 if resize.dragged() {
                     self.project_panel_height =
-                        (self.project_panel_height - resize.drag_delta().y).clamp(140.0, 420.0);
+                        (self.project_panel_height - resize.drag_delta().y).clamp(140.0, 560.0);
                 }
 
                 self.bottom_tab = theme::dock_tabs(
