@@ -121,18 +121,29 @@ impl EditorApp {
                         }
                     });
                     ui.menu_button("Window", |ui| {
+                        use crate::dock::EditorTab;
                         if ui.button("Hierarchy").clicked() {
+                            self.focus_tab(EditorTab::Hierarchy);
                             ui.close_menu();
                         }
                         if ui.button("Inspector").clicked() {
+                            self.focus_tab(EditorTab::Inspector);
+                            ui.close_menu();
+                        }
+                        if ui.button("Scene").clicked() {
+                            self.focus_tab(EditorTab::Scene);
+                            ui.close_menu();
+                        }
+                        if ui.button("Game").clicked() {
+                            self.focus_tab(EditorTab::Game);
                             ui.close_menu();
                         }
                         if ui.button("Project").clicked() {
-                            self.bottom_tab = crate::app::BottomTab::Project;
+                            self.focus_tab(EditorTab::Project);
                             ui.close_menu();
                         }
                         if ui.button("Console").clicked() {
-                            self.bottom_tab = crate::app::BottomTab::Console;
+                            self.focus_tab(EditorTab::Console);
                             ui.close_menu();
                         }
                     });

@@ -15,6 +15,7 @@ use wiimaker_scene::{
     UndoStack,
 };
 
+use crate::dock::{self, EditorTab};
 use crate::sprite_editor::{self, SpriteEditorState};
 use crate::theme;
 use crate::ui_project;
@@ -75,12 +76,6 @@ pub(crate) enum CenterTab {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BottomTab {
-    Project,
-    Console,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConsoleLevel {
     Info,
     Warn,
@@ -109,6 +104,7 @@ pub(crate) struct EditorApp {
     pub(crate) fb: Framebuffer,
     pub(crate) texture_handle: Option<egui::TextureHandle>,
     pub(crate) status: String,
+    #[allow(dead_code)]
     pub(crate) new_entity_name: String,
     pub(crate) hierarchy_filter: String,
     pub(crate) asset_names: Vec<String>,
@@ -132,11 +128,12 @@ pub(crate) struct EditorApp {
     /// Pending open when current scene is dirty (absolute path).
     pub(crate) pending_open: Option<PathBuf>,
     pub(crate) new_scene_name: String,
-    /// Owned Project panel height — egui PanelState must not derive this from content.
+    /// Unused: dock splitters own leaf size now.
+    #[allow(dead_code)]
     pub(crate) project_panel_height: f32,
-    /// Owned Hierarchy width — edge-drag splitter; never derive from content.
+    #[allow(dead_code)]
     pub(crate) hierarchy_width: f32,
-    /// Owned Inspector width — edge-drag splitter; never derive from content.
+    #[allow(dead_code)]
     pub(crate) inspector_width: f32,
     /// Snap world translate to grid when dragging / nudging with Shift.
     pub(crate) snap_enabled: bool,
@@ -146,8 +143,8 @@ pub(crate) struct EditorApp {
     pub(crate) tile_brush_id: u16,
     pub(crate) tile_brush_solid: bool,
     pub(crate) tile_paint: Option<TilePaintDrag>,
-    pub(crate) center_tab: CenterTab,
-    pub(crate) bottom_tab: BottomTab,
+    pub(crate) dock_state: egui_dock::DockState<EditorTab>,
+    pub(crate) pending_focus: Option<EditorTab>,
     pub(crate) console: Vec<ConsoleLine>,
     pub(crate) last_play_hit: Option<String>,
 }
@@ -208,8 +205,8 @@ impl EditorApp {
             tile_brush_id: 1,
             tile_brush_solid: true,
             tile_paint: None,
-            center_tab: CenterTab::Scene,
-            bottom_tab: BottomTab::Project,
+            dock_state: dock::default_unity_layout(),
+            pending_focus: None,
             console: Vec::new(),
             last_play_hit: None,
         };
@@ -809,7 +806,7 @@ impl EditorApp {
                 )
             };
             self.status = summary;
-            self.bottom_tab = BottomTab::Console;
+            self.focus_tab(EditorTab::Console);
         }
     }
 
@@ -1120,71 +1117,16 @@ impl eframe::App for EditorApp {
         }
 
         self.ui_toolbar(ctx);
-        self.ui_bottom(ctx);
         self.show_unsaved_modal(ctx);
+        self.apply_pending_focus();
 
-        // Unity 6 default: Hierarchy left, Inspector right, Scene/Game center.
-        // App-owned exact sizes + edge drag. New ids discard stale PanelState.
-        // Never set_min_width(available_width()) — a long tree steals the Scene well.
-        let hier_w = self.hierarchy_width.clamp(180.0, 520.0);
-        self.hierarchy_width = hier_w;
-        egui::SidePanel::left("hierarchy_dock")
-            .exact_width(hier_w)
-            .resizable(false)
-            .frame(theme::side_frame())
+        // Top toolbar stays as TopBottomPanel. Everything else is one DockArea.
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(theme::BG_DEEP).inner_margin(egui::Margin::same(0.0)))
             .show(ctx, |ui| {
-                // Drag the right edge (4px hit) to change hierarchy_width.
-                let right = ui.max_rect().right();
-                let resize_rect = egui::Rect::from_x_y_ranges(
-                    (right - 4.0)..=(right + 4.0),
-                    ui.max_rect().y_range(),
-                );
-                let resize = ui.interact(
-                    resize_rect,
-                    ui.id().with("hierarchy_resize"),
-                    egui::Sense::drag(),
-                );
-                if resize.hovered() || resize.dragged() {
-                    ui.ctx()
-                        .set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                }
-                if resize.dragged() {
-                    self.hierarchy_width =
-                        (self.hierarchy_width + resize.drag_delta().x).clamp(180.0, 520.0);
-                }
-                self.ui_hierarchy(ui);
+                self.ui_dock(ui);
             });
-
-        let insp_w = self.inspector_width.clamp(220.0, 520.0);
-        self.inspector_width = insp_w;
-        egui::SidePanel::right("inspector_dock")
-            .exact_width(insp_w)
-            .resizable(false)
-            .frame(theme::side_frame())
-            .show(ctx, |ui| {
-                // Drag the left edge; width += -drag_delta.x.
-                let left = ui.max_rect().left();
-                let resize_rect = egui::Rect::from_x_y_ranges(
-                    (left - 4.0)..=(left + 4.0),
-                    ui.max_rect().y_range(),
-                );
-                let resize = ui.interact(
-                    resize_rect,
-                    ui.id().with("inspector_resize"),
-                    egui::Sense::drag(),
-                );
-                if resize.hovered() || resize.dragged() {
-                    ui.ctx()
-                        .set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                }
-                if resize.dragged() {
-                    self.inspector_width =
-                        (self.inspector_width - resize.drag_delta().x).clamp(220.0, 520.0);
-                }
-                self.ui_inspector(ui);
-            });
-
-        self.ui_viewport(ctx);
+        self.apply_pending_focus();
 
         ctx.request_repaint();
     }

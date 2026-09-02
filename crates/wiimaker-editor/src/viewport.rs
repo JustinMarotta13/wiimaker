@@ -14,179 +14,141 @@ pub(crate) const VIEW_W: usize = 640;
 pub(crate) const VIEW_H: usize = 480;
 
 impl EditorApp {
-    pub(crate) fn ui_viewport(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default()
-            .frame(theme::central_frame())
-            .show(ctx, |ui| {
-                self.center_tab = theme::dock_tabs(
-                    ui,
-                    &[("Scene", CenterTab::Scene), ("Game", CenterTab::Game)],
-                    self.center_tab,
-                );
-
-                let is_scene = self.center_tab == CenterTab::Scene;
-                if is_scene {
-                    ui.horizontal(|ui| {
-                        ui.add_enabled_ui(self.play_mode == PlayMode::Edit, |ui| {
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Translate, "Move");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Scale, "Scale");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Rotate, "Rotate");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Paint, "Paint");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Erase, "Erase");
-                            ui.selectable_value(&mut self.edit_tool, EditTool::Pick, "Pick");
-                        });
-                        if self.edit_tool.is_tile_tool() {
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "brush {}{}",
-                                    self.tile_brush_id,
-                                    if self.tile_brush_solid { " solid" } else { "" }
-                                ))
-                                .size(11.0)
-                                .color(theme::TEXT_DIM),
-                            );
-                        }
-                        if theme::enable_checkbox(ui, self.snap_enabled).clicked() {
-                            self.snap_enabled = !self.snap_enabled;
-                        }
-                        ui.label(
-                            egui::RichText::new("Snap")
-                                .size(12.0)
-                                .color(theme::TEXT),
-                        );
-                        ui.add(
-                            egui::DragValue::new(&mut self.snap_size)
-                                .range(1.0..=128.0)
-                                .speed(1.0)
-                                .prefix("grid "),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(format!("{VIEW_W}x{VIEW_H}"))
-                                    .size(11.0)
-                                    .color(theme::TEXT_DIM),
-                            );
-                        });
-                    });
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("Game")
-                                .size(12.0)
-                                .color(theme::TEXT_MUTED),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(format!("{VIEW_W}x{VIEW_H}"))
-                                    .size(11.0)
-                                    .color(theme::TEXT_DIM),
-                            );
-                            if self.play_mode != PlayMode::Edit {
-                                let label = match self.play_mode {
-                                    PlayMode::Playing => "PLAYING",
-                                    PlayMode::Paused => "PAUSED",
-                                    PlayMode::Edit => "",
-                                };
-                                ui.label(
-                                    egui::RichText::new(label)
-                                        .strong()
-                                        .size(11.0)
-                                        .color(theme::ACCENT),
-                                );
-                            }
-                        });
-                    });
-                }
-                ui.add_space(4.0);
-
-                let mut draw = DrawList::new();
-                render_world(&self.world, &mut draw, self.scene.clear_rgba());
-                flush_with_atlas(&draw, &mut self.fb, Some(&self.atlas));
-
-                let rgb = fb_to_rgb(&self.fb);
-                debug_assert_eq!(self.fb.width, VIEW_W);
-                debug_assert_eq!(self.fb.height, VIEW_H);
-                debug_assert_eq!(rgb.len(), VIEW_W * VIEW_H * 3);
-                let color_image = egui::ColorImage::from_rgb([VIEW_W, VIEW_H], &rgb);
-                let tex_filter = egui::TextureOptions::NEAREST;
-                let tex = self.texture_handle.get_or_insert_with(|| {
-                    ctx.load_texture("viewport", color_image.clone(), tex_filter)
+    pub(crate) fn ui_viewport(&mut self, ui: &mut egui::Ui, tab: CenterTab) {
+        let is_scene = tab == CenterTab::Scene;
+        if is_scene {
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(self.play_mode == PlayMode::Edit, |ui| {
+                    ui.selectable_value(&mut self.edit_tool, EditTool::Translate, "Move");
+                    ui.selectable_value(&mut self.edit_tool, EditTool::Scale, "Scale");
+                    ui.selectable_value(&mut self.edit_tool, EditTool::Rotate, "Rotate");
+                    ui.selectable_value(&mut self.edit_tool, EditTool::Paint, "Paint");
+                    ui.selectable_value(&mut self.edit_tool, EditTool::Erase, "Erase");
+                    ui.selectable_value(&mut self.edit_tool, EditTool::Pick, "Pick");
                 });
-                tex.set(color_image, tex_filter);
-
-                // Remaining well is allocated first, then an egui Image is put on a
-                // contain-fit rect inside a child ui clipped to that well. Do not nest
-                // add_space+horizontal (0-size child) or rely on painter.image.
-                let well_size = ui.available_size();
-                let (well, _) = ui.allocate_exact_size(well_size, egui::Sense::hover());
-                let mut scale = (well.width() / VIEW_W as f32).min(well.height() / VIEW_H as f32);
-                if !scale.is_finite() || scale <= 0.0 {
-                    scale = 1.0;
-                }
-                let size = egui::vec2(VIEW_W as f32 * scale, VIEW_H as f32 * scale);
-                let image_rect = egui::Rect::from_center_size(well.center(), size);
-
-                let sense = if is_scene {
-                    egui::Sense::click_and_drag()
-                } else {
-                    egui::Sense::hover()
-                };
-                // Dedicated layer so the blit is not clipped by CentralPanel leftover
-                // clip (the well was a native-clear hole) and not stolen by Inspector
-                // widgets sharing put()'s default id_salt "child".
-                let painter = ctx.layer_painter(egui::LayerId::new(
-                    egui::Order::Middle,
-                    egui::Id::new("wiimaker_viewport_fb"),
-                ));
-                painter.rect_filled(well, egui::Rounding::same(2.0), theme::BG_SUNKEN);
-                painter.rect_stroke(
-                    well,
-                    egui::Rounding::same(2.0),
-                    egui::Stroke::new(1.0_f32, theme::BORDER),
-                );
-                painter.rect(
-                    image_rect.expand(2.0),
-                    egui::Rounding::same(2.0),
-                    theme::BG_RAISED,
-                    egui::Stroke::new(1.0_f32, theme::BORDER),
-                );
-                let image = egui::Image::new((tex.id(), size))
-                    .texture_options(tex_filter)
-                    .fit_to_exact_size(size)
-                    .maintain_aspect_ratio(true);
-                image.paint_at(ui, image_rect);
-                painter.image(
-                    tex.id(),
-                    image_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-                let response = ui.interact(image_rect, ui.id().with("viewport_fb"), sense);
-                if is_scene {
-                    paint_selection_outline(
-                        ui,
-                        image_rect,
-                        &self.scene,
-                        &self.selected,
-                        &self.catalog,
-                    );
-                    paint_collider_gizmos(ui, image_rect, &self.scene, &self.selected);
-                    if self.edit_tool.is_tile_tool() {
-                        if let Some(name) = self.tilemap_target() {
-                            paint_tilemap_overlay(ui, image_rect, &self.scene, &name);
-                        }
-                    }
-                    self.handle_viewport_input(&response, image_rect);
-                } else if self.play_mode == PlayMode::Edit {
-                    ui.painter().text(
-                        image_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "Play to simulate  ·  WASD moves Player",
-                        egui::FontId::proportional(13.0),
-                        theme::TEXT_DIM,
+                if self.edit_tool.is_tile_tool() {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "brush {}{}",
+                            self.tile_brush_id,
+                            if self.tile_brush_solid { " solid" } else { "" }
+                        ))
+                        .size(11.0)
+                        .color(theme::TEXT_DIM),
                     );
                 }
+                if theme::enable_checkbox(ui, self.snap_enabled).clicked() {
+                    self.snap_enabled = !self.snap_enabled;
+                }
+                ui.label(
+                    egui::RichText::new("Snap")
+                        .size(12.0)
+                        .color(theme::TEXT),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.snap_size)
+                        .range(1.0..=128.0)
+                        .speed(1.0)
+                        .prefix("grid "),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{VIEW_W}x{VIEW_H}"))
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
+                });
             });
+            ui.add_space(2.0);
+        } else {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{VIEW_W}x{VIEW_H}"))
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
+                    if self.play_mode != PlayMode::Edit {
+                        let label = match self.play_mode {
+                            PlayMode::Playing => "PLAYING",
+                            PlayMode::Paused => "PAUSED",
+                            PlayMode::Edit => "",
+                        };
+                        ui.label(
+                            egui::RichText::new(label)
+                                .strong()
+                                .size(11.0)
+                                .color(theme::ACCENT),
+                        );
+                    }
+                });
+            });
+            ui.add_space(2.0);
+        }
+
+        self.blit_framebuffer(ui, is_scene);
+    }
+
+    /// Stretch the 640×480 fb into the full allocated well (no contain-fit letterbox).
+    fn blit_framebuffer(&mut self, ui: &mut egui::Ui, is_scene: bool) {
+        let ctx = ui.ctx().clone();
+        let mut draw = DrawList::new();
+        render_world(&self.world, &mut draw, self.scene.clear_rgba());
+        flush_with_atlas(&draw, &mut self.fb, Some(&self.atlas));
+
+        let rgb = fb_to_rgb(&self.fb);
+        debug_assert_eq!(self.fb.width, VIEW_W);
+        debug_assert_eq!(self.fb.height, VIEW_H);
+        debug_assert_eq!(rgb.len(), VIEW_W * VIEW_H * 3);
+        let color_image = egui::ColorImage::from_rgb([VIEW_W, VIEW_H], &rgb);
+        let tex_filter = egui::TextureOptions::NEAREST;
+        let tex = self.texture_handle.get_or_insert_with(|| {
+            ctx.load_texture("viewport", color_image.clone(), tex_filter)
+        });
+        tex.set(color_image, tex_filter);
+
+        let well_size = ui.available_size();
+        let (well, _) = ui.allocate_exact_size(well_size, egui::Sense::hover());
+        let image_rect = well;
+        ui.set_clip_rect(ui.clip_rect().intersect(well));
+
+        let sense = if is_scene {
+            egui::Sense::click_and_drag()
+        } else {
+            egui::Sense::hover()
+        };
+        let painter = ui.painter_at(well);
+        painter.image(
+            tex.id(),
+            image_rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        let response = ui.interact(image_rect, ui.id().with("viewport_fb"), sense);
+        if is_scene {
+            paint_selection_outline(
+                ui,
+                image_rect,
+                &self.scene,
+                &self.selected,
+                &self.catalog,
+            );
+            paint_collider_gizmos(ui, image_rect, &self.scene, &self.selected);
+            if self.edit_tool.is_tile_tool() {
+                if let Some(name) = self.tilemap_target() {
+                    paint_tilemap_overlay(ui, image_rect, &self.scene, &name);
+                }
+            }
+            self.handle_viewport_input(&response, image_rect);
+        } else if self.play_mode == PlayMode::Edit {
+            ui.painter().text(
+                image_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Play to simulate  ·  WASD moves Player",
+                egui::FontId::proportional(13.0),
+                theme::TEXT_DIM,
+            );
+        }
     }
 
     fn handle_viewport_input(&mut self, response: &egui::Response, rect: egui::Rect) {
