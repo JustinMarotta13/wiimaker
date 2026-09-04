@@ -15,6 +15,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - Prefabs: `entity create-prefab` · `instantiate-prefab` · `apply-prefab` · `unpack-prefab` (files under `assets/prefabs/`).
 - `entity set --name X [--x --y --sx --sy --rotation-deg]` — scale/rotate via `set_entity_scale` / `set_entity_rotation_z` (degrees → radians).
 - `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
+- `scene build-list` / `build-add` / `build-remove` mutate `game.toml` `scenes` (Build Settings). Empty list is omitted; authoring `scene list` still walks `scenes/`.
 - `entity list` prints an indented tree (non-json); JSON still dumps flat entity array with `parent` fields.
 - Sprite sheets: `asset slice <game> <stem> --cols N --rows M`, `asset set-pivot <game> <cell> --x --y`, `asset list-sprites`.
 

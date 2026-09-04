@@ -1,6 +1,7 @@
 //! Scene → World hydration with texture / sprite-cell name resolution.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use anyhow::Result;
 use wiimaker_assets::{AnimClipCatalog, SpriteCatalog};
@@ -95,6 +96,30 @@ pub fn hydrate_into_with_catalogs(
         spawn_entity(world, scene, ent, textures, catalog, anims)?;
     }
     Ok(())
+}
+
+/// Load a scene file into an existing [`World`], keeping the caller's texture map / catalogs.
+///
+/// Resolves `scene_rel` (stem or path relative to `game_dir`; empty uses `project.default_scene`),
+/// then [`hydrate_into_with_catalogs`] (which clears `world`). Returns the scene clear color.
+pub fn load_scene_into_world(
+    world: &mut World,
+    game_dir: &Path,
+    project: &crate::project::GameProject,
+    scene_rel: &str,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+) -> Result<Rgba8> {
+    let key = if scene_rel.trim().is_empty() {
+        project.default_scene.as_str()
+    } else {
+        scene_rel
+    };
+    let rel = crate::project::resolve_scene_rel(game_dir, key)?;
+    let scene = crate::scene::load_scene(&game_dir.join(&rel))?;
+    hydrate_into_with_catalogs(world, &scene, textures, catalog, anims)?;
+    Ok(scene.clear_rgba())
 }
 
 fn spawn_entity(

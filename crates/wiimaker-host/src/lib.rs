@@ -7,6 +7,6 @@ mod atlas;
 mod raster;
 mod window;
 
-pub use atlas::{load_atlas, load_atlas_for_project, TextureAtlas};
+pub use atlas::{load_atlas, load_atlas_for_project, load_scene_into_world, TextureAtlas};
 pub use raster::{flush, flush_with_atlas, Framebuffer};
 pub use window::{run, run_with_atlas};

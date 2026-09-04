@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use wiimaker_scene::{
-    create_named_scene, find_game_dir, list_scenes, load_project, load_scene, save_scene,
-    set_default_scene, set_scene_clear, GameProject, Scene,
+    add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,
+    load_project, load_scene, remove_build_scene, save_scene, set_default_scene, set_scene_clear,
+    GameProject, Scene,
 };
 
 use crate::args::SceneCmd;
@@ -88,6 +89,77 @@ pub fn scene_cmd(root: &Path, cmd: SceneCmd, json: bool) -> Result<()> {
                 Ok(())
             } else {
                 emit_ok(json, &format!("default scene → {}", rel.display()))
+            }
+        }
+        SceneCmd::BuildList { game } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let scenes = list_build_scenes(&game_dir)?;
+            let names: Vec<String> = scenes
+                .iter()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "scenes": names,
+                        "default_scene": project.default_scene,
+                    })
+                );
+            } else if names.is_empty() {
+                println!("(no scenes in build list — authoring uses scene list / filesystem)");
+                println!("default: {}", project.default_scene);
+            } else {
+                for n in &names {
+                    if n == &project.default_scene {
+                        println!("* {n}  (default)");
+                    } else {
+                        println!("  {n}");
+                    }
+                }
+            }
+            Ok(())
+        }
+        SceneCmd::BuildAdd { game, scene } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let rel = add_build_scene(&game_dir, &scene)?;
+            let project = load_project(&game_dir)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "message": format!("build scenes += {}", rel.display()),
+                        "path": rel.to_string_lossy(),
+                        "scenes": project.scenes,
+                        "default_scene": project.default_scene,
+                    })
+                );
+                Ok(())
+            } else {
+                emit_ok(json, &format!("build scenes += {}", rel.display()))
+            }
+        }
+        SceneCmd::BuildRemove { game, scene } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let rel = remove_build_scene(&game_dir, &scene)?;
+            let project = load_project(&game_dir)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "message": format!("build scenes -= {}", rel.display()),
+                        "path": rel.to_string_lossy(),
+                        "scenes": project.scenes,
+                        "default_scene": project.default_scene,
+                    })
+                );
+                Ok(())
+            } else {
+                emit_ok(json, &format!("build scenes -= {}", rel.display()))
             }
         }
         SceneCmd::SetClear { game, rgb } => {

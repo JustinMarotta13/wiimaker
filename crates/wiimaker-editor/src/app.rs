@@ -9,10 +9,10 @@ use wiimaker_core::move_and_collide;
 use wiimaker_core::world::World;
 use wiimaker_host::{Framebuffer, TextureAtlas};
 use wiimaker_scene::{
-    add_component_sprite, create_named_scene, diagnose, duplicate_entity, find_game_dir,
-    animate_world, hydrate_lenient_with_catalogs, insert_entity_clone, list_scenes, load_project, load_scene,
-    rename_entity, save_scene, set_default_scene, EntityData, GameProject, Scene, Severity,
-    UndoStack,
+    add_build_scene, add_component_sprite, create_named_scene, diagnose, duplicate_entity,
+    find_game_dir, animate_world, hydrate_lenient_with_catalogs, insert_entity_clone, list_scenes,
+    load_project, load_scene, remove_build_scene, rename_entity, save_scene, set_default_scene,
+    EntityData, GameProject, Scene, Severity, UndoStack,
 };
 
 use crate::dock::{self, EditorTab};
@@ -128,6 +128,12 @@ pub(crate) struct EditorApp {
     /// Pending open when current scene is dirty (absolute path).
     pub(crate) pending_open: Option<PathBuf>,
     pub(crate) new_scene_name: String,
+    /// File → Build Settings… dialog.
+    pub(crate) show_build_settings: bool,
+    /// Selected row in the Scenes in Build list (relative path).
+    pub(crate) build_settings_pick: Option<String>,
+    /// Combo draft for adding a discovered scene to the build list.
+    pub(crate) build_add_draft: String,
     /// Unused: dock splitters own leaf size now.
     #[allow(dead_code)]
     pub(crate) project_panel_height: f32,
@@ -195,6 +201,9 @@ impl EditorApp {
             scene_rels: Vec::new(),
             pending_open: None,
             new_scene_name: "menu".into(),
+            show_build_settings: false,
+            build_settings_pick: None,
+            build_add_draft: String::new(),
             project_panel_height: 200.0,
             hierarchy_width: 240.0,
             inspector_width: 300.0,
@@ -358,6 +367,61 @@ impl EditorApp {
             }
             Err(e) => self.log_line(ConsoleLevel::Error, format!("save project failed: {e}")),
         }
+    }
+
+    pub(crate) fn reload_project(&mut self) {
+        match load_project(&self.game_dir) {
+            Ok(p) => self.project = p,
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("reload game.toml: {e}")),
+        }
+    }
+
+    pub(crate) fn set_default_scene_rel(&mut self, rel: &str) {
+        match set_default_scene(&self.game_dir, rel) {
+            Ok(path) => {
+                self.reload_project();
+                self.log_line(
+                    ConsoleLevel::Info,
+                    format!("default scene → {}", path.display()),
+                );
+            }
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("set default: {e}")),
+        }
+    }
+
+    pub(crate) fn add_to_build_list(&mut self, scene: &str) {
+        match add_build_scene(&self.game_dir, scene) {
+            Ok(rel) => {
+                self.reload_project();
+                self.build_settings_pick = Some(rel.to_string_lossy().replace('\\', "/"));
+                self.log_line(
+                    ConsoleLevel::Info,
+                    format!("build scenes += {}", rel.display()),
+                );
+            }
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("build add: {e}")),
+        }
+    }
+
+    pub(crate) fn remove_from_build_list(&mut self, scene: &str) {
+        match remove_build_scene(&self.game_dir, scene) {
+            Ok(rel) => {
+                self.reload_project();
+                if self.build_settings_pick.as_deref() == Some(&rel.to_string_lossy().replace('\\', "/"))
+                {
+                    self.build_settings_pick = None;
+                }
+                self.log_line(
+                    ConsoleLevel::Info,
+                    format!("build scenes -= {}", rel.display()),
+                );
+            }
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("build remove: {e}")),
+        }
+    }
+
+    pub(crate) fn open_build_scene_rel(&mut self, rel: &str) {
+        self.request_open_scene(self.game_dir.join(rel));
     }
 
     pub(crate) fn reload_assets(&mut self) -> Result<()> {
@@ -1118,6 +1182,7 @@ impl eframe::App for EditorApp {
 
         self.ui_toolbar(ctx);
         self.show_unsaved_modal(ctx);
+        self.show_build_settings_window(ctx);
         self.apply_pending_focus();
 
         // Top toolbar stays as TopBottomPanel. Everything else is one DockArea.

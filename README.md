@@ -32,10 +32,11 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | Prefab | `.prefab.json` |
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
 | Play | `wiimaker run` / `cargo run -p <game>` |
-| Build Settings | `wiimaker build` · `wiimaker play-wii` |
+| Scenes in Build / LoadScene | `game.toml` `scenes = [...]` · `load_scene_into_world` · File → Build Settings… |
+| Build / Dolphin | `wiimaker build` · `wiimaker play-wii` |
 | Sprite Editor | `assets/<name>.sprites.json` + editor / `wiimaker asset slice` |
 
-Gameplay scripts stay as Rust `App` (like MonoBehaviour code): load a scene, then mutate entities in `update`.
+Gameplay scripts stay as Rust `App` (like MonoBehaviour code): `load_scene_into_world` (keeps the atlas), then mutate entities in `update`.
 
 ## Quick start (host)
 
@@ -60,6 +61,9 @@ wiimaker asset slice my-game hero --cols 4 --rows 1
 wiimaker asset set-pivot my-game hero_2 --x 0.375 --y 0.375
 wiimaker scene new my-game --name menu
 wiimaker scene set-default my-game --scene menu
+wiimaker scene build-add my-game --scene menu
+wiimaker scene build-add my-game --scene main
+wiimaker scene build-list my-game --json
 wiimaker entity add my-game --name Player --sprite hero_2 --x 320 --y 240
 wiimaker entity add-component my-game --name Maze Tilemap --cols 28 --rows 31 --cell 16
 wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'

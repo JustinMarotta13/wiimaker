@@ -25,6 +25,10 @@ impl EditorApp {
                             self.doctor();
                             ui.close_menu();
                         }
+                        if ui.button("Build Settings…").clicked() {
+                            self.show_build_settings = true;
+                            ui.close_menu();
+                        }
                         if ui.button("Play").clicked() {
                             self.play();
                             ui.close_menu();

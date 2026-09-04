@@ -132,6 +132,8 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         check_scene_refs(scene, &sprite_names, &anim_names, &assets, &mut issues);
     }
 
+    check_build_scenes(game_dir, project, &mut issues);
+
     let wpack = project.wpack_path(game_dir);
     if !wpack.is_file() {
         issues.push(Issue {
@@ -149,6 +151,35 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         game: project.name.clone(),
         ok,
         issues,
+    }
+}
+
+fn check_build_scenes(game_dir: &Path, project: &GameProject, issues: &mut Vec<Issue>) {
+    if project.scenes.is_empty() {
+        return;
+    }
+    let default = project.default_scene.replace('\\', "/");
+    let in_list = project
+        .scenes
+        .iter()
+        .any(|s| s.replace('\\', "/") == default);
+    if !in_list {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message: format!(
+                "default_scene '{}' is not in game.toml scenes build list",
+                project.default_scene
+            ),
+        });
+    }
+    for rel in &project.scenes {
+        let abs = game_dir.join(rel);
+        if !abs.is_file() {
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: format!("build scene missing: {rel}"),
+            });
+        }
     }
 }
 

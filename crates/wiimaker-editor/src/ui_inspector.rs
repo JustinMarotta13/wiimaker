@@ -802,7 +802,13 @@ impl EditorApp {
                 }
                 theme::muted(ui, "Creates a new entity from this prefab");
             } else if name == "game.toml" {
-                theme::muted(ui, "Project settings — edit game.toml or use Set default");
+                theme::muted(ui, "Project settings — Scenes in Build");
+                ui.add_space(6.0);
+                self.ui_build_settings_body(ui);
+                ui.add_space(6.0);
+                if ui.button("Open Build Settings…").clicked() {
+                    self.show_build_settings = true;
+                }
             } else if abs.is_dir() {
                 theme::muted(ui, "Folder — select a file for actions");
             } else {

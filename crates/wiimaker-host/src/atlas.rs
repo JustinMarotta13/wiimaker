@@ -107,3 +107,26 @@ pub fn load_atlas_for_project(
     }
     Ok(TextureAtlas::from_wpack(&pack))
 }
+
+/// Hydrate `scene_rel` into `world` using this atlas (catalogs from `project.assets_dir`).
+/// Does not rebuild or drop the atlas.
+pub fn load_scene_into_world(
+    world: &mut wiimaker_core::world::World,
+    game_dir: &std::path::Path,
+    project: &wiimaker_scene::GameProject,
+    scene_rel: &str,
+    atlas: &TextureAtlas,
+) -> Result<wiimaker_core::color::Rgba8, Box<dyn std::error::Error>> {
+    let assets = project.assets_path(game_dir);
+    let catalog = wiimaker_assets::SpriteCatalog::load_dir(&assets, |stem| atlas.size_of(stem))?;
+    let anims = wiimaker_assets::AnimClipCatalog::load_dir(&assets)?;
+    Ok(wiimaker_scene::load_scene_into_world(
+        world,
+        game_dir,
+        project,
+        scene_rel,
+        atlas.map(),
+        Some(&catalog),
+        Some(&anims),
+    )?)
+}
