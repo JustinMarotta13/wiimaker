@@ -85,6 +85,20 @@ pub enum SceneCmd {
         #[arg(long)]
         scene: String,
     },
+    /// Print `game.toml` Scenes in Build list
+    BuildList { game: String },
+    /// Append a scene to `game.toml` scenes
+    BuildAdd {
+        game: String,
+        #[arg(long)]
+        scene: String,
+    },
+    /// Remove a scene from `game.toml` scenes
+    BuildRemove {
+        game: String,
+        #[arg(long)]
+        scene: String,
+    },
     SetClear {
         game: String,
         #[arg(long, value_parser = parse_rgb)]

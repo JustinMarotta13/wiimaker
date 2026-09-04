@@ -21,21 +21,13 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 
 Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera marker, Tilemap, Collider, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json`.
 
-**Not present:** audio playback, camera used at render time, named sorting layers, prefab variants, runtime scene API, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
+**Not present:** audio playback, camera used at render time, named sorting layers, prefab variants, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
 
 ---
 
 ## Now
 
-**Recommended next morning:** Runtime scene load / switch (menu → maze → win for Pac-Man).
-
-### 5. Runtime scene load / switch — **GUI + CLI**
-Unity: LoadScene. Menu → maze → win. Today games hydrate once; `scene list/show` is authoring-only. Editor can *preview* another scene but does not rewrite `game.toml`.
-
-- `load_scene_into(world, path, catalog)` already almost exists (`hydrate_into`). Add `App` helper + keep atlas.
-- **GUI:** Build Settings–style default + additive list on Project/Inspector for `game.toml`.
-- **CLI:** `scene new` / `scene set-default` already ship (chrome morning). Runtime load is game code.
-- **Test:** pac-man Start on `menu.scene.json`, Enter → `main`, all dots → `win`.
+**Recommended next morning:** Camera follow (use the Camera you already hydrate).
 
 ### 6. 4-way discrete / grid-snap mover — **GUI + CLI**
 Unity: nothing built-in; everyone writes it. Input already has D-pad + stick. Pac-Man needs queued cardinals + snap to cell centers.
@@ -103,6 +95,7 @@ Shipped. Keep here so we do not rebuild them.
 - AABB/Circle collider + overlap (scene `Collider`, Inspector kind/size/solid, viewport seafoam outline gizmo, CLI `entity add-component … Collider --w --h`, `entity overlaps`, `overlaps` / `move_and_collide`; host-first, WSCN0003 unchanged)
 - Unity 6 editor chrome (dark Pro docks: Hierarchy left, Scene/Game center, Inspector right, Project/Console bottom; Play/Pause/Stop centered; component foldout cards). CLI `scene new` · `scene set-default`
 - Trigger / collectible (GUI Is Trigger + Filter Tag; CLI Trigger/--trigger/--filter, entity triggers, entity despawn; `triggers_entered`; triggers skip `move_and_collide`)
+- **Runtime scene load / switch** (2026-09-04) — `load_scene_into_world` (scene + host atlas helper) replaces World, keeps texture map; `game.toml` `scenes = [...]` Build Settings; doctor warns default missing from list / missing files; CLI `scene build-list` · `build-add` · `build-remove` (`--json`); editor File → Build Settings… + Inspector on `game.toml`. Pac-Man stays local (do not commit `games/`).
 
 ### CLI commands (exact names)
 
@@ -119,7 +112,7 @@ Global: `--json`
 | `dolphin` | launch existing `boot.dol` |
 | `play-wii` | build then Dolphin |
 | `doctor` | validate |
-| `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` | |
+| `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` | build-* mutate `game.toml` `scenes` |
 | `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag` |
 | `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) |
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
@@ -131,7 +124,7 @@ Global: `--json`
 
 ### Editor chrome (exact control names)
 
-File: Save scene · Doctor · Play · Stop Play · Run external… · Build · Play in Dolphin · Build & Run · Instantiate <prefab>
+File: Save scene · Doctor · Build Settings… · Play · Stop Play · Run external… · Build · Play in Dolphin · Build & Run · Instantiate <prefab>
 Edit: Undo · Redo · Duplicate · Copy · Paste
 Window: Hierarchy · Inspector · Project · Console
 Toolbar (left): Save · Build · Play in Dolphin · Build & Run · ⋯ (Cook assets… · Doctor · Refresh assets)
@@ -146,5 +139,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Ship runtime scene load / switch (Now #5).** Games hydrate once today; Pac-Man fakes menu → maze → win in game code. Engine should expose `load_scene` + Build Settings scene list.
+**Ship camera follow (Now #8).** `SceneCamera` hydrates but `render_world` never emits `SetCamera`; bigger mazes cannot pan. Alternative if you want Pac-Man motion first: 4-way grid-snap mover (Now #6).
 

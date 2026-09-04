@@ -127,6 +127,15 @@ impl EditorApp {
                     {
                         self.set_as_default_scene();
                     }
+                    if ui
+                        .add(egui::Button::new(
+                            RichText::new("Build Settings…").color(theme::TEXT),
+                        ))
+                        .on_hover_text("Scenes in Build list on game.toml")
+                        .clicked()
+                    {
+                        self.show_build_settings = true;
+                    }
                 });
     }
 
@@ -178,6 +187,159 @@ impl EditorApp {
             self.select_file(Some(entry.rel.clone()));
             ui.close_menu();
         }
+    }
+}
+
+impl EditorApp {
+    pub(crate) fn show_build_settings_window(&mut self, ctx: &egui::Context) {
+        if !self.show_build_settings {
+            return;
+        }
+        let mut open = self.show_build_settings;
+        egui::Window::new("Build Settings")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size([440.0, 320.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new("Scenes In Build")
+                        .size(13.0)
+                        .strong()
+                        .color(theme::TEXT),
+                );
+                theme::muted(
+                    ui,
+                    "Ordered list on game.toml. Star sets default_scene. Runtime: load_scene_into_world.",
+                );
+                ui.add_space(6.0);
+                self.ui_build_settings_body(ui);
+            });
+        self.show_build_settings = open;
+    }
+
+    pub(crate) fn ui_build_settings_body(&mut self, ui: &mut egui::Ui) {
+        let scenes = self.project.scenes.clone();
+        let default = self.project.default_scene.clone();
+        let pick = self.build_settings_pick.clone();
+
+        theme::card_frame().show(ui, |ui| {
+            let list_h = 140.0_f32.min(ui.available_height().max(80.0));
+            egui::ScrollArea::vertical()
+                .id_salt("build_scenes_list")
+                .max_height(list_h)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if scenes.is_empty() {
+                        theme::muted(ui, "Empty list — filesystem scene list is used for authoring");
+                    }
+                    for rel in &scenes {
+                        let is_default = *rel == default;
+                        let selected = pick.as_deref() == Some(rel.as_str());
+                        ui.horizontal(|ui| {
+                            let star = if is_default { "*" } else { " " };
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(star)
+                                            .color(if is_default {
+                                                theme::DIRTY
+                                            } else {
+                                                theme::TEXT_DIM
+                                            })
+                                            .monospace(),
+                                    )
+                                    .fill(theme::BG_SUNKEN)
+                                    .min_size(egui::vec2(22.0, 18.0)),
+                                )
+                                .on_hover_text("Set as default scene")
+                                .clicked()
+                            {
+                                self.set_default_scene_rel(rel);
+                            }
+                            let label = if is_default {
+                                format!("{rel}  (default)")
+                            } else {
+                                rel.clone()
+                            };
+                            let resp = ui.selectable_label(selected, &label);
+                            if resp.clicked() {
+                                self.build_settings_pick = Some(rel.clone());
+                            }
+                            if resp.double_clicked() {
+                                self.build_settings_pick = Some(rel.clone());
+                                self.open_build_scene_rel(rel);
+                            }
+                        });
+                    }
+                });
+        });
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let discovered: Vec<String> = self
+                .scene_rels
+                .iter()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .filter(|p| !scenes.iter().any(|s| s == p))
+                .collect();
+            if self.build_add_draft.is_empty() {
+                if let Some(first) = discovered.first() {
+                    self.build_add_draft = first.clone();
+                }
+            }
+            let mut add_choice = self.build_add_draft.clone();
+            egui::ComboBox::from_id_salt("build_add_combo")
+                .selected_text(if add_choice.is_empty() {
+                    "Add scene…".to_string()
+                } else {
+                    add_choice.clone()
+                })
+                .show_ui(ui, |ui| {
+                    for p in &discovered {
+                        ui.selectable_value(&mut add_choice, p.clone(), p);
+                    }
+                });
+            self.build_add_draft = add_choice;
+            if ui
+                .add_enabled(
+                    !self.build_add_draft.is_empty()
+                        && discovered.iter().any(|p| p == &self.build_add_draft),
+                    egui::Button::new(RichText::new("+").color(theme::TEXT)),
+                )
+                .on_hover_text("Add selected scene to build list")
+                .clicked()
+            {
+                let s = self.build_add_draft.clone();
+                self.add_to_build_list(&s);
+                self.build_add_draft.clear();
+            }
+            let can_remove = self.build_settings_pick.is_some();
+            if ui
+                .add_enabled(
+                    can_remove,
+                    egui::Button::new(RichText::new("-").color(theme::TEXT)),
+                )
+                .on_hover_text("Remove selected from build list")
+                .clicked()
+            {
+                if let Some(rel) = self.build_settings_pick.clone() {
+                    self.remove_from_build_list(&rel);
+                }
+            }
+            if ui
+                .add_enabled(
+                    self.build_settings_pick.is_some(),
+                    egui::Button::new(RichText::new("Open").color(theme::TEXT)),
+                )
+                .on_hover_text("Open selected scene")
+                .clicked()
+            {
+                if let Some(rel) = self.build_settings_pick.clone() {
+                    self.open_build_scene_rel(&rel);
+                }
+            }
+        });
     }
 }
 

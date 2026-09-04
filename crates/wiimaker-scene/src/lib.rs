@@ -22,7 +22,7 @@ pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use hydrate::{
     hydrate, hydrate_into, hydrate_into_with_catalog, hydrate_into_with_catalogs, hydrate_lenient,
     hydrate_lenient_with_catalog, hydrate_lenient_with_catalogs, hydrate_with_catalog,
-    hydrate_with_catalogs, TextureMap,
+    hydrate_with_catalogs, load_scene_into_world, TextureMap,
 };
 pub use mutate::{
     add_component_animation, add_component_disc, add_component_sprite, add_entity, apply_prefab,
@@ -34,7 +34,8 @@ pub use mutate::{
 };
 pub use pick::{pick_entity_at, pick_entity_at_with_catalog, pointer_to_scene};
 pub use project::{
-    create_named_scene, find_game_dir, list_scenes, load_project, resolve_scene_rel, save_project,
+    add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,
+    load_project, remove_build_scene, resolve_scene_rel, save_project, set_build_scenes,
     set_default_scene, GameProject,
 };
 pub use render::render_world;

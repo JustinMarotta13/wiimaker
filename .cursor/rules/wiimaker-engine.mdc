@@ -27,9 +27,8 @@ Sprite textures resolve from cooked `.wpack` names via hydrate `TextureMap` — 
 ## Game `App` pattern
 
 ```rust
-// ✅ load scene once, mutate World in update, render via scene helper
-let scene = load_scene(...)?;
-let world = hydrate(&scene, atlas.map())?;
+// ✅ load / switch scenes; atlas stays loaded
+load_scene_into_world(world, game_dir, &project, "menu", atlas.map(), Some(&catalog), Some(&anims))?;
 // update: world.transform_mut(id)
 // render: render_world(&world, clear, draw)
 ```

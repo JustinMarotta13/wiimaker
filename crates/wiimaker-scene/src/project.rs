@@ -19,6 +19,9 @@ pub struct GameProject {
     pub wpack: String,
     #[serde(default = "default_wscn")]
     pub wscn: String,
+    /// Ordered Scenes in Build list (`game.toml` `scenes = [...]`). Empty = unset.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scenes: Vec<String>,
 }
 
 fn default_title() -> String {
@@ -47,6 +50,7 @@ impl GameProject {
             assets_dir: default_assets(),
             wpack: default_wpack(),
             wscn: default_wscn(),
+            scenes: Vec::new(),
         }
     }
 
@@ -135,13 +139,94 @@ pub fn resolve_scene_rel(game_dir: &Path, scene: &str) -> Result<PathBuf> {
     bail!("scene not found: {scene}");
 }
 
+fn norm_rel(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn listed_matches(listed: &str, key: &str) -> bool {
+    let a = listed.replace('\\', "/");
+    let b = key.replace('\\', "/");
+    if a == b {
+        return true;
+    }
+    let a_stem = Path::new(&a)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(a.as_str());
+    let b_stem = Path::new(&b)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(b.as_str());
+    a_stem == b_stem || a_stem.trim_end_matches(".scene.json") == b.trim_end_matches(".scene.json")
+}
+
 /// Persist `game.toml` `default_scene` (Build Settings analogue).
 pub fn set_default_scene(game_dir: &Path, scene: &str) -> Result<PathBuf> {
     let rel = resolve_scene_rel(game_dir, scene)?;
     let mut project = load_project(game_dir)?;
-    project.default_scene = rel.to_string_lossy().replace('\\', "/");
+    project.default_scene = norm_rel(&rel);
     save_project(game_dir, &project)?;
     Ok(rel)
+}
+
+/// Ordered `game.toml` `scenes` list (empty when omitted).
+pub fn list_build_scenes(game_dir: &Path) -> Result<Vec<PathBuf>> {
+    let project = load_project(game_dir)?;
+    Ok(project.scenes.iter().map(PathBuf::from).collect())
+}
+
+/// Append a scene to the Build Settings list and save `game.toml`.
+pub fn add_build_scene(game_dir: &Path, scene: &str) -> Result<PathBuf> {
+    let rel = resolve_scene_rel(game_dir, scene)?;
+    let key = norm_rel(&rel);
+    let mut project = load_project(game_dir)?;
+    if !project.scenes.iter().any(|s| listed_matches(s, &key)) {
+        project.scenes.push(key);
+        save_project(game_dir, &project)?;
+    }
+    Ok(rel)
+}
+
+/// Remove a scene from the Build Settings list and save `game.toml`.
+pub fn remove_build_scene(game_dir: &Path, scene: &str) -> Result<PathBuf> {
+    let mut project = load_project(game_dir)?;
+    let key = match resolve_scene_rel(game_dir, scene) {
+        Ok(rel) => norm_rel(&rel),
+        Err(_) => scene.trim().replace('\\', "/"),
+    };
+    let before = project.scenes.len();
+    let mut removed = key.clone();
+    project.scenes.retain(|s| {
+        if listed_matches(s, &key) {
+            removed = s.replace('\\', "/");
+            false
+        } else {
+            true
+        }
+    });
+    if project.scenes.len() == before {
+        bail!("scene not in build list: {scene}");
+    }
+    save_project(game_dir, &project)?;
+    Ok(PathBuf::from(removed))
+}
+
+/// Replace the Build Settings list (each entry must resolve to an existing scene file).
+pub fn set_build_scenes(game_dir: &Path, scenes: &[impl AsRef<str>]) -> Result<Vec<PathBuf>> {
+    let mut resolved = Vec::new();
+    let mut keys = Vec::new();
+    for scene in scenes {
+        let rel = resolve_scene_rel(game_dir, scene.as_ref())?;
+        let key = norm_rel(&rel);
+        if !keys.iter().any(|k: &String| listed_matches(k, &key)) {
+            keys.push(key);
+            resolved.push(rel);
+        }
+    }
+    let mut project = load_project(game_dir)?;
+    project.scenes = keys;
+    save_project(game_dir, &project)?;
+    Ok(resolved)
 }
 
 fn is_scene_file(path: &Path) -> bool {
@@ -293,6 +378,46 @@ mod tests {
         let rel = set_default_scene(&dir, "scenes/main.scene.json").unwrap();
         assert_eq!(rel, PathBuf::from("scenes/main.scene.json"));
         assert!(set_default_scene(&dir, "missing").is_err());
+    }
+
+    #[test]
+    fn build_scenes_roundtrip_and_omit_when_empty() {
+        let dir = tempfile_dir("build-scenes");
+        fs::create_dir_all(dir.join("scenes")).unwrap();
+        fs::write(dir.join("scenes/main.scene.json"), "{\"name\":\"main\"}\n").unwrap();
+        fs::write(dir.join("scenes/menu.scene.json"), "{\"name\":\"menu\"}\n").unwrap();
+        fs::write(
+            dir.join("game.toml"),
+            "name = \"t\"\ndefault_scene = \"scenes/main.scene.json\"\n",
+        )
+        .unwrap();
+
+        let project = load_project(&dir).unwrap();
+        assert!(project.scenes.is_empty());
+        assert!(list_build_scenes(&dir).unwrap().is_empty());
+
+        add_build_scene(&dir, "menu").unwrap();
+        add_build_scene(&dir, "scenes/main.scene.json").unwrap();
+        add_build_scene(&dir, "menu").unwrap(); // idempotent
+        let listed = list_build_scenes(&dir).unwrap();
+        assert_eq!(
+            listed,
+            vec![
+                PathBuf::from("scenes/menu.scene.json"),
+                PathBuf::from("scenes/main.scene.json"),
+            ]
+        );
+        let toml_text = fs::read_to_string(dir.join("game.toml")).unwrap();
+        assert!(toml_text.contains("scenes"));
+
+        remove_build_scene(&dir, "menu").unwrap();
+        assert_eq!(
+            list_build_scenes(&dir).unwrap(),
+            vec![PathBuf::from("scenes/main.scene.json")]
+        );
+        set_build_scenes(&dir, &["menu", "main"]).unwrap();
+        assert_eq!(list_build_scenes(&dir).unwrap().len(), 2);
+        assert!(set_build_scenes(&dir, &["nope"]).is_err());
     }
 
     fn tempfile_dir(label: &str) -> PathBuf {

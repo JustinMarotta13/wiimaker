@@ -16,6 +16,7 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 
 ## Decisions
 
+- `load_scene_into_world` (`wiimaker-scene`, thin `wiimaker-host` wrapper taking `&TextureAtlas`) resolves stem/path, `hydrate_into_with_catalogs` (clears World), returns clear color. Keep the atlas; do not recook on switch.
 - Until Rust `staticlib` lands, Dolphin play uses the C scene player + GX textured quads; host keeps `wiimaker-scene` JSON hydrate + `SpriteCatalog`.
 - `games/` is gitignored (local projects only); workspace still lists `games/hello-orb` for local cook/run.
 - Pivot lives on sheet meta (not SceneSprite override) for v0.

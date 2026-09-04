@@ -45,6 +45,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Translate gizmo P0 = drag-on-entity (no separate handle).
 - Scene discovery: `wiimaker_scene::list_scenes(game_dir)` → relative `*.scene.json` under `scenes/` plus `default_scene` if outside that dir.
 - Opening a non-default scene is editor-only preview; "Set as default scene" persists via `save_project`.
+- File → **Build Settings…** (also Project / Inspector on `game.toml`): ordered `game.toml` `scenes` list, star = `default_scene`, +/- add/remove, Open. CLI twins: `scene build-list` / `build-add` / `build-remove`.
 - Entity hierarchy: optional `parent` name on `EntityData`; transform is **local**; hydrate/pick/wscn/outline compose world via `Scene::world_transform`. Delete cascades to descendants. CLI: `entity set-parent --name X [--parent Y]`.
 - Inspector sprite field is a catalog ComboBox (cells + whole textures), not PNG stems only.
 - Inspector focus is entity XOR project file (`selected` / `selected_file`).

@@ -15,7 +15,7 @@ clap binary in `crates/wiimaker-cli`. Agents build games as: `new` → `asset im
 | Area | Commands |
 |---|---|
 | Project | `new`, `run`, `edit`, `cook`, `doctor`, `build`, `dolphin`, `play-wii` |
-| Scene | `scene list\|show\|set-clear` |
+| Scene | `scene list\|show\|new\|set-default\|build-list\|build-add\|build-remove\|set-clear` |
 | Entity | `entity list\|add\|set\|add-component\|remove\|duplicate\|rename\|set-parent` |
 | Asset | `asset list\|import\|slice\|set-pivot\|list-sprites` |
 
