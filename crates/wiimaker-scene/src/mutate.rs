@@ -114,6 +114,11 @@ pub fn rename_entity(scene: &mut Scene, old: &str, new: &str) -> Result<()> {
             if e.parent.as_deref() == Some(old) {
                 e.parent = Some(new.to_string());
             }
+            if let Some(cam) = e.components.camera.as_mut() {
+                if cam.follow.as_deref() == Some(old) {
+                    cam.follow = Some(new.to_string());
+                }
+            }
         }
     }
     Ok(())
@@ -368,7 +373,19 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animation"))?;
             a.enabled = enabled;
         }
-        other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation)"),
+        "camera" => {
+            let c = ent
+                .components
+                .camera
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Camera"))?;
+            c.active = enabled;
+        }
+        other => {
+            bail!(
+                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera)"
+            )
+        }
     }
     Ok(())
 }
@@ -446,6 +463,70 @@ pub fn set_entity_anim(
     Ok(())
 }
 
+pub fn add_component_camera(scene: &mut Scene, name: &str, active: bool) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    match ent.components.camera.as_mut() {
+        Some(c) => c.active = active,
+        None => {
+            ent.components.camera = Some(crate::scene::SceneCamera {
+                active,
+                follow: None,
+                lerp: 0.15,
+            });
+        }
+    }
+    Ok(())
+}
+
+pub fn remove_component_camera(scene: &mut Scene, name: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    if ent.components.camera.is_none() {
+        bail!("entity '{name}' has no Camera");
+    }
+    ent.components.camera = None;
+    Ok(())
+}
+
+/// Ensure Camera exists and set follow target + optional lerp.
+/// Empty `target` clears follow.
+pub fn add_component_follow(
+    scene: &mut Scene,
+    name: &str,
+    target: &str,
+    lerp: Option<f32>,
+) -> Result<()> {
+    set_entity_follow(scene, name, Some(target), lerp)
+}
+
+/// Set Camera follow. `target` `None` leaves the name unchanged; `Some("")` clears it.
+/// Creates an active Camera if missing.
+pub fn set_entity_follow(
+    scene: &mut Scene,
+    name: &str,
+    target: Option<&str>,
+    lerp: Option<f32>,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let cam = ent
+        .components
+        .camera
+        .get_or_insert_with(|| crate::scene::SceneCamera {
+            active: true,
+            follow: None,
+            lerp: 0.15,
+        });
+    if let Some(t) = target {
+        cam.follow = if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        };
+    }
+    if let Some(l) = lerp {
+        cam.lerp = l.clamp(0.0, 1.0);
+    }
+    Ok(())
+}
 
 fn find_mut<'a>(scene: &'a mut Scene, name: &str) -> Result<&'a mut EntityData> {
     scene
@@ -641,5 +722,37 @@ mod tests {
         let w = scene.world_transform("c").unwrap();
         assert_eq!(w.translation[0], 150.0);
         assert_eq!(w.translation[1], 120.0);
+    }
+
+    #[test]
+    fn camera_follow_mutate_and_rename_target() {
+        let mut scene = empty_scene();
+        add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
+        add_entity(&mut scene, "Main Camera", &MutateOpts::default()).unwrap();
+        add_component_camera(&mut scene, "Main Camera", true).unwrap();
+        set_entity_follow(&mut scene, "Main Camera", Some("Player"), Some(0.2)).unwrap();
+        let cam = scene
+            .find_entity("Main Camera")
+            .unwrap()
+            .components
+            .camera
+            .as_ref()
+            .unwrap();
+        assert!(cam.active);
+        assert_eq!(cam.follow.as_deref(), Some("Player"));
+        assert!((cam.lerp - 0.2).abs() < 1e-6);
+        rename_entity(&mut scene, "Player", "Hero").unwrap();
+        assert_eq!(
+            scene
+                .find_entity("Main Camera")
+                .unwrap()
+                .components
+                .camera
+                .as_ref()
+                .unwrap()
+                .follow
+                .as_deref(),
+            Some("Hero")
+        );
     }
 }

@@ -25,6 +25,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Viewport tools: Move · Scale · Rotate (drag on entity). Snap applies to translate + 45° rotate steps.
 - Tilemap: viewport **Paint / Erase / Pick** (right-click erases while Painting). Inspector **+ Tilemap** (32×18, cell 16) · grid w/h · cell · origin · palette (id/color/sprite) · **Brush**. Selected tilemap AABB outlined; paint stamps `tile_brush_id` + solid onto the targeted grid.
 - Collider Inspector: solid · **Is Trigger** · **Filter Tag** (0 = any). Viewport gizmos: accent for walls, amber (`220,180,60`) for triggers. Keep dark theme.
+- Camera Inspector: Follow target combo (entity names) + Lerp. Scene view draws a 640×480 cyan rect centered on the active camera (Game tab applies offset). Play ticks `World::follow_cameras` after WASD.
 - Prefabs: Inspector **Save as Prefab…**; Project strip + toolbar **Instantiate <name>** (or Prefab menu when many); File → Instantiate; **Cmd/Ctrl+I** first `.prefab.json`. Double-click / context menu also instantiate. CLI: `entity create-prefab` / `instantiate-prefab` / `apply-prefab` / `unpack-prefab`.
 - Multi-select: status `selected N: A, B`; Hierarchy uses full-width blue selection (Unity), not `>`/`+` prefixes.
 - Drop PNG anywhere in the editor window → copy into `assets/` + cook refresh.

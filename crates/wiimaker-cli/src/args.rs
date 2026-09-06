@@ -86,7 +86,9 @@ pub enum SceneCmd {
         scene: String,
     },
     /// Print `game.toml` Scenes in Build list
-    BuildList { game: String },
+    BuildList {
+        game: String,
+    },
     /// Append a scene to `game.toml` scenes
     BuildAdd {
         game: String,
@@ -148,6 +150,12 @@ pub enum EntityCmd {
         /// Entity gameplay tag (trigger filter counterpart)
         #[arg(long)]
         tag: Option<u32>,
+        /// Camera follow target entity name (creates Camera if missing; empty string clears)
+        #[arg(long)]
+        follow: Option<String>,
+        /// Camera follow lerp (`0` frozen, `1` snap). Use with `--follow`.
+        #[arg(long)]
+        lerp: Option<f32>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -155,7 +163,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, or Animation
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Camera, or Follow
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -197,6 +205,12 @@ pub enum EntityCmd {
         /// Animation loop (default true)
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         r#loop: bool,
+        /// Follow target entity name (`Follow` / `Camera`)
+        #[arg(long)]
+        target: Option<String>,
+        /// Follow lerp factor (`0` frozen, `1` snap). Default `0.15` for Follow.
+        #[arg(long)]
+        lerp: Option<f32>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -238,7 +252,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, or Animation
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, or Camera
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -248,7 +262,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, or Animation
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, or Camera
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,

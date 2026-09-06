@@ -1,9 +1,10 @@
 use eframe::egui;
 use wiimaker_assets::SpriteCatalog;
 use wiimaker_core::draw::DrawList;
+use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
-    pick_entity_at_with_catalog, pointer_to_scene, render_world, set_entity_rotation_z,
+    pick_entity_at_with_catalog, pointer_to_scene, render_world_ex, set_entity_rotation_z,
     set_entity_scale, set_entity_world_xy, tilemap_set_cell, Scene,
 };
 
@@ -40,11 +41,7 @@ impl EditorApp {
                 if theme::enable_checkbox(ui, self.snap_enabled).clicked() {
                     self.snap_enabled = !self.snap_enabled;
                 }
-                ui.label(
-                    egui::RichText::new("Snap")
-                        .size(12.0)
-                        .color(theme::TEXT),
-                );
+                ui.label(egui::RichText::new("Snap").size(12.0).color(theme::TEXT));
                 ui.add(
                     egui::DragValue::new(&mut self.snap_size)
                         .range(1.0..=128.0)
@@ -93,7 +90,8 @@ impl EditorApp {
     fn blit_framebuffer(&mut self, ui: &mut egui::Ui, is_scene: bool) {
         let ctx = ui.ctx().clone();
         let mut draw = DrawList::new();
-        render_world(&self.world, &mut draw, self.scene.clear_rgba());
+        // Scene tab stays world-space (camera rect gizmo). Game tab applies the active camera.
+        render_world_ex(&self.world, &mut draw, self.scene.clear_rgba(), !is_scene);
         flush_with_atlas(&draw, &mut self.fb, Some(&self.atlas));
 
         let rgb = fb_to_rgb(&self.fb);
@@ -102,9 +100,9 @@ impl EditorApp {
         debug_assert_eq!(rgb.len(), VIEW_W * VIEW_H * 3);
         let color_image = egui::ColorImage::from_rgb([VIEW_W, VIEW_H], &rgb);
         let tex_filter = egui::TextureOptions::NEAREST;
-        let tex = self.texture_handle.get_or_insert_with(|| {
-            ctx.load_texture("viewport", color_image.clone(), tex_filter)
-        });
+        let tex = self
+            .texture_handle
+            .get_or_insert_with(|| ctx.load_texture("viewport", color_image.clone(), tex_filter));
         tex.set(color_image, tex_filter);
 
         let well_size = ui.available_size();
@@ -126,14 +124,9 @@ impl EditorApp {
         );
         let response = ui.interact(image_rect, ui.id().with("viewport_fb"), sense);
         if is_scene {
-            paint_selection_outline(
-                ui,
-                image_rect,
-                &self.scene,
-                &self.selected,
-                &self.catalog,
-            );
+            paint_selection_outline(ui, image_rect, &self.scene, &self.selected, &self.catalog);
             paint_collider_gizmos(ui, image_rect, &self.scene, &self.selected);
+            paint_camera_gizmos(ui, image_rect, &self.world);
             if self.edit_tool.is_tile_tool() {
                 if let Some(name) = self.tilemap_target() {
                     paint_tilemap_overlay(ui, image_rect, &self.scene, &name);
@@ -530,6 +523,36 @@ fn paint_collider_gizmos(
                 painter.circle_stroke(to_screen(center[0], center[1]), radius_px, stroke);
             }
         }
+    }
+}
+
+/// Unity-ish camera frustum: 640×480 rect centered on an active Camera's world pose.
+fn paint_camera_gizmos(ui: &egui::Ui, image_rect: egui::Rect, world: &World) {
+    let to_screen = |sx: f32, sy: f32| -> egui::Pos2 {
+        egui::pos2(
+            image_rect.min.x + sx / VIEW_W as f32 * image_rect.width(),
+            image_rect.min.y + sy / VIEW_H as f32 * image_rect.height(),
+        )
+    };
+    let painter = ui.painter();
+    let color = egui::Color32::from_rgb(140, 210, 230);
+    let stroke = egui::Stroke::new(1.5_f32, color);
+    for id in world.iter_entities() {
+        let Some(cam) = world.camera(id) else {
+            continue;
+        };
+        if !cam.active {
+            continue;
+        }
+        let Some(xf) = world.transform(id) else {
+            continue;
+        };
+        let cx = xf.translation.x;
+        let cy = xf.translation.y;
+        let hw = VIEW_W as f32 * 0.5;
+        let hh = VIEW_H as f32 * 0.5;
+        let r = egui::Rect::from_min_max(to_screen(cx - hw, cy - hh), to_screen(cx + hw, cy + hh));
+        painter.rect_stroke(r, 0.0, stroke);
     }
 }
 

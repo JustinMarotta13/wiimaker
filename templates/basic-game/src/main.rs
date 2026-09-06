@@ -41,7 +41,9 @@ impl App for Game {
         &self.title
     }
 
-    fn update(&mut self, _ctx: &FrameCtx<'_>) {}
+    fn update(&mut self, _ctx: &FrameCtx<'_>) {
+        self.world.follow_cameras();
+    }
 
     fn render(&mut self, _ctx: &FrameCtx<'_>, draw: &mut DrawList) {
         render_world(&self.world, draw, self.clear);

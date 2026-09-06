@@ -10,7 +10,7 @@ use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::{Rect, TextureId};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::tilemap::{TileVisual, Tilemap};
-use wiimaker_core::world::{Animation, Camera, Disc, Sprite, World};
+use wiimaker_core::world::{Animation, Camera, Disc, Follow, Sprite, World};
 
 use crate::scene::{EntityData, Scene};
 
@@ -164,7 +164,7 @@ fn spawn_entity(
     }
 
     if let Some(cam) = &ent.components.camera {
-        world.set_camera(id, Some(Camera { active: cam.active }));
+        apply_scene_camera(world, id, cam);
     }
 
     if let Some(tm) = &ent.components.tilemap {
@@ -217,7 +217,6 @@ fn spawn_entity(
             }
         }
     }
-
 
     Ok(())
 }
@@ -290,7 +289,7 @@ pub fn hydrate_lenient_with_catalogs(
             }
         }
         if let Some(cam) = &ent.components.camera {
-            world.set_camera(id, Some(Camera { active: cam.active }));
+            apply_scene_camera(&mut world, id, cam);
         }
         if let Some(tm) = &ent.components.tilemap {
             if tm.enabled {
@@ -395,7 +394,6 @@ fn resolve_palette_sprite(name: &str, catalog: Option<&SpriteCatalog>) -> (Strin
     (name.to_string(), Rect::unit())
 }
 
-
 fn resolve_animation(
     a: &crate::scene::SceneAnimation,
     anims: Option<&AnimClipCatalog>,
@@ -409,6 +407,20 @@ fn resolve_animation(
         .unwrap_or(10.0);
     let loop_ = a.loop_;
     (cells, fps, loop_)
+}
+
+fn apply_scene_camera(
+    world: &mut World,
+    id: wiimaker_core::world::EntityId,
+    cam: &crate::scene::SceneCamera,
+) {
+    world.set_camera(id, Some(Camera { active: cam.active }));
+    match &cam.follow {
+        Some(t) if !t.is_empty() => {
+            world.set_follow(id, Some(Follow::new(t.clone(), cam.lerp)));
+        }
+        _ => world.set_follow(id, None),
+    }
 }
 
 fn scene_collider_to_runtime(c: &crate::scene::SceneCollider) -> Collider {

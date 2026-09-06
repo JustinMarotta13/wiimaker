@@ -38,7 +38,7 @@ Scenes are JSON on disk (`scenes/*.scene.json`). The egui editor and CLI share
 mutation helpers in `wiimaker-scene` so agents and humans never diverge.
 
 Unity mapping: Project → `game.toml`, Scene → `.scene.json`, GameObject → named
-entity with `Transform` + `Sprite` / `Disc` / `Camera` / `Tilemap` / `Collider`, Prefab → `.prefab.json`.
+entity with `Transform` + `Sprite` / `Disc` / `Camera` (+ optional follow) / `Tilemap` / `Collider`, Prefab → `.prefab.json`.
 
 ### `wiimaker-core`
 
@@ -47,7 +47,7 @@ Platform-agnostic. Uses `glam` for math. Games never call GX or OpenGL directly.
 Key types:
 
 - `App` — implement `update` / `render`
-- `World` — named entities with Transform + Sprite/Disc/Camera/Tilemap/Collider (`tile_solid` / `overlaps` / `move_and_collide`)
+- `World` — named entities with Transform + Sprite/Disc/Camera/Follow/Tilemap/Collider (`tile_solid` / `overlaps` / `move_and_collide` / `follow_cameras`)
 - `DrawList` — ordered `DrawCmd` (Clear, SetCamera, DrawMesh, DrawSprite)
 - `Input` — normalized buttons + sticks (GCN layout as the lingua franca)
 - `Time` — fixed 60 Hz tick with accumulator (Wii VI is king)

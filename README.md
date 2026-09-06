@@ -70,6 +70,9 @@ wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'
 wiimaker tilemap set my-game --name Maze --x 1 --y 1 --id 0
 wiimaker tilemap get my-game --name Maze --x 1 --y 1 --json
 wiimaker entity add-component my-game --name Wall Collider --w 32 --h 16
+wiimaker entity add-component my-game --name MainCamera Camera
+wiimaker entity add-component my-game --name MainCamera Follow --target Player --lerp 0.15
+# or: wiimaker entity set my-game --name MainCamera --follow Player --lerp 0.15
 wiimaker entity overlaps my-game --name Player --other Wall
 wiimaker cook my-game          # advanced / agents
 wiimaker doctor my-game
