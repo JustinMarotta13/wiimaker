@@ -9,10 +9,10 @@ use wiimaker_core::move_and_collide;
 use wiimaker_core::world::World;
 use wiimaker_host::{Framebuffer, TextureAtlas};
 use wiimaker_scene::{
-    add_build_scene, add_component_sprite, create_named_scene, diagnose, duplicate_entity,
-    find_game_dir, animate_world, hydrate_lenient_with_catalogs, insert_entity_clone, list_scenes,
-    load_project, load_scene, remove_build_scene, rename_entity, save_scene, set_default_scene,
-    EntityData, GameProject, Scene, Severity, UndoStack,
+    add_build_scene, add_component_sprite, animate_world, create_named_scene, diagnose,
+    duplicate_entity, find_game_dir, hydrate_lenient_with_catalogs, insert_entity_clone,
+    list_scenes, load_project, load_scene, remove_build_scene, rename_entity, save_scene,
+    set_default_scene, EntityData, GameProject, Scene, Severity, UndoStack,
 };
 
 use crate::dock::{self, EditorTab};
@@ -407,7 +407,8 @@ impl EditorApp {
         match remove_build_scene(&self.game_dir, scene) {
             Ok(rel) => {
                 self.reload_project();
-                if self.build_settings_pick.as_deref() == Some(&rel.to_string_lossy().replace('\\', "/"))
+                if self.build_settings_pick.as_deref()
+                    == Some(&rel.to_string_lossy().replace('\\', "/"))
                 {
                     self.build_settings_pick = None;
                 }
@@ -929,12 +930,7 @@ impl EditorApp {
             return;
         }
         let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
-        animate_world(
-            &mut self.world,
-            &self.catalog,
-            self.atlas.map(),
-            dt,
-        );
+        animate_world(&mut self.world, &self.catalog, self.atlas.map(), dt);
         let (dx, dy) = ctx.input(|i| {
             let mut x = 0.0f32;
             let mut y = 0.0f32;
@@ -952,44 +948,42 @@ impl EditorApp {
             }
             (x, y)
         });
-        if dx == 0.0 && dy == 0.0 {
-            return;
-        }
-        let speed = 220.0 * dt;
-        let Some(id) = self.world.find_by_name("Player") else {
-            return;
-        };
-        let hit = move_and_collide(&mut self.world, id, Vec2::new(dx * speed, dy * speed));
-        if let Some(hid) = hit.hit {
-            let name = self
-                .world
-                .name(hid)
-                .unwrap_or("?")
-                .to_string();
-            if self.last_play_hit.as_deref() != Some(name.as_str()) {
-                self.console_push(
-                    ConsoleLevel::Info,
-                    format!("Play collision · Player × {name}"),
-                );
-                self.last_play_hit = Some(name);
-            }
-        } else {
-            self.last_play_hit = None;
-        }
-        let r = self.world.disc(id).map(|d| d.radius).unwrap_or(16.0);
-        if let Some(xf) = self.world.transform_mut(id) {
-            xf.translation.x = xf.translation.x.clamp(r, 640.0 - r);
-            xf.translation.y = xf.translation.y.clamp(r, 480.0 - r);
-        }
-        if let Some(shadow) = self.world.find_by_name("OrbShadow") {
-            if let (Some(player), Some(sxf)) = (
-                self.world.transform(id).copied(),
-                self.world.transform_mut(shadow),
-            ) {
-                sxf.translation.x = player.translation.x + 4.0;
-                sxf.translation.y = player.translation.y + 6.0;
+        if dx != 0.0 || dy != 0.0 {
+            if let Some(id) = self.world.find_by_name("Player") {
+                let speed = 220.0 * dt;
+                let hit = move_and_collide(&mut self.world, id, Vec2::new(dx * speed, dy * speed));
+                if let Some(hid) = hit.hit {
+                    let name = self.world.name(hid).unwrap_or("?").to_string();
+                    if self.last_play_hit.as_deref() != Some(name.as_str()) {
+                        self.console_push(
+                            ConsoleLevel::Info,
+                            format!("Play collision · Player × {name}"),
+                        );
+                        self.last_play_hit = Some(name);
+                    }
+                } else {
+                    self.last_play_hit = None;
+                }
+                // Identity 640×480 play clamps to the screen; an active camera can pan.
+                if self.world.active_camera().is_none() {
+                    let r = self.world.disc(id).map(|d| d.radius).unwrap_or(16.0);
+                    if let Some(xf) = self.world.transform_mut(id) {
+                        xf.translation.x = xf.translation.x.clamp(r, 640.0 - r);
+                        xf.translation.y = xf.translation.y.clamp(r, 480.0 - r);
+                    }
+                }
+                if let Some(shadow) = self.world.find_by_name("OrbShadow") {
+                    if let (Some(player), Some(sxf)) = (
+                        self.world.transform(id).copied(),
+                        self.world.transform_mut(shadow),
+                    ) {
+                        sxf.translation.x = player.translation.x + 4.0;
+                        sxf.translation.y = player.translation.y + 6.0;
+                    }
+                }
             }
         }
+        self.world.follow_cameras();
     }
 
     fn spawn_wiimaker(&mut self, args: &[&str], ok_status: &str) {
@@ -1187,7 +1181,11 @@ impl eframe::App for EditorApp {
 
         // Top toolbar stays as TopBottomPanel. Everything else is one DockArea.
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(theme::BG_DEEP).inner_margin(egui::Margin::same(0.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(theme::BG_DEEP)
+                    .inner_margin(egui::Margin::same(0.0)),
+            )
             .show(ctx, |ui| {
                 self.ui_dock(ui);
             });

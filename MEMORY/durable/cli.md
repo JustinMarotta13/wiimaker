@@ -13,7 +13,9 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - `entity set-parent <game> --name Child [--parent Parent]` — omit `--parent` to unparent; preserves world pose.
 - `entity remove-component` / `set-component-enabled --enabled true|false` (clap `ArgAction::Set`).
 - Prefabs: `entity create-prefab` · `instantiate-prefab` · `apply-prefab` · `unpack-prefab` (files under `assets/prefabs/`).
-- `entity set --name X [--x --y --sx --sy --rotation-deg]` — scale/rotate via `set_entity_scale` / `set_entity_rotation_z` (degrees → radians).
+- `entity set --name X [--x --y --sx --sy --rotation-deg --tag --follow --lerp]` — scale/rotate via `set_entity_scale` / `set_entity_rotation_z` (degrees → radians). `--follow` creates Camera if missing.
+- Collider / Trigger: `entity add-component … Collider|--trigger|--filter` or kind `Trigger`; `entity triggers <game> <name>`; `entity despawn <game> <name>`; `entity set --tag N`.
+- Camera / Follow: `entity add-component <game> --name Cam Camera` · `Follow --target Player --lerp 0.15`. Same mutate helpers as the editor.
 - `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
 - `scene build-list` / `build-add` / `build-remove` mutate `game.toml` `scenes` (Build Settings). Empty list is omitted; authoring `scene list` still walks `scenes/`.
 - `entity list` prints an indented tree (non-json); JSON still dumps flat entity array with `parent` fields.

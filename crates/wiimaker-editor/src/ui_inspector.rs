@@ -1,9 +1,10 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
-    add_component_animation, add_component_collider, add_component_disc, add_component_sprite,
-    add_component_tilemap, remove_component_animation, remove_component_collider,
-    remove_component_disc, remove_component_sprite, remove_component_tilemap, save_project,
-    set_component_enabled, tilemap_resize, SceneColliderKind,
+    add_component_animation, add_component_camera, add_component_collider, add_component_disc,
+    add_component_follow, add_component_sprite, add_component_tilemap, remove_component_animation,
+    remove_component_camera, remove_component_collider, remove_component_disc,
+    remove_component_sprite, remove_component_tilemap, save_project, set_component_enabled,
+    tilemap_resize, SceneColliderKind,
 };
 
 use crate::app::EditorApp;
@@ -52,16 +53,19 @@ impl EditorApp {
         let mut add_tilemap = false;
         let mut add_collider = false;
         let mut add_animation = false;
+        let mut add_camera = false;
         let mut remove_sprite = false;
         let mut remove_disc = false;
         let mut remove_tilemap = false;
         let mut remove_collider = false;
         let mut remove_animation = false;
+        let mut remove_camera = false;
         let mut toggle_sprite: Option<bool> = None;
         let mut toggle_disc: Option<bool> = None;
         let mut toggle_tilemap: Option<bool> = None;
         let mut toggle_collider: Option<bool> = None;
         let mut toggle_animation: Option<bool> = None;
+        let mut toggle_camera: Option<bool> = None;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
@@ -89,6 +93,7 @@ impl EditorApp {
         }
 
         let catalog_names: Vec<String> = self.catalog.names().to_vec();
+        let entity_names: Vec<String> = self.scene.entities.iter().map(|e| e.name.clone()).collect();
         let mut pending_sprite_tex: Option<(String, [f32; 2])> = None;
 
         if let Some(ent) = self.scene.entities.iter_mut().find(|e| e.name == sel) {
@@ -419,12 +424,78 @@ impl EditorApp {
                 }
             }
 
+            if let Some(cam) = ent.components.camera.as_mut() {
+                let hdr = theme::component_card_header(
+                    ui,
+                    "camera",
+                    "Camera",
+                    Some(cam.active),
+                    true,
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_camera = Some(en);
+                }
+                if hdr.remove {
+                    remove_camera = true;
+                }
+                if hdr.open {
+                theme::inspector_props().show(ui, |ui| {
+                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                    let current = cam.follow.clone().unwrap_or_default();
+                    let label = if current.is_empty() {
+                        "(none)"
+                    } else {
+                        current.as_str()
+                    };
+                    let mut new_follow = cam.follow.clone();
+                    let mut follow_changed = false;
+                    egui::ComboBox::from_id_salt("camera_follow")
+                        .selected_text(label)
+                        .width(combo_w)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(current.is_empty(), "(none)")
+                                .clicked()
+                            {
+                                new_follow = None;
+                                follow_changed = true;
+                            }
+                            for name in &entity_names {
+                                if name == &sel {
+                                    continue;
+                                }
+                                if ui
+                                    .selectable_label(current.as_str() == name, name)
+                                    .clicked()
+                                {
+                                    new_follow = Some(name.clone());
+                                    follow_changed = true;
+                                }
+                            }
+                        });
+                    if follow_changed {
+                        cam.follow = new_follow;
+                        dirty = true;
+                    }
+                    dirty |= theme::labeled_drag(ui, "Lerp", &mut cam.lerp, 0.01);
+                    if cam.lerp < 0.0 {
+                        cam.lerp = 0.0;
+                    }
+                    if cam.lerp > 1.0 {
+                        cam.lerp = 1.0;
+                    }
+                });
+                }
+                ui.add_space(4.0);
+            }
+
 
             let missing_sprite = ent.components.sprite.is_none();
             let missing_disc = ent.components.disc.is_none();
             let missing_tilemap = ent.components.tilemap.is_none();
             let missing_collider = ent.components.collider.is_none();
             let missing_animation = ent.components.animation.is_none();
+            let missing_camera = ent.components.camera.is_none();
             ui.add_space(12.0);
             let add_w = ui.available_width();
             ui.allocate_ui_with_layout(
@@ -455,11 +526,16 @@ impl EditorApp {
                         add_animation = true;
                         ui.close_menu();
                     }
+                    if missing_camera && ui.button("Camera").clicked() {
+                        add_camera = true;
+                        ui.close_menu();
+                    }
                     if !missing_sprite
                         && !missing_disc
                         && !missing_tilemap
                         && !missing_collider
                         && !missing_animation
+                        && !missing_camera
                     {
                         ui.label(
                             RichText::new("All components present")
@@ -638,6 +714,44 @@ impl EditorApp {
         if let Some(en) = toggle_animation {
             self.push_undo();
             if set_component_enabled(&mut self.scene, &sel, "animation", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if add_camera {
+            self.push_undo();
+            let _ = add_component_camera(&mut self.scene, &sel, true);
+            let default_target = self
+                .scene
+                .find_entity("Player")
+                .map(|_| "Player".to_string())
+                .or_else(|| {
+                    self.scene
+                        .entities
+                        .iter()
+                        .find(|e| e.name != sel)
+                        .map(|e| e.name.clone())
+                });
+            if let Some(t) = default_target {
+                let _ = add_component_follow(&mut self.scene, &sel, &t, Some(0.15));
+            }
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_camera {
+            self.push_undo();
+            if remove_component_camera(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_camera {
+            self.push_undo();
+            if set_component_enabled(&mut self.scene, &sel, "camera", en).is_ok() {
                 self.sync_baseline();
                 self.mark_dirty();
             } else {

@@ -19,15 +19,15 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera marker, Tilemap, Collider, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json`.
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · active Camera offsets dests (centered 640×480) + `World::follow_cameras`.
 
-**Not present:** audio playback, camera used at render time, named sorting layers, prefab variants, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
+**Not present:** audio playback, named sorting layers, prefab variants, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
 
 ---
 
 ## Now
 
-**Recommended next morning:** Camera follow (use the Camera you already hydrate).
+**Recommended next morning:** 4-way discrete / grid-snap mover.
 
 ### 6. 4-way discrete / grid-snap mover — **GUI + CLI**
 Unity: nothing built-in; everyone writes it. Input already has D-pad + stick. Pac-Man needs queued cardinals + snap to cell centers.
@@ -44,15 +44,6 @@ ARCHITECTURE M3. Cook WAV → `.wpack` is sketched; **no playback** on host or W
 - **GUI:** Project on `.wav` → Inspector play; entity `AudioSource`.
 - **CLI:** `asset import <game> chomp.wav` · `asset play` (host).
 - **Test:** eat a dot → hear a tick; doctor lists clips.
-
-### 8. Camera follow (use the Camera you already hydrate) — **GUI + CLI**
-`SceneCamera` hydrates onto `World` but `render_world` never emits `SetCamera`. Maze-that-fits-640×480 hides this; bigger mazes cannot.
-
-- If an active Camera exists, offset sprite/disc dest by `cam.translation` (ortho, screen-space).
-- Optional `Follow { target: "Player", lerp }`.
-- **GUI:** Inspector Follow target combo; viewport shows camera rect.
-- **CLI:** `entity add-component … Camera` (exists via scene JSON today — add CLI kind) · `entity set --follow Player`.
-- **Test:** 2× maze; camera keeps Player centered; no Camera → today's 640×480 identity.
 
 ---
 
@@ -97,6 +88,8 @@ Shipped. Keep here so we do not rebuild them.
 - Trigger / collectible (GUI Is Trigger + Filter Tag; CLI Trigger/--trigger/--filter, entity triggers, entity despawn; `triggers_entered`; triggers skip `move_and_collide`)
 - **Runtime scene load / switch** (2026-09-04) — `load_scene_into_world` (scene + host atlas helper) replaces World, keeps texture map; `game.toml` `scenes = [...]` Build Settings; doctor warns default missing from list / missing files; CLI `scene build-list` · `build-add` · `build-remove` (`--json`); editor File → Build Settings… + Inspector on `game.toml`. Pac-Man stays local (do not commit `games/`).
 
+- **Camera follow** (2026-09-06) — active `Camera` offsets `render_world` dests (viewport center = camera translation; `(320,240)` = identity). Optional Follow on `SceneCamera` (`follow` name + `lerp`, default 0.15). `World::follow_cameras` each play/host tick. Inspector Camera foldout (target combo + lerp); Scene view 640×480 cyan rect gizmo; Game view applies offset. CLI `entity add-component … Camera` · `Follow --target --lerp` · `entity set --follow --lerp`. Host-first (WSCN unchanged). No Camera → identical dests.
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -113,8 +106,8 @@ Global: `--json`
 | `play-wii` | build then Dolphin |
 | `doctor` | validate |
 | `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` | build-* mutate `game.toml` `scenes` |
-| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag` |
-| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) |
+| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp` |
+| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Camera` \| `Follow` (`--target` `--lerp`) |
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
 | `entity overlaps` · `entity triggers` | `--name` [ `--other` ] · pairwise/list overlaps; `triggers <name>` lists entered triggers |
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
@@ -132,12 +125,12 @@ Toolbar (center): Play / Pause / Stop
 Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Paint · Erase · Pick · Snap · grid size
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship camera follow (Now #8).** `SceneCamera` hydrates but `render_world` never emits `SetCamera`; bigger mazes cannot pan. Alternative if you want Pac-Man motion first: 4-way grid-snap mover (Now #6).
+**Ship 4-way grid-snap mover (Now #6).** Input already has D-pad + stick; Pac-Man needs queued cardinals + snap to cell centers. Camera follow is Done.
 
