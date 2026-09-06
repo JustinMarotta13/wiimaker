@@ -1,7 +1,7 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
     add_component_animation, add_component_camera, add_component_collider, add_component_disc,
-    add_component_follow, add_component_sprite, add_component_tilemap, remove_component_animation,
+    add_component_sprite, add_component_tilemap, remove_component_animation,
     remove_component_camera, remove_component_collider, remove_component_disc,
     remove_component_sprite, remove_component_tilemap, save_project, set_component_enabled,
     tilemap_resize, SceneColliderKind,
@@ -723,20 +723,6 @@ impl EditorApp {
         if add_camera {
             self.push_undo();
             let _ = add_component_camera(&mut self.scene, &sel, true);
-            let default_target = self
-                .scene
-                .find_entity("Player")
-                .map(|_| "Player".to_string())
-                .or_else(|| {
-                    self.scene
-                        .entities
-                        .iter()
-                        .find(|e| e.name != sel)
-                        .map(|e| e.name.clone())
-                });
-            if let Some(t) = default_target {
-                let _ = add_component_follow(&mut self.scene, &sel, &t, Some(0.15));
-            }
             self.sync_baseline();
             self.mark_dirty();
         }

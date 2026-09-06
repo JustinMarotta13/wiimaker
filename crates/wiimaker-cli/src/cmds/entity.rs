@@ -7,9 +7,9 @@ use wiimaker_scene::{
     add_component_follow, add_component_sprite, add_component_tilemap, add_entity, apply_prefab,
     duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered,
     instantiate_prefab, load_prefab, remove_component_animation, remove_component_camera,
-    remove_component_collider, remove_component_disc, remove_component_sprite,
-    remove_component_tilemap, remove_entity, rename_entity, save_prefab, save_scene,
-    set_component_enabled, set_entity_anim, set_entity_follow, set_entity_parent,
+    remove_component_collider, remove_component_disc, remove_component_follow,
+    remove_component_sprite, remove_component_tilemap, remove_entity, rename_entity, save_prefab,
+    save_scene, set_component_enabled, set_entity_anim, set_entity_follow, set_entity_parent,
     set_entity_rotation_z, set_entity_scale, set_entity_transform, unpack_prefab_instance,
     MutateOpts, Scene, SceneColliderKind,
 };
@@ -300,8 +300,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "tilemap" => remove_component_tilemap(&mut sc, &name)?,
                 "collider" => remove_component_collider(&mut sc, &name)?,
                 "animation" => remove_component_animation(&mut sc, &name)?,
-                "camera" | "follow" => remove_component_camera(&mut sc, &name)?,
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera)"),
+                "camera" => remove_component_camera(&mut sc, &name)?,
+                "follow" => remove_component_follow(&mut sc, &name)?,
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|Follow)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed {kind} from {name}"))

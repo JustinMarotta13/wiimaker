@@ -252,7 +252,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, or Camera
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, or Follow (Follow removal clears fields; use entity set --follow "" to clear)
         kind: String,
         #[arg(long)]
         scene: Option<String>,
