@@ -27,4 +27,6 @@ pub use tilemap::{
     tile_get, tile_solid, tile_solid_world, world_to_cell, world_to_cell_on, TileVisual, Tilemap,
 };
 pub use time::Clock;
-pub use world::{Animation, Camera, Disc, EntityId, Sprite, Transform, World};
+pub use world::{
+    Animation, Camera, Disc, EntityId, Follow, Sprite, Transform, World, SCREEN_H, SCREEN_W,
+};

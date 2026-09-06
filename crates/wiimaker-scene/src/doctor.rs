@@ -98,7 +98,6 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         sprite_names = texture_names.clone();
     }
 
-
     let anim_names = list_anim_clips(&assets).unwrap_or_default();
     for aname in &anim_names {
         let path = AnimClipMeta::path(&assets, aname);
@@ -272,6 +271,19 @@ fn check_scene_refs(
                             });
                         }
                     }
+                }
+            }
+        }
+        if let Some(cam) = &ent.components.camera {
+            if let Some(target) = cam.follow.as_deref().filter(|t| !t.is_empty()) {
+                if !scene.entities.iter().any(|e| e.name == target) {
+                    issues.push(Issue {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "entity '{}': Camera follow target '{}' not found",
+                            ent.name, target
+                        ),
+                    });
                 }
             }
         }

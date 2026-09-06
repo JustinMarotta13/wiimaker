@@ -301,10 +301,27 @@ impl SceneDisc {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SceneCamera {
     #[serde(default = "default_true")]
     pub active: bool,
+    /// Named entity to track (empty / omitted = no follow).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow: Option<String>,
+    /// Follow lerp factor (`0` frozen, `1` snap). Default `0.15`.
+    #[serde(
+        default = "default_follow_lerp",
+        skip_serializing_if = "is_default_follow_lerp"
+    )]
+    pub lerp: f32,
+}
+
+fn default_follow_lerp() -> f32 {
+    0.15
+}
+
+fn is_default_follow_lerp(v: &f32) -> bool {
+    (*v - default_follow_lerp()).abs() < 1e-6
 }
 
 fn default_true() -> bool {
@@ -499,7 +516,6 @@ impl SceneTilePalette {
     }
 }
 
-
 /// Sprite clip player (Unity Animator analogue). `clip` is `assets/<clip>.anim.json` stem.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SceneAnimation {
@@ -507,7 +523,11 @@ pub struct SceneAnimation {
     /// When set, overrides the clip file's fps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fps: Option<f32>,
-    #[serde(default = "default_true", rename = "loop", skip_serializing_if = "is_true")]
+    #[serde(
+        default = "default_true",
+        rename = "loop",
+        skip_serializing_if = "is_true"
+    )]
     pub loop_: bool,
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled: bool,
