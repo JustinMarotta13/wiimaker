@@ -28,8 +28,8 @@ pub use mutate::{
     add_component_animation, add_component_camera, add_component_disc, add_component_follow,
     add_component_sprite, add_entity, apply_prefab, duplicate_entity, entity_to_prefab,
     insert_entity_clone, instantiate_prefab, remove_component_animation, remove_component_camera,
-    remove_component_disc, remove_component_sprite, remove_entity, rename_entity,
-    set_component_enabled, set_entity_anim, set_entity_follow, set_entity_parent,
+    remove_component_disc, remove_component_follow, remove_component_sprite, remove_entity,
+    rename_entity, set_component_enabled, set_entity_anim, set_entity_follow, set_entity_parent,
     set_entity_rotation_z, set_entity_scale, set_entity_transform, set_entity_world_xy,
     set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
 };

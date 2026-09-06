@@ -537,23 +537,15 @@ fn paint_camera_gizmos(ui: &egui::Ui, image_rect: egui::Rect, world: &World) {
     let painter = ui.painter();
     let color = egui::Color32::from_rgb(140, 210, 230);
     let stroke = egui::Stroke::new(1.5_f32, color);
-    for id in world.iter_entities() {
-        let Some(cam) = world.camera(id) else {
-            continue;
-        };
-        if !cam.active {
-            continue;
-        }
-        let Some(xf) = world.transform(id) else {
-            continue;
-        };
-        let cx = xf.translation.x;
-        let cy = xf.translation.y;
-        let hw = VIEW_W as f32 * 0.5;
-        let hh = VIEW_H as f32 * 0.5;
-        let r = egui::Rect::from_min_max(to_screen(cx - hw, cy - hh), to_screen(cx + hw, cy + hh));
-        painter.rect_stroke(r, 0.0, stroke);
-    }
+    let Some((_id, xf, _cam)) = world.active_camera() else {
+        return;
+    };
+    let cx = xf.translation.x;
+    let cy = xf.translation.y;
+    let hw = VIEW_W as f32 * 0.5;
+    let hh = VIEW_H as f32 * 0.5;
+    let r = egui::Rect::from_min_max(to_screen(cx - hw, cy - hh), to_screen(cx + hw, cy + hh));
+    painter.rect_stroke(r, 0.0, stroke);
 }
 
 fn paint_selection_outline(

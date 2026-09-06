@@ -17,8 +17,8 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 ## Decisions
 
 - `load_scene_into_world` (`wiimaker-scene`, thin `wiimaker-host` wrapper taking `&TextureAtlas`) resolves stem/path, `hydrate_into_with_catalogs` (clears World), returns clear color. Keep the atlas; do not recook on switch.
-- Active Camera: dests in `render_world` are world − (cam − 320,240). Camera at default spawn is identity. Host raster still ignores `SetCamera` (offset is baked into dests). `World::follow_cameras` after play movement / game `update`.
-- Until Rust `staticlib` lands, Dolphin play uses the C scene player + GX textured quads; host keeps `wiimaker-scene` JSON hydrate + `SpriteCatalog`.
+- Active Camera: dests in `render_world` are world − (cam − 320,240). Camera at default spawn is identity. Camera offset is applied in `render_world` dests; `SetCamera` is reserved for a future backend that transforms at flush time (do not emit both). `World::follow_cameras` after play movement / game `update`.
+- Until Rust `staticlib` lands, Dolphin play uses the C scene player + GX textured quads; host keeps `wiimaker-scene` JSON hydrate + `SpriteCatalog`. WSCN/stub_game still skip cameras.
 - `games/` is gitignored (local projects only); workspace still lists `games/hello-orb` for local cook/run.
 - Pivot lives on sheet meta (not SceneSprite override) for v0.
 - Tilemap cells: row-major `u16` ids + 0/1 `solid` in JSON; packed bits at runtime. Cell `(0,0)` is top-left of `transform + origin`. Occupied (`id != 0`) draw as palette sprite or colored quad (`TextureId(u32::MAX)` → white sample × tint). `tile_solid` treats OOB as solid when any tilemap exists.

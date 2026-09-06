@@ -47,7 +47,7 @@ fn hydrate_follow_and_snap_centers_target() {
 
     let mut draw = wiimaker_core::draw::DrawList::new();
     render_world(&world, &mut draw, Rgba8::BLACK);
-    assert!(draw
+    assert!(!draw
         .cmds()
         .iter()
         .any(|c| matches!(c, DrawCmd::SetCamera { .. })));

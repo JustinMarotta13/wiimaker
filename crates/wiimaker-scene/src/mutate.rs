@@ -486,6 +486,19 @@ pub fn remove_component_camera(scene: &mut Scene, name: &str) -> Result<()> {
     ent.components.camera = None;
     Ok(())
 }
+/// Clear Camera follow state without removing the Camera component.
+/// Follow is stored on SceneCamera rather than as a separate component.
+pub fn remove_component_follow(scene: &mut Scene, name: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let cam = ent
+        .components
+        .camera
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Camera"))?;
+    cam.follow = None;
+    cam.lerp = 0.15;
+    Ok(())
+}
 
 /// Ensure Camera exists and set follow target + optional lerp.
 /// Empty `target` clears follow.
@@ -730,6 +743,7 @@ mod tests {
         add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
         add_entity(&mut scene, "Main Camera", &MutateOpts::default()).unwrap();
         add_component_camera(&mut scene, "Main Camera", true).unwrap();
+        assert!(scene.find_entity("Main Camera").unwrap().components.camera.as_ref().unwrap().follow.is_none());
         set_entity_follow(&mut scene, "Main Camera", Some("Player"), Some(0.2)).unwrap();
         let cam = scene
             .find_entity("Main Camera")
@@ -754,5 +768,15 @@ mod tests {
                 .as_deref(),
             Some("Hero")
         );
+        remove_component_follow(&mut scene, "Main Camera").unwrap();
+        let cam = scene
+            .find_entity("Main Camera")
+            .unwrap()
+            .components
+            .camera
+            .as_ref()
+            .unwrap();
+        assert!(cam.follow.is_none());
+        assert!((cam.lerp - 0.15).abs() < 1e-6);
     }
 }

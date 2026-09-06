@@ -2,8 +2,8 @@
 
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::{DrawList, Rect, TextureId};
-use wiimaker_core::math::{orthographic, Mat4, Vec2, Vec3};
-use wiimaker_core::world::{World, SCREEN_H, SCREEN_W};
+use wiimaker_core::math::Vec2;
+use wiimaker_core::world::World;
 
 /// Sentinel texture: host atlas samples white, then tint supplies the cell color.
 const QUAD_TEX: TextureId = TextureId(u32::MAX);
@@ -12,8 +12,9 @@ const QUAD_TEX: TextureId = TextureId(u32::MAX);
 ///
 /// Dest origin = `translation - pivot * size * scale` (default pivot is center).
 /// An **active** Camera offsets dests so its translation is the 640×480 viewport
-/// center (camera at `320, 240` matches the no-camera identity). Also emits
-/// [`DrawCmd::SetCamera`]. No active camera → today's identity dests.
+/// center (camera at `320, 240` matches the no-camera identity). No active camera
+/// → today's identity dests. Camera transforms are intentionally not emitted as
+/// [`DrawCmd::SetCamera`] because host backends apply the offset in these dests.
 pub fn render_world(world: &World, draw: &mut DrawList, clear: Rgba8) {
     render_world_ex(world, draw, clear, true);
 }
@@ -28,12 +29,6 @@ pub fn render_world_ex(world: &World, draw: &mut DrawList, clear: Rgba8, apply_c
     } else {
         Vec2::ZERO
     };
-
-    if apply_camera && world.active_camera().is_some() {
-        let view = Mat4::from_translation(Vec3::new(-offset.x, -offset.y, 0.0));
-        let proj = orthographic(SCREEN_W, SCREEN_H);
-        draw.set_camera(view, proj);
-    }
 
     let mut tiles: Vec<_> = world.iter_tilemaps().collect();
     tiles.sort_by(|a, b| {
@@ -161,7 +156,7 @@ mod tests {
         world.set_camera(cam, None);
         let mut without = DrawList::new();
         render_world(&world, &mut without, Rgba8::BLACK);
-        assert!(has_set_camera(with_cam.cmds()));
+        assert!(!has_set_camera(with_cam.cmds()));
         assert!(!has_set_camera(without.cmds()));
         assert_eq!(sprite_dests(with_cam.cmds()), sprite_dests(without.cmds()));
     }
@@ -179,6 +174,7 @@ mod tests {
         // offset x = 420 - 320 = 100
         assert_eq!(sprite_dests(draw.cmds()), vec![(84.0 - 100.0, 34.0)]);
         assert_eq!(disc_centers(draw.cmds()), vec![(0.0, 50.0)]);
+        assert!(!has_set_camera(draw.cmds()));
     }
 
     #[test]
