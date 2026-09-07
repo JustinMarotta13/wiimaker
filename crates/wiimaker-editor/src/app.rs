@@ -4,6 +4,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use eframe::egui;
 use wiimaker_assets::{AnimClipCatalog, SpriteCatalog, WPack};
+use wiimaker_core::input::{Button, Input};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::move_and_collide;
 use wiimaker_core::world::World;
@@ -931,24 +932,43 @@ impl EditorApp {
         }
         let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
         animate_world(&mut self.world, &self.catalog, self.atlas.map(), dt);
+
+        let mut play_input = Input::new();
         let (dx, dy) = ctx.input(|i| {
             let mut x = 0.0f32;
             let mut y = 0.0f32;
-            if i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft) {
+            let left = i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft);
+            let right = i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight);
+            let up = i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp);
+            let down = i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown);
+            if left {
                 x -= 1.0;
             }
-            if i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight) {
+            if right {
                 x += 1.0;
             }
-            if i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp) {
+            if up {
                 y -= 1.0;
             }
-            if i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown) {
+            if down {
                 y += 1.0;
             }
+            play_input.set_down(Button::DPadLeft, left);
+            play_input.set_down(Button::DPadRight, right);
+            play_input.set_down(Button::DPadUp, up);
+            play_input.set_down(Button::DPadDown, down);
+            play_input.main.x = x;
+            play_input.main.y = -y; // world −Y is Up; stick +Y is Up
             (x, y)
         });
-        if dx != 0.0 || dy != 0.0 {
+        self.world.step_grid_movers(&play_input, dt);
+
+        let player_uses_grid = self
+            .world
+            .find_by_name("Player")
+            .and_then(|id| self.world.grid_mover(id))
+            .is_some();
+        if !player_uses_grid && (dx != 0.0 || dy != 0.0) {
             if let Some(id) = self.world.find_by_name("Player") {
                 let speed = 220.0 * dt;
                 let hit = move_and_collide(&mut self.world, id, Vec2::new(dx * speed, dy * speed));
@@ -972,14 +992,16 @@ impl EditorApp {
                         xf.translation.y = xf.translation.y.clamp(r, 480.0 - r);
                     }
                 }
-                if let Some(shadow) = self.world.find_by_name("OrbShadow") {
-                    if let (Some(player), Some(sxf)) = (
-                        self.world.transform(id).copied(),
-                        self.world.transform_mut(shadow),
-                    ) {
-                        sxf.translation.x = player.translation.x + 4.0;
-                        sxf.translation.y = player.translation.y + 6.0;
-                    }
+            }
+        }
+        if let Some(id) = self.world.find_by_name("Player") {
+            if let Some(shadow) = self.world.find_by_name("OrbShadow") {
+                if let (Some(player), Some(sxf)) = (
+                    self.world.transform(id).copied(),
+                    self.world.transform_mut(shadow),
+                ) {
+                    sxf.translation.x = player.translation.x + 4.0;
+                    sxf.translation.y = player.translation.y + 6.0;
                 }
             }
         }

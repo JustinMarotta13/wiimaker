@@ -246,6 +246,8 @@ pub struct SceneComponents {
     pub collider: Option<SceneCollider>,
     #[serde(default, rename = "Animation", skip_serializing_if = "Option::is_none")]
     pub animation: Option<SceneAnimation>,
+    #[serde(default, rename = "GridMover", skip_serializing_if = "Option::is_none")]
+    pub grid_mover: Option<SceneGridMover>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -549,6 +551,88 @@ impl SceneAnimation {
         Self {
             clip: clip.into(),
             ..Default::default()
+        }
+    }
+}
+
+/// 4-way grid-snap mover (Pac-Man queued cardinals). Host-first; not in WSCN.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SceneGridMover {
+    #[serde(default = "default_grid_cell")]
+    pub cell: f32,
+    /// World units per second.
+    #[serde(default = "default_grid_speed")]
+    pub speed: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_dir: Option<SceneDir>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+}
+
+fn default_grid_cell() -> f32 {
+    16.0
+}
+fn default_grid_speed() -> f32 {
+    120.0
+}
+
+impl Default for SceneGridMover {
+    fn default() -> Self {
+        Self {
+            cell: default_grid_cell(),
+            speed: default_grid_speed(),
+            queued_dir: None,
+            enabled: true,
+        }
+    }
+}
+
+impl SceneGridMover {
+    pub fn new(cell: f32, speed: f32) -> Self {
+        Self {
+            cell: if cell <= 0.0 { default_grid_cell() } else { cell },
+            speed: speed.max(0.0),
+            queued_dir: None,
+            enabled: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+pub enum SceneDir {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl SceneDir {
+    pub fn to_runtime(self) -> wiimaker_core::Dir {
+        match self {
+            SceneDir::Up => wiimaker_core::Dir::Up,
+            SceneDir::Down => wiimaker_core::Dir::Down,
+            SceneDir::Left => wiimaker_core::Dir::Left,
+            SceneDir::Right => wiimaker_core::Dir::Right,
+        }
+    }
+
+    pub fn from_runtime(d: wiimaker_core::Dir) -> Self {
+        match d {
+            wiimaker_core::Dir::Up => SceneDir::Up,
+            wiimaker_core::Dir::Down => SceneDir::Down,
+            wiimaker_core::Dir::Left => SceneDir::Left,
+            wiimaker_core::Dir::Right => SceneDir::Right,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "up" => Some(SceneDir::Up),
+            "down" => Some(SceneDir::Down),
+            "left" => Some(SceneDir::Left),
+            "right" => Some(SceneDir::Right),
+            _ => None,
         }
     }
 }

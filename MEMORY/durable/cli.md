@@ -16,6 +16,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - `entity set --name X [--x --y --sx --sy --rotation-deg --tag --follow --lerp]` — scale/rotate via `set_entity_scale` / `set_entity_rotation_z` (degrees → radians). `--follow` creates Camera if missing.
 - Collider / Trigger: `entity add-component … Collider|--trigger|--filter` or kind `Trigger`; `entity triggers <game> <name>`; `entity despawn <game> <name>`; `entity set --tag N`.
 - Camera / Follow: `entity add-component <game> --name Cam Camera` · `Follow --target Player --lerp 0.15`. Same mutate helpers as the editor.
+- GridMover: `entity add-component <game> --name Player GridMover --cell 20 --speed 6`. `entity set --name Player --cell --speed` creates/updates GridMover. Diagonals use horizontal axis only.
 - `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
 - `scene build-list` / `build-add` / `build-remove` mutate `game.toml` `scenes` (Build Settings). Empty list is omitted; authoring `scene list` still walks `scenes/`.
 - `entity list` prints an indented tree (non-json); JSON still dumps flat entity array with `parent` fields.
