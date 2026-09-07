@@ -27,20 +27,21 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning:** Audio oneshots.
+**Recommended next morning (2026-09-08):** Scene viewer controls + Game view resolution / aspect.
 
-### 7. Audio oneshots — **GUI + CLI**
-ARCHITECTURE M3. Cook WAV → `.wpack` is sketched; **no playback** on host or Wii (ASND mentioned, unused).
+### 8. Scene viewer controls + Game view aspect — **GUI + CLI**
+Unity chrome gap. Scene already has Move/Scale/Rotate/Paint/Erase/Pick/Snap; Game is a fixed 640×480 blit with no aspect/resolution UI.
 
-- `AudioClip` asset + `world.play_oneshot("chomp")`. Host: cpal/rodio. Wii: ASND later is fine.
-- **GUI:** Project on `.wav` → Inspector play; entity `AudioSource`.
-- **CLI:** `asset import <game> chomp.wav` · `asset play` (host).
-- **Test:** eat a dot → hear a tick; doctor lists clips.
+- **Scene view toolbar (Unity-like):** 2D toggle, pan/hand (or middle-drag already?), zoom (scroll + explicit %), grid overlay on/off, maybe gizmo visibility. Keep dark Pro chrome; paint geometry icons only (no unicode tofu).
+- **Game view:** resolution / aspect dropdown (Free Aspect, 640×480, 16:9, 4:3, custom W×H), letterbox/pillarbox when aspect locked, Scale slider. Persist in editor prefs or `game.toml` (e.g. `game_view = { width, height, aspect }`).
+- **CLI twin:** `scene set-game-view --width --height [--aspect free|fixed]` or `editor prefs` — whatever matches how prefs are stored; must mutate the same files the Game view toolbar writes.
+- **Test:** switch Free Aspect ↔ 640×480 in Game tab (letterbox visible); Scene zoom/pan/grid toggles; screenshots vs Unity Game view aspect bar. Pac-Man local only.
 
 ---
 
 ## Later
 
+- **Audio oneshots** (GUI+CLI) — ARCHITECTURE M3. Cook WAV → `.wpack` sketched; no host/Wii playback yet. `world.play_oneshot`, cpal/rodio host, ASND later; Project `.wav` play + `AudioSource`; CLI `asset import` / `asset play`.
 - **Sorting layers** (GUI+CLI) — named layers + order, not only raw `z`. Unity Sorting Layer.
 - **Prefab variants / overrides** (GUI+CLI) — unpack is a no-op; no orange-bold overrides. Dot/Ghost instances need this.
 - **Play-in-editor runs `App`** (GUI) — today's Play is hello-orb WASD, not the game crate. Load game as dylib or interpret a tiny script graph. CLI already has `run`.
@@ -126,5 +127,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Ship audio oneshots (Now #7).** Cook WAV → `.wpack` is sketched; no playback on host or Wii yet. Grid-snap mover is Done.
+**Ship Scene viewer controls + Game view resolution/aspect (Now #8).** Justin directed 2026-09-07 for the 2026-09-08 morning. Audio oneshots moved to Later.
 
