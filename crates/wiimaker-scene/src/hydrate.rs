@@ -11,6 +11,7 @@ use wiimaker_core::draw::{Rect, TextureId};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::tilemap::{TileVisual, Tilemap};
 use wiimaker_core::world::{Animation, Camera, Disc, Follow, Sprite, World};
+use wiimaker_core::GridMover;
 
 use crate::scene::{EntityData, Scene};
 
@@ -218,6 +219,12 @@ fn spawn_entity(
         }
     }
 
+    if let Some(g) = &ent.components.grid_mover {
+        if g.enabled {
+            world.set_grid_mover(id, Some(scene_grid_mover_to_runtime(g)));
+        }
+    }
+
     Ok(())
 }
 
@@ -330,6 +337,11 @@ pub fn hydrate_lenient_with_catalogs(
                 world.set_animation(id, Some(anim));
             }
         }
+        if let Some(g) = &ent.components.grid_mover {
+            if g.enabled {
+                world.set_grid_mover(id, Some(scene_grid_mover_to_runtime(g)));
+            }
+        }
     }
     world
 }
@@ -438,4 +450,10 @@ fn scene_collider_to_runtime(c: &crate::scene::SceneCollider) -> Collider {
         trigger: c.trigger,
         filter_tag: c.filter_tag,
     }
+}
+
+fn scene_grid_mover_to_runtime(g: &crate::scene::SceneGridMover) -> GridMover {
+    let mut gm = GridMover::new(g.cell, g.speed);
+    gm.queued_dir = g.queued_dir.map(|d| d.to_runtime());
+    gm
 }

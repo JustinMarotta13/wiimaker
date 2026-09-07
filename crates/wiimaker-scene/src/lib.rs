@@ -26,12 +26,13 @@ pub use hydrate::{
 };
 pub use mutate::{
     add_component_animation, add_component_camera, add_component_disc, add_component_follow,
-    add_component_sprite, add_entity, apply_prefab, duplicate_entity, entity_to_prefab,
-    insert_entity_clone, instantiate_prefab, remove_component_animation, remove_component_camera,
-    remove_component_disc, remove_component_follow, remove_component_sprite, remove_entity,
-    rename_entity, set_component_enabled, set_entity_anim, set_entity_follow, set_entity_parent,
-    set_entity_rotation_z, set_entity_scale, set_entity_transform, set_entity_world_xy,
-    set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
+    add_component_grid_mover, add_component_sprite, add_entity, apply_prefab, duplicate_entity,
+    entity_to_prefab, insert_entity_clone, instantiate_prefab, remove_component_animation,
+    remove_component_camera, remove_component_disc, remove_component_follow,
+    remove_component_grid_mover, remove_component_sprite, remove_entity, rename_entity,
+    set_component_enabled, set_entity_anim, set_entity_follow, set_entity_grid_mover,
+    set_entity_parent, set_entity_rotation_z, set_entity_scale, set_entity_transform,
+    set_entity_world_xy, set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{pick_entity_at, pick_entity_at_with_catalog, pointer_to_scene};
 pub use project::{
@@ -42,8 +43,8 @@ pub use project::{
 pub use render::{render_world, render_world_ex};
 pub use scene::{
     load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneAnimation,
-    SceneCamera, SceneCollider, SceneColliderKind, SceneComponents, SceneDisc, SceneSprite,
-    SceneTilePalette, SceneTilemap, SceneTransform,
+    SceneCamera, SceneCollider, SceneColliderKind, SceneComponents, SceneDir, SceneDisc,
+    SceneGridMover, SceneSprite, SceneTilePalette, SceneTilemap, SceneTransform,
 };
 pub use tilemap::{
     add_component_tilemap, ensure_tilemap, remove_component_tilemap, tilemap_fill,

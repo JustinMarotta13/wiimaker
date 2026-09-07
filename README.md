@@ -73,6 +73,8 @@ wiimaker entity add-component my-game --name Wall Collider --w 32 --h 16
 wiimaker entity add-component my-game --name MainCamera Camera
 wiimaker entity add-component my-game --name MainCamera Follow --target Player --lerp 0.15
 # or: wiimaker entity set my-game --name MainCamera --follow Player --lerp 0.15
+wiimaker entity add-component my-game --name Player GridMover --cell 20 --speed 6
+# or: wiimaker entity set my-game --name Player --cell 20 --speed 6
 wiimaker entity overlaps my-game --name Player --other Wall
 wiimaker cook my-game          # advanced / agents
 wiimaker doctor my-game

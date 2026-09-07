@@ -287,6 +287,14 @@ fn check_scene_refs(
                 }
             }
         }
+        if let Some(g) = &ent.components.grid_mover {
+            if g.cell <= 0.0 {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!("entity '{}': GridMover cell size must be > 0", ent.name),
+                });
+            }
+        }
     }
     let mut names = std::collections::HashSet::new();
     for ent in &scene.entities {

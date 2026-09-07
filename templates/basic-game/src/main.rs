@@ -41,7 +41,8 @@ impl App for Game {
         &self.title
     }
 
-    fn update(&mut self, _ctx: &FrameCtx<'_>) {
+    fn update(&mut self, ctx: &FrameCtx<'_>) {
+        self.world.step_grid_movers(ctx.input, ctx.clock.dt);
         self.world.follow_cameras();
     }
 

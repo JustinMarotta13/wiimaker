@@ -12,14 +12,14 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 |---|---|
 | Project window | `game.toml` + `assets/` + `scenes/` + editor **Project** explorer |
 | Hierarchy | editor Hierarchy (parent/unparent DnD, multi-select, duplicate) |
-| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider, enable checkbox, catalog combo, tile palette |
+| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover, enable checkbox, catalog combo, tile palette |
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Paint / Erase / Pick**, Snap + nudge |
 | Play | toolbar Play/Pause/Stop (hardcoded WASD on entity named `Player`; does **not** run game `App::update`) · File → Run external → `cargo run -p <game>` |
 | Prefab | `.prefab.json` · Save as Prefab / Instantiate / Apply / Unpack (unpack is a no-op) |
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · active Camera offsets dests (centered 640×480) + `World::follow_cameras`.
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by component `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers).
 
 **Not present:** audio playback, named sorting layers, prefab variants, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped).
 
@@ -27,15 +27,7 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning:** 4-way discrete / grid-snap mover.
-
-### 6. 4-way discrete / grid-snap mover — **GUI + CLI**
-Unity: nothing built-in; everyone writes it. Input already has D-pad + stick. Pac-Man needs queued cardinals + snap to cell centers.
-
-- Optional `GridMover { cell, speed, queued_dir }` component **or** a core helper `cardinal(input) -> Option<Dir>` + `try_step(grid)`.
-- **GUI:** Inspector on Player (cell size, speed).
-- **CLI:** `entity add-component … GridMover --cell 20 --speed 6`.
-- **Test:** hold Up+Right → only one axis, no diagonals; reverse allowed immediately.
+**Recommended next morning:** Audio oneshots.
 
 ### 7. Audio oneshots — **GUI + CLI**
 ARCHITECTURE M3. Cook WAV → `.wpack` is sketched; **no playback** on host or Wii (ASND mentioned, unused).
@@ -90,6 +82,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Camera follow** (2026-09-06) — active `Camera` offsets `render_world` dests (viewport center = camera translation; `(320,240)` = identity). Optional Follow on `SceneCamera` (`follow` name + `lerp`, default 0.15). `World::follow_cameras` each play/host tick. Inspector Camera foldout (target combo + lerp); Scene view 640×480 cyan rect gizmo; Game view applies offset. CLI `entity add-component … Camera` · `Follow --target --lerp` · `entity set --follow --lerp`. Host-first (WSCN unchanged). No Camera → identical dests.
 
+- **4-way grid-snap mover** (2026-09-07) — optional `GridMover { cell, speed, queued_dir }` + `cardinal(input)` / `try_step` / `World::step_grid_movers`. Diagonals: **horizontal wins**. Reverse of current heading is immediate; 90° turns wait for cell center. Stick +Y = Up = −Y world. Inspector foldout (cell, speed, queued dir). CLI `entity add-component … GridMover --cell --speed` · `entity set --cell --speed`. Host play + editor Play tick. Host-first (WSCN unchanged).
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -106,8 +100,8 @@ Global: `--json`
 | `play-wii` | build then Dolphin |
 | `doctor` | validate |
 | `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` | build-* mutate `game.toml` `scenes` |
-| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp` |
-| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Camera` \| `Follow` (`--target` `--lerp`) |
+| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed` |
+| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Camera` \| `Follow` (`--target` `--lerp`) \| `GridMover` (`--cell` `--speed` `--queued-dir`) |
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
 | `entity overlaps` · `entity triggers` | `--name` [ `--other` ] · pairwise/list overlaps; `triggers <name>` lists entered triggers |
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
@@ -125,12 +119,12 @@ Toolbar (center): Play / Pause / Stop
 Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Paint · Erase · Pick · Snap · grid size
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship 4-way grid-snap mover (Now #6).** Input already has D-pad + stick; Pac-Man needs queued cardinals + snap to cell centers. Camera follow is Done.
+**Ship audio oneshots (Now #7).** Cook WAV → `.wpack` is sketched; no playback on host or Wii yet. Grid-snap mover is Done.
 

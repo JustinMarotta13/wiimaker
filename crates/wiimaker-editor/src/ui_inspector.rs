@@ -1,10 +1,10 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
     add_component_animation, add_component_camera, add_component_collider, add_component_disc,
-    add_component_sprite, add_component_tilemap, remove_component_animation,
+    add_component_grid_mover, add_component_sprite, add_component_tilemap, remove_component_animation,
     remove_component_camera, remove_component_collider, remove_component_disc,
-    remove_component_sprite, remove_component_tilemap, save_project, set_component_enabled,
-    tilemap_resize, SceneColliderKind,
+    remove_component_grid_mover, remove_component_sprite, remove_component_tilemap, save_project,
+    set_component_enabled, tilemap_resize, SceneColliderKind, SceneDir,
 };
 
 use crate::app::EditorApp;
@@ -54,18 +54,21 @@ impl EditorApp {
         let mut add_collider = false;
         let mut add_animation = false;
         let mut add_camera = false;
+        let mut add_grid_mover = false;
         let mut remove_sprite = false;
         let mut remove_disc = false;
         let mut remove_tilemap = false;
         let mut remove_collider = false;
         let mut remove_animation = false;
         let mut remove_camera = false;
+        let mut remove_grid_mover = false;
         let mut toggle_sprite: Option<bool> = None;
         let mut toggle_disc: Option<bool> = None;
         let mut toggle_tilemap: Option<bool> = None;
         let mut toggle_collider: Option<bool> = None;
         let mut toggle_animation: Option<bool> = None;
         let mut toggle_camera: Option<bool> = None;
+        let mut toggle_grid_mover: Option<bool> = None;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
@@ -489,6 +492,75 @@ impl EditorApp {
                 ui.add_space(4.0);
             }
 
+            if let Some(g) = ent.components.grid_mover.as_mut() {
+                let hdr = theme::component_card_header(
+                    ui,
+                    "gridmover",
+                    "GridMover",
+                    Some(g.enabled),
+                    true,
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_grid_mover = Some(en);
+                }
+                if hdr.remove {
+                    remove_grid_mover = true;
+                }
+                if hdr.open {
+                theme::inspector_props().show(ui, |ui| {
+                    dirty |= theme::labeled_drag(ui, "Cell", &mut g.cell, 0.25);
+                    if g.cell < 0.01 {
+                        g.cell = 0.01;
+                    }
+                    dirty |= theme::labeled_drag(ui, "Speed", &mut g.speed, 0.5);
+                    if g.speed < 0.0 {
+                        g.speed = 0.0;
+                    }
+                    let current = g.queued_dir;
+                    let label = match current {
+                        None => "(none)",
+                        Some(SceneDir::Up) => "Up",
+                        Some(SceneDir::Down) => "Down",
+                        Some(SceneDir::Left) => "Left",
+                        Some(SceneDir::Right) => "Right",
+                    };
+                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                    let mut new_q = current;
+                    let mut q_changed = false;
+                    egui::ComboBox::from_id_salt("grid_queued_dir")
+                        .selected_text(label)
+                        .width(combo_w)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(current.is_none(), "(none)").clicked() {
+                                new_q = None;
+                                q_changed = true;
+                            }
+                            for (d, name) in [
+                                (SceneDir::Up, "Up"),
+                                (SceneDir::Down, "Down"),
+                                (SceneDir::Left, "Left"),
+                                (SceneDir::Right, "Right"),
+                            ] {
+                                if ui.selectable_label(current == Some(d), name).clicked() {
+                                    new_q = Some(d);
+                                    q_changed = true;
+                                }
+                            }
+                        });
+                    if q_changed {
+                        g.queued_dir = new_q;
+                        dirty = true;
+                    }
+                    ui.label(
+                        RichText::new("4-way only · diagonals use horizontal · reverse is immediate")
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
+                });
+                }
+                ui.add_space(4.0);
+            }
+
 
             let missing_sprite = ent.components.sprite.is_none();
             let missing_disc = ent.components.disc.is_none();
@@ -496,6 +568,7 @@ impl EditorApp {
             let missing_collider = ent.components.collider.is_none();
             let missing_animation = ent.components.animation.is_none();
             let missing_camera = ent.components.camera.is_none();
+            let missing_grid_mover = ent.components.grid_mover.is_none();
             ui.add_space(12.0);
             let add_w = ui.available_width();
             ui.allocate_ui_with_layout(
@@ -530,12 +603,17 @@ impl EditorApp {
                         add_camera = true;
                         ui.close_menu();
                     }
+                    if missing_grid_mover && ui.button("GridMover").clicked() {
+                        add_grid_mover = true;
+                        ui.close_menu();
+                    }
                     if !missing_sprite
                         && !missing_disc
                         && !missing_tilemap
                         && !missing_collider
                         && !missing_animation
                         && !missing_camera
+                        && !missing_grid_mover
                     {
                         ui.label(
                             RichText::new("All components present")
@@ -738,6 +816,30 @@ impl EditorApp {
         if let Some(en) = toggle_camera {
             self.push_undo();
             if set_component_enabled(&mut self.scene, &sel, "camera", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if add_grid_mover {
+            self.push_undo();
+            let _ = add_component_grid_mover(&mut self.scene, &sel, 16.0, 120.0);
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_grid_mover {
+            self.push_undo();
+            if remove_component_grid_mover(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_grid_mover {
+            self.push_undo();
+            if set_component_enabled(&mut self.scene, &sel, "gridmover", en).is_ok() {
                 self.sync_baseline();
                 self.mark_dirty();
             } else {

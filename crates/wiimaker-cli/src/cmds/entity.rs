@@ -4,14 +4,15 @@ use anyhow::{bail, Result};
 use serde::Serialize;
 use wiimaker_scene::{
     add_component_animation, add_component_camera, add_component_collider, add_component_disc,
-    add_component_follow, add_component_sprite, add_component_tilemap, add_entity, apply_prefab,
-    duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered,
-    instantiate_prefab, load_prefab, remove_component_animation, remove_component_camera,
-    remove_component_collider, remove_component_disc, remove_component_follow,
+    add_component_follow, add_component_grid_mover, add_component_sprite, add_component_tilemap,
+    add_entity, apply_prefab, duplicate_entity, entities_overlap, entity_overlaps,
+    entity_to_prefab, entity_triggers_entered, instantiate_prefab, load_prefab,
+    remove_component_animation, remove_component_camera, remove_component_collider,
+    remove_component_disc, remove_component_follow, remove_component_grid_mover,
     remove_component_sprite, remove_component_tilemap, remove_entity, rename_entity, save_prefab,
-    save_scene, set_component_enabled, set_entity_anim, set_entity_follow, set_entity_parent,
-    set_entity_rotation_z, set_entity_scale, set_entity_transform, unpack_prefab_instance,
-    MutateOpts, Scene, SceneColliderKind,
+    save_scene, set_component_enabled, set_entity_anim, set_entity_follow, set_entity_grid_mover,
+    set_entity_parent, set_entity_rotation_z, set_entity_scale, set_entity_transform,
+    unpack_prefab_instance, MutateOpts, Scene, SceneColliderKind, SceneDir,
 };
 
 use crate::args::EntityCmd;
@@ -73,6 +74,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             tag,
             follow,
             lerp,
+            cell,
+            speed,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -84,8 +87,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 && tag.is_none()
                 && follow.is_none()
                 && lerp.is_none()
+                && cell.is_none()
+                && speed.is_none()
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -112,6 +117,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             if follow.is_some() || lerp.is_some() {
                 set_entity_follow(&mut sc, &name, follow.as_deref(), lerp)?;
             }
+            if cell.is_some() || speed.is_some() {
+                set_entity_grid_mover(&mut sc, &name, cell, speed, None)?;
+            }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("updated entity {name}"))
         }
@@ -135,6 +143,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             r#loop,
             target,
             lerp,
+            speed,
+            queued_dir,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -186,8 +196,17 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     })?;
                     add_component_follow(&mut sc, &name, &target, lerp)?;
                 }
+                "gridmover" | "grid_mover" | "grid-mover" => {
+                    add_component_grid_mover(&mut sc, &name, cell, speed)?;
+                    if let Some(q) = queued_dir {
+                        let dir = SceneDir::parse(&q).ok_or_else(|| {
+                            anyhow::anyhow!("unknown --queued-dir '{q}' (Up|Down|Left|Right)")
+                        })?;
+                        set_entity_grid_mover(&mut sc, &name, None, None, Some(Some(dir)))?;
+                    }
+                }
                 other => {
-                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Camera|Follow)")
+                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Camera|Follow|GridMover)")
                 }
             }
             save_scene(&path, &sc)?;
@@ -302,7 +321,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "animation" => remove_component_animation(&mut sc, &name)?,
                 "camera" => remove_component_camera(&mut sc, &name)?,
                 "follow" => remove_component_follow(&mut sc, &name)?,
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|Follow)"),
+                "gridmover" | "grid_mover" | "grid-mover" => {
+                    remove_component_grid_mover(&mut sc, &name)?
+                }
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|Follow|GridMover)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed {kind} from {name}"))

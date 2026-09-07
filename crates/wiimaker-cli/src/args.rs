@@ -156,6 +156,12 @@ pub enum EntityCmd {
         /// Camera follow lerp (`0` frozen, `1` snap). Use with `--follow`.
         #[arg(long)]
         lerp: Option<f32>,
+        /// GridMover cell size (creates GridMover if missing)
+        #[arg(long)]
+        cell: Option<f32>,
+        /// GridMover speed in world units per second
+        #[arg(long)]
+        speed: Option<f32>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -163,7 +169,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Camera, or Follow
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Camera, Follow, or GridMover
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -175,7 +181,7 @@ pub enum EntityCmd {
         height: f32,
         #[arg(long, default_value_t = 36.0)]
         radius: f32,
-        /// Tilemap cell size in world units
+        /// Tilemap / GridMover cell size in world units
         #[arg(long, default_value_t = 16.0)]
         cell: f32,
         /// Tilemap grid width (cells)
@@ -211,6 +217,12 @@ pub enum EntityCmd {
         /// Follow lerp factor (`0` frozen, `1` snap). Default `0.15` for Follow.
         #[arg(long)]
         lerp: Option<f32>,
+        /// GridMover speed in world units per second (default 120)
+        #[arg(long, default_value_t = 120.0)]
+        speed: f32,
+        /// GridMover queued cardinal: Up, Down, Left, Right
+        #[arg(long)]
+        queued_dir: Option<String>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -252,7 +264,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, or Follow (Follow removal clears fields; use entity set --follow "" to clear)
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, Follow, or GridMover (Follow removal clears fields; use entity set --follow "" to clear)
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -262,7 +274,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, or Camera
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, or GridMover
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,

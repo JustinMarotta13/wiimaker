@@ -3,6 +3,7 @@
 use crate::collider::Collider;
 use crate::color::Rgba8;
 use crate::draw::{Rect, TextureId};
+use crate::grid_mover::GridMover;
 use crate::math::{Quat, Vec2, Vec3};
 use crate::tilemap::Tilemap;
 
@@ -177,6 +178,7 @@ struct Slot {
     tilemap: Option<Tilemap>,
     collider: Option<Collider>,
     animation: Option<Animation>,
+    grid_mover: Option<GridMover>,
 }
 
 /// Tiny entity world — Unity GameObject feel without a full ECS.
@@ -208,6 +210,7 @@ impl World {
             slot.tilemap = None;
             slot.collider = None;
             slot.animation = None;
+            slot.grid_mover = None;
             return EntityId(idx as u32);
         }
         let id = EntityId(self.slots.len() as u32);
@@ -223,6 +226,7 @@ impl World {
             tilemap: None,
             collider: None,
             animation: None,
+            grid_mover: None,
         });
         id
     }
@@ -496,6 +500,20 @@ impl World {
                 None
             }
         })
+    }
+
+    pub fn grid_mover(&self, id: EntityId) -> Option<&GridMover> {
+        self.slot(id).and_then(|s| s.grid_mover.as_ref())
+    }
+
+    pub fn grid_mover_mut(&mut self, id: EntityId) -> Option<&mut GridMover> {
+        self.slot_mut(id).and_then(|s| s.grid_mover.as_mut())
+    }
+
+    pub fn set_grid_mover(&mut self, id: EntityId, grid_mover: Option<GridMover>) {
+        if let Some(slot) = self.slot_mut(id) {
+            slot.grid_mover = grid_mover;
+        }
     }
 
     fn slot(&self, id: EntityId) -> Option<&Slot> {

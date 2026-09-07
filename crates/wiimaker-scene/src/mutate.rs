@@ -381,9 +381,17 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Camera"))?;
             c.active = enabled;
         }
+        "gridmover" | "grid_mover" | "grid-mover" => {
+            let g = ent
+                .components
+                .grid_mover
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no GridMover"))?;
+            g.enabled = enabled;
+        }
         other => {
             bail!(
-                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera)"
+                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|GridMover)"
             )
         }
     }
@@ -538,6 +546,57 @@ pub fn set_entity_follow(
     if let Some(l) = lerp {
         cam.lerp = l.clamp(0.0, 1.0);
     }
+    Ok(())
+}
+
+pub fn add_component_grid_mover(
+    scene: &mut Scene,
+    name: &str,
+    cell: f32,
+    speed: f32,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let mut gm = crate::scene::SceneGridMover::new(cell, speed);
+    if let Some(prev) = ent.components.grid_mover.as_ref() {
+        gm.queued_dir = prev.queued_dir;
+        gm.enabled = prev.enabled;
+    }
+    ent.components.grid_mover = Some(gm);
+    Ok(())
+}
+
+pub fn remove_component_grid_mover(scene: &mut Scene, name: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    if ent.components.grid_mover.is_none() {
+        bail!("entity '{name}' has no GridMover");
+    }
+    ent.components.grid_mover = None;
+    Ok(())
+}
+
+/// Create or update GridMover. `None` fields leave the existing value (or defaults).
+pub fn set_entity_grid_mover(
+    scene: &mut Scene,
+    name: &str,
+    cell: Option<f32>,
+    speed: Option<f32>,
+    queued_dir: Option<Option<crate::scene::SceneDir>>,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let gm = ent
+        .components
+        .grid_mover
+        .get_or_insert_with(crate::scene::SceneGridMover::default);
+    if let Some(c) = cell {
+        gm.cell = if c <= 0.0 { 16.0 } else { c };
+    }
+    if let Some(s) = speed {
+        gm.speed = s.max(0.0);
+    }
+    if let Some(q) = queued_dir {
+        gm.queued_dir = q;
+    }
+    gm.enabled = true;
     Ok(())
 }
 
@@ -778,5 +837,38 @@ mod tests {
             .unwrap();
         assert!(cam.follow.is_none());
         assert!((cam.lerp - 0.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn grid_mover_add_set_remove() {
+        let mut scene = empty_scene();
+        add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
+        add_component_grid_mover(&mut scene, "Player", 20.0, 6.0).unwrap();
+        let g = scene
+            .find_entity("Player")
+            .unwrap()
+            .components
+            .grid_mover
+            .as_ref()
+            .unwrap();
+        assert!((g.cell - 20.0).abs() < 1e-6);
+        assert!((g.speed - 6.0).abs() < 1e-6);
+        set_entity_grid_mover(&mut scene, "Player", Some(16.0), Some(120.0), None).unwrap();
+        let g = scene
+            .find_entity("Player")
+            .unwrap()
+            .components
+            .grid_mover
+            .as_ref()
+            .unwrap();
+        assert!((g.cell - 16.0).abs() < 1e-6);
+        assert!((g.speed - 120.0).abs() < 1e-6);
+        remove_component_grid_mover(&mut scene, "Player").unwrap();
+        assert!(scene
+            .find_entity("Player")
+            .unwrap()
+            .components
+            .grid_mover
+            .is_none());
     }
 }
