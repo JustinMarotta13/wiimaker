@@ -76,6 +76,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             lerp,
             cell,
             speed,
+            queued_dir,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -89,8 +90,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 && lerp.is_none()
                 && cell.is_none()
                 && speed.is_none()
+                && queued_dir.is_none()
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -117,8 +119,15 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             if follow.is_some() || lerp.is_some() {
                 set_entity_follow(&mut sc, &name, follow.as_deref(), lerp)?;
             }
-            if cell.is_some() || speed.is_some() {
-                set_entity_grid_mover(&mut sc, &name, cell, speed, None)?;
+            if cell.is_some() || speed.is_some() || queued_dir.is_some() {
+                let q = match queued_dir.as_deref() {
+                    None => None,
+                    Some("") => Some(None),
+                    Some(s) => Some(Some(SceneDir::parse(s).ok_or_else(|| {
+                        anyhow::anyhow!("unknown --queued-dir '{s}' (Up|Down|Left|Right)")
+                    })?)),
+                };
+                set_entity_grid_mover(&mut sc, &name, cell, speed, q)?;
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("updated entity {name}"))
