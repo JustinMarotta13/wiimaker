@@ -162,6 +162,9 @@ pub enum EntityCmd {
         /// GridMover speed in world units per second
         #[arg(long)]
         speed: Option<f32>,
+        /// GridMover queued cardinal: Up, Down, Left, Right (empty string clears)
+        #[arg(long)]
+        queued_dir: Option<String>,
         #[arg(long)]
         scene: Option<String>,
     },
