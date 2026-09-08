@@ -18,13 +18,14 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - Camera / Follow: `entity add-component <game> --name Cam Camera` · `Follow --target Player --lerp 0.15`. Same mutate helpers as the editor.
 - GridMover: `entity add-component <game> --name Player GridMover --cell 20 --speed 6 [--queued-dir Right]`. `entity set --name Player --cell --speed --queued-dir` creates/updates (empty `--queued-dir ""` clears queue). Diagonals use horizontal axis only.
 - `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
-- `scene build-list` / `build-add` / `build-remove` mutate `game.toml` `scenes` (Build Settings). Empty list is omitted; authoring `scene list` still walks `scenes/`.
+- `scene set-game-view <game> [--width --height] [--aspect free|fixed] [--preset free|640x480|16:9|4:3|custom] [--scale]` writes `.wiimaker/prefs.toml` (same as Game tab).
+- `editor prefs <game>` dumps Scene/Game chrome; `editor set-scene-view` sets zoom/pan/grid/gizmos/snap (`--json`).
 - `entity list` prints an indented tree (non-json); JSON still dumps flat entity array with `parent` fields.
 - Sprite sheets: `asset slice <game> <stem> --cols N --rows M`, `asset set-pivot <game> <cell> --x --y`, `asset list-sprites`.
 
 ## Decisions
 
-- CLI sources are modular: `main.rs` dispatch · `args.rs` (clap) · `cmds/{project,scene,entity,asset}.rs` · `util.rs` · `pipeline.rs` (ship helpers).
+- CLI sources are modular: `main.rs` dispatch · `args.rs` (clap) · `cmds/{project,scene,entity,asset,editor}.rs` · `util.rs` · `pipeline.rs` (ship helpers).
 - Wii embed uses `scene.wscn` **WSCN0003** (UV + pivot + length-prefixed Tilemap) rather than parsing JSON on console.
 - Tilemap: `tilemap set|fill|stamp|get` (`--name --x --y --id`, `--ascii` or `--cells --width`). Auto-creates a default Tilemap on the named entity if missing. `entity add-component … Tilemap --cols --rows --cell`.
 - Collider / Trigger: `entity add-component … Collider|--trigger|--filter` or kind `Trigger`; `entity triggers <game> <name>`; `entity despawn <game> <name>`; `entity set --tag N`.

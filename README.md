@@ -64,6 +64,9 @@ wiimaker scene set-default my-game --scene menu
 wiimaker scene build-add my-game --scene menu
 wiimaker scene build-add my-game --scene main
 wiimaker scene build-list my-game --json
+wiimaker scene set-game-view my-game --preset 640x480 --scale 1
+wiimaker editor set-scene-view my-game --zoom 1.25 --grid true --gizmos true
+wiimaker editor prefs my-game --json
 wiimaker entity add my-game --name Player --sprite hero_2 --x 320 --y 240
 wiimaker entity add-component my-game --name Maze Tilemap --cols 28 --rows 31 --cell 16
 wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'
@@ -86,6 +89,8 @@ wiimaker play-wii my-game      # build then Dolphin
 ```
 
 Scene / entity edits write `.scene.json` — the same files the egui editor saves.
+
+Editor Scene/Game chrome (zoom, grid, gizmos, Game aspect) lives in `<game>/.wiimaker/prefs.toml`, not `game.toml`. `wiimaker scene set-game-view` and `wiimaker editor set-scene-view` mutate that file; the editor toolbar writes the same store.
 
 Sprite sheets keep one PNG; cells live in `assets/<stem>.sprites.json` (Grid By Cell Count + normalized pivot). Scenes reference cell names like `hero_2`.
 

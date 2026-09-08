@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use wiimaker_scene::{
     add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,
-    load_project, load_scene, remove_build_scene, save_scene, set_default_scene, set_scene_clear,
-    GameProject, Scene,
+    load_project, load_scene, remove_build_scene, save_scene, set_default_scene, set_game_view,
+    set_scene_clear, GameProject, Scene, EDITOR_PREFS_REL,
 };
 
 use crate::args::SceneCmd;
@@ -167,6 +167,57 @@ pub fn scene_cmd(root: &Path, cmd: SceneCmd, json: bool) -> Result<()> {
             set_scene_clear(&mut scene, rgb);
             save_scene(&path, &scene)?;
             emit_ok(json, "scene clear updated")
+        }
+        SceneCmd::SetGameView {
+            game,
+            width,
+            height,
+            aspect,
+            preset,
+            scale,
+        } => {
+            let game_dir = find_game_dir(root, &game)?;
+            if width.is_none()
+                && height.is_none()
+                && aspect.is_none()
+                && preset.is_none()
+                && scale.is_none()
+            {
+                anyhow::bail!(
+                    "set-game-view needs --width/--height, --aspect free|fixed, --preset, or --scale"
+                );
+            }
+            let prefs = set_game_view(
+                &game_dir,
+                width,
+                height,
+                aspect.as_deref(),
+                preset.as_deref(),
+                scale,
+            )?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "message": "game view prefs updated",
+                        "path": game_dir.join(EDITOR_PREFS_REL).to_string_lossy(),
+                        "prefs": prefs,
+                    })
+                );
+                Ok(())
+            } else {
+                emit_ok(
+                    json,
+                    &format!(
+                        "game view → {} {}x{} scale={:.2}",
+                        prefs.game_view.preset.as_str(),
+                        prefs.game_view.width,
+                        prefs.game_view.height,
+                        prefs.game_view.scale
+                    ),
+                )
+            }
         }
     }
 }

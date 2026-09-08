@@ -20,9 +20,9 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - **Hierarchy click vs drag:** do **not** use `dnd_drag_source` for selectable rows. It overlays `Sense::drag()` on top of the row; egui then ignores click widgets underneath, so drag starts immediately and Inspector selection never fires. Use `Sense::click_and_drag()` + `dnd_set_drag_payload` (+ Tooltip layer ghost while `is_being_dragged`). Labels: `.selectable(false)` so text-select sense does not compete.
 - Toolbar primary: Save · Play · Build · Play in Dolphin · Build & Run. **Cook** lives under the painter ellipsis menu only. Host Play and Wii Build auto-prepare assets.
 - Sprite / Disc Inspector: checkbox toggles `enabled` (skipped by hydrate/pick/bake); Remove uses `remove_component_*`. CLI: `entity remove-component` / `set-component-enabled --enabled true|false`.
-- Viewport: Snap checkbox + grid size; arrow keys nudge 1px (or snap size when Snap/Shift). Multi-select via Cmd-click (Hierarchy + viewport); drag moves whole selection; Delete on a selected row removes all selected.
+- Viewport: Snap checkbox + grid size; Scene **Hand** pans (middle-drag also pans); scroll + `%` zoom; **Grid** overlay; **Gizmos** toggle; **2D** control is always-on. Arrow keys nudge 1px (or snap size when Snap/Shift). Multi-select via Cmd-click (Hierarchy + viewport); drag moves whole selection; Delete on a selected row removes all selected.
 - Play toolbar = in-editor Play Mode (Play/Pause/Stop, WASD moves `Player`, Esc stops). Scene edits preserved on Stop. File → Run external… still shells `cargo run -p <game>`.
-- Viewport tools: Move · Scale · Rotate (drag on entity). Snap applies to translate + 45° rotate steps.
+- Viewport tools: Move · Scale · Rotate · Hand (drag on entity; Hand pans). Snap applies to translate + 45° rotate steps.
 - Tilemap: viewport **Paint / Erase / Pick** (right-click erases while Painting). Inspector **+ Tilemap** (32×18, cell 16) · grid w/h · cell · origin · palette (id/color/sprite) · **Brush**. Selected tilemap AABB outlined; paint stamps `tile_brush_id` + solid onto the targeted grid.
 - Collider Inspector: solid · **Is Trigger** · **Filter Tag** (0 = any). Viewport gizmos: accent for walls, amber (`220,180,60`) for triggers. Keep dark theme.
 - Camera Inspector: Follow target combo (entity names) + Lerp. Scene view draws a 640×480 cyan rect centered on the active camera (Game tab applies offset). Play ticks `World::follow_cameras` after WASD / GridMover.
@@ -33,7 +33,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Sprite Editor: Project file (PNG / `.sprites.json`) → Inspector **Edit Sprites…**, or double-click / context menu; writes `.sprites.json` then refresh catalog.
 - Project panel is a **file explorer** (`game.toml`, `assets/`, `scenes/`). Click → `selected_file` (clears entity selection); Inspector shows path/type/size + type-specific actions.
 - Project rows: full-width painted hover/select (not `selectable_label`); folders use accent + strong text — never `TEXT_MUTED` for primary labels. ASCII type markers only (Unicode glyphs fail in this shell).
-- **Icons must be painter geometry** (`theme::{cube_icon, foldout_button, enable_checkbox, icon_menu_button, play_control, search_icon}`). egui default fonts on this Linux box do not rasterize `▾ ▸ ⋮ ⋯ ▶` (or a hollow `rect_stroke` cube, which reads as tofu). Do not use Unicode/emoji as icons. Geometric stand-ins only — never Unity cube/logo artwork.
+- **Icons must be painter geometry** (`theme::{cube_icon, foldout_button, enable_checkbox, icon_menu_button, play_control, search_icon, tool_toggle}`). egui default fonts on this Linux box do not rasterize `▾ ▸ ⋮ ⋯ ▶` (or a hollow `rect_stroke` cube, which reads as tofu). Do not use Unicode/emoji as icons. Geometric stand-ins only — never Unity cube/logo artwork.
 - Project row `new_child` text: always `set_clip_rect(row_rect.intersect(ui.clip_rect()))`. Replacing the ScrollArea clip lets scrolled-off labels paint over the Project header/meta chips.
 
 ## Decisions
@@ -51,6 +51,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Entity hierarchy: optional `parent` name on `EntityData`; transform is **local**; hydrate/pick/wscn/outline compose world via `Scene::world_transform`. Delete cascades to descendants. CLI: `entity set-parent --name X [--parent Y]`.
 - Inspector sprite field is a catalog ComboBox (cells + whole textures), not PNG stems only.
 - Inspector focus is entity XOR project file (`selected` / `selected_file`).
+- Scene/Game chrome prefs: `<game>/.wiimaker/prefs.toml` (`EditorPrefs` in `wiimaker-scene`). Not `game.toml`. Editor toolbar + `scene set-game-view` / `editor set-scene-view` share `load_editor_prefs` / `save_editor_prefs`. Scene zoom 1 = fill well; Game locked aspect uses `fitted_blit_rect` letterbox/pillarbox + Scale slider.
 - Selection is `Vec<String>` (last = primary for Inspector); Cmd-click toggles.
 
 ## Open follow-ups

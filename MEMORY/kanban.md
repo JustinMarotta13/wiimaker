@@ -13,7 +13,8 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Project window | `game.toml` + `assets/` + `scenes/` + editor **Project** explorer |
 | Hierarchy | editor Hierarchy (parent/unparent DnD, multi-select, duplicate) |
 | Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover, enable checkbox, catalog combo, tile palette |
-| Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Paint / Erase / Pick**, Snap + nudge |
+| Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, Snap + nudge |
+| Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop (hardcoded WASD on entity named `Player`; does **not** run game `App::update`) · File → Run external → `cargo run -p <game>` |
 | Prefab | `.prefab.json` · Save as Prefab / Instantiate / Apply / Unpack (unpack is a no-op) |
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
@@ -27,15 +28,7 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-08):** Scene viewer controls + Game view resolution / aspect.
-
-### 8. Scene viewer controls + Game view aspect — **GUI + CLI**
-Unity chrome gap. Scene already has Move/Scale/Rotate/Paint/Erase/Pick/Snap; Game is a fixed 640×480 blit with no aspect/resolution UI.
-
-- **Scene view toolbar (Unity-like):** 2D toggle, pan/hand (or middle-drag already?), zoom (scroll + explicit %), grid overlay on/off, maybe gizmo visibility. Keep dark Pro chrome; paint geometry icons only (no unicode tofu).
-- **Game view:** resolution / aspect dropdown (Free Aspect, 640×480, 16:9, 4:3, custom W×H), letterbox/pillarbox when aspect locked, Scale slider. Persist in editor prefs or `game.toml` (e.g. `game_view = { width, height, aspect }`).
-- **CLI twin:** `scene set-game-view --width --height [--aspect free|fixed]` or `editor prefs` — whatever matches how prefs are stored; must mutate the same files the Game view toolbar writes.
-- **Test:** switch Free Aspect ↔ 640×480 in Game tab (letterbox visible); Scene zoom/pan/grid toggles; screenshots vs Unity Game view aspect bar. Pac-Man local only.
+**Recommended next morning (2026-09-08):** Gizmo handles (Unity Scene chrome — axis handles + collider/tilemap gizmos). Audio oneshots stays in Later.
 
 ---
 
@@ -45,7 +38,7 @@ Unity chrome gap. Scene already has Move/Scale/Rotate/Paint/Erase/Pick/Snap; Gam
 - **Sorting layers** (GUI+CLI) — named layers + order, not only raw `z`. Unity Sorting Layer.
 - **Prefab variants / overrides** (GUI+CLI) — unpack is a no-op; no orange-bold overrides. Dot/Ghost instances need this.
 - **Play-in-editor runs `App`** (GUI) — today's Play is hello-orb WASD, not the game crate. Load game as dylib or interpret a tiny script graph. CLI already has `run`.
-- **Gizmo handles** (GUI) — Move is drag-on-entity; add axis handles + collider/tilemap gizmos. CLI n/a except maybe `entity set`.
+- **Gizmo handles** (GUI) — Move is drag-on-entity; add axis handles + collider/tilemap gizmos. CLI n/a except maybe `entity set`. **Recommended next.**
 - **Text / HUD** (GUI+CLI) — DrawList has no glyphs; score lives in stdout. Bitmap font in `.wpack` + `DrawText`.
 - **Animated tiles / auto-tile** (GUI+CLI) — after tilemap.
 - **Tilemap CLI stamp from ASCII** (CLI, tiny GUI import) — `tilemap from-ascii maze.txt`.
@@ -85,6 +78,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **4-way grid-snap mover** (2026-09-07) — optional `GridMover { cell, speed, queued_dir }` + `cardinal(input)` / `try_step` / `World::step_grid_movers`. Diagonals: **horizontal wins**. Reverse of current heading is immediate; 90° turns wait for cell center. Stick +Y = Up = −Y world. Inspector foldout (cell, speed, queued dir). CLI `entity add-component … GridMover --cell --speed --queued-dir` · `entity set --cell --speed --queued-dir` (empty `--queued-dir ""` clears). Host play + editor Play tick. Host-first (WSCN unchanged).
 
+- **Scene viewer + Game view aspect** (2026-09-08) — Scene: geometric Move/Scale/Rotate/**Hand**/Paint/Erase/Pick, always-on **2D**, scroll + `%` zoom, pan (Hand or middle-drag), **Grid** overlay, **Gizmos** toggle, Snap. Game: Free Aspect / 640×480 / 16:9 / 4:3 / custom W×H, letterbox/pillarbox, Scale slider. Store: `<game>/.wiimaker/prefs.toml` (`EditorPrefs`; not `game.toml`). CLI `scene set-game-view` · `editor prefs` · `editor set-scene-view` (`--json`). Host-first.
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -100,7 +95,8 @@ Global: `--json`
 | `dolphin` | launch existing `boot.dol` |
 | `play-wii` | build then Dolphin |
 | `doctor` | validate |
-| `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` | build-* mutate `game.toml` `scenes` |
+| `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` · `scene set-game-view` | build-* mutate `game.toml` `scenes`; set-game-view writes `.wiimaker/prefs.toml` |
+| `editor prefs` · `editor set-scene-view` | Scene zoom/pan/grid/gizmos/snap in the same prefs file |
 | `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir` |
 | `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Camera` \| `Follow` (`--target` `--lerp`) \| `GridMover` (`--cell` `--speed` `--queued-dir`) |
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
@@ -118,7 +114,8 @@ Window: Hierarchy · Inspector · Project · Console
 Toolbar (left): Save · Build · Play in Dolphin · Build & Run · ⋯ (Cook assets… · Doctor · Refresh assets)
 Toolbar (center): Play / Pause / Stop
 Center tabs: Scene · Game
-Scene view: Move · Scale · Rotate · Paint · Erase · Pick · Snap · grid size
+Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
+Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale
 Bottom tabs: Project · Console
 Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
@@ -127,5 +124,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Ship Scene viewer controls + Game view resolution/aspect (Now #8).** Justin directed 2026-09-07 for the 2026-09-08 morning. Audio oneshots moved to Later.
+**Ship Gizmo handles (Later — Unity Scene chrome).** Axis handles + richer collider/tilemap gizmos. Audio oneshots remains the next runtime gap after that.
 
