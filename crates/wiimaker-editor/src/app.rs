@@ -12,8 +12,9 @@ use wiimaker_host::{Framebuffer, TextureAtlas};
 use wiimaker_scene::{
     add_build_scene, add_component_sprite, animate_world, create_named_scene, diagnose,
     duplicate_entity, find_game_dir, hydrate_lenient_with_catalogs, insert_entity_clone,
-    list_scenes, load_project, load_scene, remove_build_scene, rename_entity, save_scene,
-    set_default_scene, EntityData, GameProject, Scene, Severity, UndoStack,
+    list_scenes, load_editor_prefs, load_project, load_scene, remove_build_scene, rename_entity,
+    save_editor_prefs, save_scene, set_default_scene, EditorPrefs, EntityData, GameProject, Scene,
+    Severity, UndoStack,
 };
 
 use crate::dock::{self, EditorTab};
@@ -55,6 +56,7 @@ pub(crate) enum EditTool {
     Paint,
     Erase,
     Pick,
+    Hand,
 }
 
 impl EditTool {
@@ -142,9 +144,9 @@ pub(crate) struct EditorApp {
     pub(crate) hierarchy_width: f32,
     #[allow(dead_code)]
     pub(crate) inspector_width: f32,
-    /// Snap world translate to grid when dragging / nudging with Shift.
-    pub(crate) snap_enabled: bool,
-    pub(crate) snap_size: f32,
+    /// Scene/Game chrome — `<game>/.wiimaker/prefs.toml`.
+    pub(crate) prefs: EditorPrefs,
+    pub(crate) prefs_dirty: bool,
     pub(crate) edit_tool: EditTool,
     pub(crate) play_mode: PlayMode,
     pub(crate) tile_brush_id: u16,
@@ -208,8 +210,8 @@ impl EditorApp {
             project_panel_height: 200.0,
             hierarchy_width: 240.0,
             inspector_width: 300.0,
-            snap_enabled: false,
-            snap_size: 16.0,
+            prefs: EditorPrefs::default(),
+            prefs_dirty: false,
             edit_tool: EditTool::Translate,
             play_mode: PlayMode::Edit,
             tile_brush_id: 1,
@@ -224,6 +226,10 @@ impl EditorApp {
         app.refresh_scenes();
         app.refresh_project_tree();
         app.rehydrate();
+        match load_editor_prefs(&app.game_dir) {
+            Ok(p) => app.prefs = p,
+            Err(e) => app.status = format!("prefs: {e}"),
+        }
         app.status = format!("opened {}", app.project.name);
         // Agent / screenshot helper: `WIIMAKER_EDITOR_SELECT=Player` selects an entity on open.
         if let Ok(name) = std::env::var("WIIMAKER_EDITOR_SELECT") {
@@ -522,6 +528,20 @@ impl EditorApp {
     pub(crate) fn mark_dirty(&mut self) {
         self.dirty = true;
         self.rehydrate();
+    }
+
+    pub(crate) fn persist_prefs(&mut self) {
+        self.prefs_dirty = true;
+    }
+
+    pub(crate) fn flush_prefs(&mut self) {
+        if !self.prefs_dirty {
+            return;
+        }
+        match save_editor_prefs(&self.game_dir, &self.prefs) {
+            Ok(()) => self.prefs_dirty = false,
+            Err(e) => self.status = format!("prefs save failed: {e}"),
+        }
     }
 
     /// Nudge all selected entities by `(dx, dy)` in world space.
@@ -1096,8 +1116,8 @@ impl eframe::App for EditorApp {
                 let shift = i.modifiers.shift;
                 let mut nudge_xy = [0.0_f32, 0.0_f32];
                 if !cmd && !self.selected.is_empty() {
-                    let step = if shift || self.snap_enabled {
-                        self.snap_size.max(1.0)
+                    let step = if shift || self.prefs.scene_view.snap {
+                        self.prefs.scene_view.snap_size.max(1.0)
                     } else {
                         1.0
                     };
@@ -1212,6 +1232,8 @@ impl eframe::App for EditorApp {
                 self.ui_dock(ui);
             });
         self.apply_pending_focus();
+
+        self.flush_prefs();
 
         ctx.request_repaint();
     }

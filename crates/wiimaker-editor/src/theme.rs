@@ -616,3 +616,147 @@ pub fn play_control(ui: &mut egui::Ui, kind: PlayBtn, active: bool, enabled: boo
     }
     resp
 }
+
+/// Scene / Game toolbar glyph (painter geometry — no unicode).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolGlyph {
+    Translate,
+    Scale,
+    Rotate,
+    Paint,
+    Erase,
+    Pick,
+    Hand,
+    Mode2d,
+    Grid,
+    Gizmo,
+}
+
+pub fn tool_toggle(ui: &mut egui::Ui, selected: bool, tooltip: &str, glyph: ToolGlyph) -> egui::Response {
+    let size = egui::vec2(24.0, 22.0);
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if !tooltip.is_empty() {
+        resp = resp.on_hover_text(tooltip);
+    }
+    let bg = if selected {
+        ACCENT_DIM
+    } else if resp.hovered() {
+        Color32::from_rgb(80, 80, 80)
+    } else {
+        BG_RAISED
+    };
+    ui.painter().rect_filled(rect, Rounding::same(3.0), bg);
+    if selected {
+        ui.painter()
+            .rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.0_f32, ACCENT));
+    } else {
+        ui.painter()
+            .rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.0_f32, BORDER_SOFT));
+    }
+    let color = if selected { Color32::WHITE } else { TEXT };
+    paint_tool_glyph(ui.painter(), rect.shrink(3.5), glyph, color);
+    resp
+}
+
+fn paint_tool_glyph(painter: &egui::Painter, r: egui::Rect, glyph: ToolGlyph, color: Color32) {
+    let c = r.center();
+    let stroke = Stroke::new(1.25_f32, color);
+    match glyph {
+        ToolGlyph::Translate => {
+            painter.line_segment(
+                [egui::pos2(r.left(), c.y), egui::pos2(r.right(), c.y)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::pos2(c.x, r.top()), egui::pos2(c.x, r.bottom())],
+                stroke,
+            );
+            let a = 3.0;
+            painter.line_segment(
+                [egui::pos2(r.right(), c.y), egui::pos2(r.right() - a, c.y - a)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::pos2(r.right(), c.y), egui::pos2(r.right() - a, c.y + a)],
+                stroke,
+            );
+        }
+        ToolGlyph::Scale => {
+            painter.rect_stroke(r.shrink(2.0), Rounding::ZERO, stroke);
+            let h = egui::Rect::from_center_size(r.right_bottom() - egui::vec2(3.0, 3.0), egui::vec2(5.0, 5.0));
+            painter.rect_filled(h, Rounding::ZERO, color);
+        }
+        ToolGlyph::Rotate => {
+            painter.circle_stroke(c, r.width() * 0.32, stroke);
+            let p = egui::pos2(c.x + r.width() * 0.32, c.y);
+            painter.line_segment([p, egui::pos2(p.x - 3.0, p.y - 4.0)], stroke);
+            painter.line_segment([p, egui::pos2(p.x + 3.0, p.y - 2.0)], stroke);
+        }
+        ToolGlyph::Paint => {
+            painter.rect_filled(
+                egui::Rect::from_center_size(egui::pos2(c.x, c.y + 2.0), egui::vec2(6.0, 8.0)),
+                Rounding::same(1.0),
+                color,
+            );
+            painter.circle_filled(egui::pos2(c.x, c.y - 4.0), 3.0, color);
+        }
+        ToolGlyph::Erase => {
+            painter.rect_stroke(
+                egui::Rect::from_center_size(c, egui::vec2(10.0, 7.0)),
+                Rounding::same(1.0),
+                stroke,
+            );
+            painter.line_segment(
+                [egui::pos2(c.x - 4.0, c.y - 2.0), egui::pos2(c.x + 4.0, c.y + 2.0)],
+                stroke,
+            );
+        }
+        ToolGlyph::Pick => {
+            painter.circle_stroke(egui::pos2(c.x - 2.0, c.y - 2.0), 3.5, stroke);
+            painter.line_segment(
+                [
+                    egui::pos2(c.x + 0.5, c.y + 0.5),
+                    egui::pos2(c.x + 6.0, c.y + 6.0),
+                ],
+                stroke,
+            );
+        }
+        ToolGlyph::Hand => {
+            painter.rect_filled(
+                egui::Rect::from_center_size(egui::pos2(c.x, c.y + 2.0), egui::vec2(8.0, 6.0)),
+                Rounding::same(1.5),
+                color,
+            );
+            for i in 0..3 {
+                let x = c.x - 3.0 + i as f32 * 3.0;
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(x - 0.8, c.y - 6.0),
+                        egui::pos2(x + 0.8, c.y + 1.0),
+                    ),
+                    Rounding::same(0.8),
+                    color,
+                );
+            }
+        }
+        ToolGlyph::Mode2d => {
+            painter.rect_filled(r.shrink(2.5), Rounding::same(1.0), color);
+            painter.rect_stroke(r.shrink(1.0), Rounding::same(1.0), stroke);
+        }
+        ToolGlyph::Grid => {
+            let s = r.shrink(2.0);
+            for i in 0..3 {
+                let t = i as f32 / 2.0;
+                let x = s.left() + s.width() * t;
+                let y = s.top() + s.height() * t;
+                painter.line_segment([egui::pos2(x, s.top()), egui::pos2(x, s.bottom())], stroke);
+                painter.line_segment([egui::pos2(s.left(), y), egui::pos2(s.right(), y)], stroke);
+            }
+        }
+        ToolGlyph::Gizmo => {
+            painter.line_segment([c, egui::pos2(r.right() - 1.0, c.y)], Stroke::new(1.4_f32, AXIS_X));
+            painter.line_segment([c, egui::pos2(c.x, r.top() + 1.0)], Stroke::new(1.4_f32, AXIS_Y));
+        }
+    }
+}

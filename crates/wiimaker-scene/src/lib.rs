@@ -6,6 +6,7 @@ mod doctor;
 mod hydrate;
 mod mutate;
 mod pick;
+mod prefs;
 mod project;
 mod render;
 mod scene;
@@ -35,6 +36,11 @@ pub use mutate::{
     set_entity_world_xy, set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{pick_entity_at, pick_entity_at_with_catalog, pointer_to_scene};
+pub use prefs::{
+    apply_game_view, apply_scene_view, editor_prefs_path, fitted_blit_rect, infer_game_view_preset,
+    load_editor_prefs, save_editor_prefs, scene_blit_rect, set_game_view, set_scene_view,
+    EditorPrefs, GameViewAspect, GameViewPrefs, GameViewPreset, SceneViewPrefs, EDITOR_PREFS_REL,
+};
 pub use project::{
     add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,
     load_project, remove_build_scene, resolve_scene_rel, save_project, set_build_scenes,

@@ -62,6 +62,11 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: TilemapCmd,
     },
+    /// Editor chrome prefs (`<game>/.wiimaker/prefs.toml`)
+    Editor {
+        #[command(subcommand)]
+        cmd: EditorCmd,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -105,6 +110,50 @@ pub enum SceneCmd {
         game: String,
         #[arg(long, value_parser = parse_rgb)]
         rgb: [u8; 3],
+    },
+    /// Game view aspect / resolution (writes `.wiimaker/prefs.toml`)
+    SetGameView {
+        game: String,
+        #[arg(long)]
+        width: Option<u32>,
+        #[arg(long)]
+        height: Option<u32>,
+        /// `free` (fill well) or `fixed` (letterbox to width×height / preset)
+        #[arg(long)]
+        aspect: Option<String>,
+        /// `free` | `640x480` | `16:9` | `4:3` | `custom`
+        #[arg(long)]
+        preset: Option<String>,
+        /// Scale slider (1 = contain-fit)
+        #[arg(long)]
+        scale: Option<f32>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EditorCmd {
+    /// Print `.wiimaker/prefs.toml` (defaults if missing)
+    Prefs { game: String },
+    /// Scene view zoom / pan / grid / gizmos / snap
+    SetSceneView {
+        game: String,
+        #[arg(long)]
+        zoom: Option<f32>,
+        #[arg(long)]
+        pan_x: Option<f32>,
+        #[arg(long)]
+        pan_y: Option<f32>,
+        #[arg(long, action = clap::ArgAction::Set)]
+        grid: Option<bool>,
+        #[arg(long, action = clap::ArgAction::Set)]
+        gizmos: Option<bool>,
+        #[arg(long, action = clap::ArgAction::Set)]
+        snap: Option<bool>,
+        #[arg(long)]
+        snap_size: Option<f32>,
+        /// Must stay true (2D-only engine)
+        #[arg(long, action = clap::ArgAction::Set)]
+        mode_2d: Option<bool>,
     },
 }
 
