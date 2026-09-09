@@ -19,7 +19,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - GridMover: `entity add-component <game> --name Player GridMover --cell 20 --speed 6 [--queued-dir Right]`. `entity set --name Player --cell --speed --queued-dir` creates/updates (empty `--queued-dir ""` clears queue). Diagonals use horizontal axis only.
 - `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
 - `scene set-game-view <game> [--width --height] [--aspect free|fixed] [--preset free|640x480|16:9|4:3|custom] [--scale]` writes `.wiimaker/prefs.toml` (same as Game tab).
-- `editor prefs <game>` dumps Scene/Game chrome; `editor set-scene-view` sets zoom/pan/grid/gizmos/snap (`--json`).
+- `editor prefs <game>` dumps Scene/Game chrome; `editor set-scene-view` sets zoom/pan/grid/gizmos/snap (`--json`). Move-tool axis handles are editor-only (CLI n/a).
 - `entity list` prints an indented tree (non-json); JSON still dumps flat entity array with `parent` fields.
 - Sprite sheets: `asset slice <game> <stem> --cols N --rows M`, `asset set-pivot <game> <cell> --x --y`, `asset list-sprites`.
 

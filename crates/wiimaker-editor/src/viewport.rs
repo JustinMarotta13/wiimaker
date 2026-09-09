@@ -4,9 +4,9 @@ use wiimaker_core::draw::DrawList;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
-    fitted_blit_rect, pick_entity_at_with_catalog, pointer_to_scene, render_world_ex,
-    scene_blit_rect, set_entity_rotation_z, set_entity_scale, set_entity_world_xy, tilemap_set_cell,
-    GameViewAspect, GameViewPreset, Scene,
+    constrain_translate, fitted_blit_rect, pick_entity_at_with_catalog, pointer_to_scene,
+    render_world_ex, scene_blit_rect, set_entity_rotation_z, set_entity_scale, set_entity_world_xy,
+    tilemap_set_cell, GameViewAspect, GameViewPreset, MoveHandleLayout, Scene, TranslateHandle,
 };
 
 use crate::app::{CenterTab, EditTool, EditorApp, PlayMode, TilePaintDrag, ViewportDrag};
@@ -36,7 +36,11 @@ impl EditorApp {
                     (EditTool::Translate, "Move", theme::ToolGlyph::Translate),
                     (EditTool::Scale, "Scale", theme::ToolGlyph::Scale),
                     (EditTool::Rotate, "Rotate", theme::ToolGlyph::Rotate),
-                    (EditTool::Hand, "Hand (pan) · middle-drag also pans", theme::ToolGlyph::Hand),
+                    (
+                        EditTool::Hand,
+                        "Hand (pan) · middle-drag also pans",
+                        theme::ToolGlyph::Hand,
+                    ),
                     (EditTool::Paint, "Paint", theme::ToolGlyph::Paint),
                     (EditTool::Erase, "Erase", theme::ToolGlyph::Erase),
                     (EditTool::Pick, "Pick", theme::ToolGlyph::Pick),
@@ -48,7 +52,12 @@ impl EditorApp {
                 }
             });
             // 2D is always-on (engine is 2D-only) — still show the control.
-            let _ = theme::tool_toggle(ui, self.prefs.scene_view.mode_2d, "2D (always on)", theme::ToolGlyph::Mode2d);
+            let _ = theme::tool_toggle(
+                ui,
+                self.prefs.scene_view.mode_2d,
+                "2D (always on)",
+                theme::ToolGlyph::Mode2d,
+            );
             if theme::tool_toggle(
                 ui,
                 self.prefs.scene_view.grid_overlay,
@@ -158,10 +167,20 @@ impl EditorApp {
                 let mut w = self.prefs.game_view.width as f32;
                 let mut h = self.prefs.game_view.height as f32;
                 let cw = ui
-                    .add(egui::DragValue::new(&mut w).range(16.0..=4096.0).prefix("W ").speed(1.0))
+                    .add(
+                        egui::DragValue::new(&mut w)
+                            .range(16.0..=4096.0)
+                            .prefix("W ")
+                            .speed(1.0),
+                    )
                     .changed();
                 let ch = ui
-                    .add(egui::DragValue::new(&mut h).range(16.0..=4096.0).prefix("H ").speed(1.0))
+                    .add(
+                        egui::DragValue::new(&mut h)
+                            .range(16.0..=4096.0)
+                            .prefix("H ")
+                            .speed(1.0),
+                    )
                     .changed();
                 if cw || ch {
                     self.prefs.game_view.width = w as u32;
@@ -170,7 +189,11 @@ impl EditorApp {
                     self.persist_prefs();
                 }
             }
-            ui.label(egui::RichText::new("Scale").size(12.0).color(theme::TEXT_MUTED));
+            ui.label(
+                egui::RichText::new("Scale")
+                    .size(12.0)
+                    .color(theme::TEXT_MUTED),
+            );
             let mut scale = self.prefs.game_view.scale;
             if ui
                 .add(egui::Slider::new(&mut scale, 0.1..=3.0).max_decimals(2))
@@ -246,8 +269,7 @@ impl EditorApp {
         } else {
             let gv = &self.prefs.game_view;
             let (aw, ah) = gv.aspect_wh(well.width(), well.height());
-            let (x, y, w, h) =
-                fitted_blit_rect(well.width(), well.height(), aw, ah, gv.scale);
+            let (x, y, w, h) = fitted_blit_rect(well.width(), well.height(), aw, ah, gv.scale);
             egui::Rect::from_min_size(well.min + egui::vec2(x, y), egui::vec2(w, h))
         };
 
@@ -273,21 +295,26 @@ impl EditorApp {
 
         if is_scene {
             if self.prefs.scene_view.grid_overlay {
-                paint_grid_overlay(
-                    ui,
-                    image_rect,
-                    self.prefs.scene_view.snap_size.max(1.0),
-                );
+                paint_grid_overlay(ui, image_rect, self.prefs.scene_view.snap_size.max(1.0));
             }
             if self.prefs.scene_view.gizmos {
                 paint_selection_outline(ui, image_rect, &self.scene, &self.selected, &self.catalog);
                 paint_collider_gizmos(ui, image_rect, &self.scene, &self.selected);
+                paint_tilemap_gizmos(ui, image_rect, &self.scene, &self.selected);
                 paint_camera_gizmos(ui, image_rect, &self.world);
             }
-            if self.edit_tool.is_tile_tool() {
+            if self.edit_tool.is_tile_tool() && !self.prefs.scene_view.gizmos {
                 if let Some(name) = self.tilemap_target() {
                     paint_tilemap_overlay(ui, image_rect, &self.scene, &name);
                 }
+            }
+            if is_scene
+                && self.play_mode == PlayMode::Edit
+                && self.edit_tool == EditTool::Translate
+                && !self.selected.is_empty()
+            {
+                let hover = ui.input(|i| i.pointer.hover_pos());
+                paint_move_handles(ui, image_rect, &self.scene, &self.selected, hover);
             }
             self.handle_scene_nav(&well_resp, well);
             self.handle_viewport_input(&response, image_rect);
@@ -385,8 +412,28 @@ impl EditorApp {
             return;
         }
 
-        // Click (no drag): select or clear (Cmd toggles).
-        if response.clicked() {
+        let handle_hit = if self.edit_tool == EditTool::Translate {
+            response
+                .interact_pointer_pos()
+                .and_then(|p| self.hit_move_handle(rect, p))
+        } else {
+            None
+        };
+        if self.edit_tool == EditTool::Translate {
+            if let Some(hover) = response.hover_pos() {
+                if let Some((_, h)) = self.hit_move_handle(rect, hover) {
+                    let icon = match h {
+                        TranslateHandle::X => egui::CursorIcon::ResizeHorizontal,
+                        TranslateHandle::Y => egui::CursorIcon::ResizeVertical,
+                        TranslateHandle::Free => egui::CursorIcon::Move,
+                    };
+                    response.ctx.set_cursor_icon(icon);
+                }
+            }
+        }
+
+        // Click (no drag): select or clear (Cmd toggles). Handle hits keep selection.
+        if response.clicked() && handle_hit.is_none() {
             let cmd = response.ctx.input(|i| i.modifiers.command);
             if let Some(pos) = response.interact_pointer_pos().and_then(to_scene) {
                 match pick_at(self, pos) {
@@ -398,11 +445,29 @@ impl EditorApp {
             }
         }
 
-        // Drag start: select hit entity and begin tool gesture.
+        // Drag start: axis handle (Move) or hit entity, then begin tool gesture.
         if response.drag_started() {
             if let Some(pos) = response.interact_pointer_pos().and_then(to_scene) {
-                match pick_at(self, pos) {
-                    Some((name, grab_offset)) => {
+                let started = if let Some((name, handle)) = handle_hit.clone() {
+                    let world = self
+                        .scene
+                        .world_transform(&name)
+                        .or_else(|| self.scene.find_entity(&name).map(|e| e.transform.clone()));
+                    let origin = world
+                        .as_ref()
+                        .map(|w| [w.translation[0], w.translation[1]])
+                        .unwrap_or(pos);
+                    Some((name, [pos[0] - origin[0], pos[1] - origin[1]], handle))
+                } else {
+                    match pick_at(self, pos) {
+                        Some((name, grab_offset)) => {
+                            Some((name, grab_offset, TranslateHandle::Free))
+                        }
+                        None => None,
+                    }
+                };
+                match started {
+                    Some((name, grab_offset, translate_handle)) => {
                         if !self.is_selected(&name) {
                             self.select(Some(name.clone()));
                         }
@@ -450,6 +515,7 @@ impl EditorApp {
                             dist_start,
                             angle_start,
                             rot_z_start,
+                            translate_handle,
                         });
                     }
                     None => {
@@ -467,10 +533,28 @@ impl EditorApp {
                         EditTool::Translate => {
                             let mut x = pos[0] - drag.grab_offset[0];
                             let mut y = pos[1] - drag.grab_offset[1];
+                            let xy = constrain_translate(
+                                drag.translate_handle,
+                                x,
+                                y,
+                                drag.primary_start,
+                            );
+                            x = xy[0];
+                            y = xy[1];
                             if self.prefs.scene_view.snap && self.prefs.scene_view.snap_size > 0.0 {
                                 let g = self.prefs.scene_view.snap_size;
-                                x = (x / g).round() * g;
-                                y = (y / g).round() * g;
+                                match drag.translate_handle {
+                                    TranslateHandle::X => {
+                                        x = (x / g).round() * g;
+                                    }
+                                    TranslateHandle::Y => {
+                                        y = (y / g).round() * g;
+                                    }
+                                    TranslateHandle::Free => {
+                                        x = (x / g).round() * g;
+                                        y = (y / g).round() * g;
+                                    }
+                                }
                             }
                             let dx = x - drag.primary_start[0];
                             let dy = y - drag.primary_start[1];
@@ -529,6 +613,22 @@ impl EditorApp {
             }
             self.viewport_drag = None;
         }
+    }
+
+    fn hit_move_handle(
+        &self,
+        rect: egui::Rect,
+        pointer: egui::Pos2,
+    ) -> Option<(String, TranslateHandle)> {
+        let name = self.selected.last()?.clone();
+        let world = self
+            .scene
+            .world_transform(&name)
+            .or_else(|| self.scene.find_entity(&name).map(|e| e.transform.clone()))?;
+        let origin = scene_to_screen(rect, world.translation[0], world.translation[1]);
+        let layout = MoveHandleLayout::at([origin.x, origin.y]);
+        let handle = layout.hit([pointer.x, pointer.y])?;
+        Some((name, handle))
     }
 
     fn handle_tile_paint(
@@ -658,6 +758,13 @@ impl EditorApp {
     }
 }
 
+fn scene_to_screen(image_rect: egui::Rect, sx: f32, sy: f32) -> egui::Pos2 {
+    egui::pos2(
+        image_rect.min.x + sx / VIEW_W as f32 * image_rect.width(),
+        image_rect.min.y + sy / VIEW_H as f32 * image_rect.height(),
+    )
+}
+
 fn paint_grid_overlay(ui: &egui::Ui, image_rect: egui::Rect, step: f32) {
     let to_screen = |sx: f32, sy: f32| -> egui::Pos2 {
         egui::pos2(
@@ -726,8 +833,142 @@ fn paint_tilemap_overlay(ui: &egui::Ui, image_rect: egui::Rect, scene: &Scene, n
         .rect_stroke(r, 0.0, egui::Stroke::new(1.0, theme::ACCENT));
 }
 
-/// Collider gizmos: accent outline of the AABB or circle (amber when `trigger`).
-/// All enabled colliders get a 1px stroke; the selection is 2px so walls read in screenshots.
+fn paint_tilemap_gizmos(ui: &egui::Ui, image_rect: egui::Rect, scene: &Scene, selected: &[String]) {
+    let painter = ui.painter();
+    for ent in &scene.entities {
+        let Some(tm) = &ent.components.tilemap else {
+            continue;
+        };
+        if !tm.enabled {
+            continue;
+        }
+        let world = scene
+            .world_transform(&ent.name)
+            .unwrap_or_else(|| ent.transform.clone());
+        let (origin, size) = tm.world_rect(&world);
+        let min = scene_to_screen(image_rect, origin[0], origin[1]);
+        let max = scene_to_screen(image_rect, origin[0] + size[0], origin[1] + size[1]);
+        let r = egui::Rect::from_min_max(min, max);
+        let is_sel = selected.iter().any(|n| n == &ent.name);
+        let bounds = if is_sel {
+            egui::Color32::from_rgb(90, 200, 170)
+        } else {
+            egui::Color32::from_rgba_unmultiplied(70, 160, 140, 160)
+        };
+        painter.rect_stroke(
+            r,
+            0.0,
+            egui::Stroke::new(if is_sel { 2.0 } else { 1.0 }, bounds),
+        );
+        let cell_px_x = (tm.cell * world.scale[0]).abs() / VIEW_W as f32 * image_rect.width();
+        let cell_px_y = (tm.cell * world.scale[1]).abs() / VIEW_H as f32 * image_rect.height();
+        if cell_px_x < 4.0 || cell_px_y < 4.0 || tm.width > 128 || tm.height > 128 {
+            continue;
+        }
+        let grid = egui::Color32::from_rgba_unmultiplied(70, 160, 140, 80);
+        let stroke = egui::Stroke::new(1.0_f32, grid);
+        for i in 1..tm.width {
+            let x = origin[0] + i as f32 * tm.cell * world.scale[0];
+            painter.line_segment(
+                [
+                    scene_to_screen(image_rect, x, origin[1]),
+                    scene_to_screen(image_rect, x, origin[1] + size[1]),
+                ],
+                stroke,
+            );
+        }
+        for j in 1..tm.height {
+            let y = origin[1] + j as f32 * tm.cell * world.scale[1];
+            painter.line_segment(
+                [
+                    scene_to_screen(image_rect, origin[0], y),
+                    scene_to_screen(image_rect, origin[0] + size[0], y),
+                ],
+                stroke,
+            );
+        }
+    }
+}
+
+fn paint_move_handles(
+    ui: &egui::Ui,
+    image_rect: egui::Rect,
+    scene: &Scene,
+    selected: &[String],
+    hover: Option<egui::Pos2>,
+) {
+    let Some(name) = selected.last() else {
+        return;
+    };
+    let Some(ent) = scene.find_entity(name) else {
+        return;
+    };
+    let world = scene
+        .world_transform(name)
+        .unwrap_or_else(|| ent.transform.clone());
+    let origin = scene_to_screen(image_rect, world.translation[0], world.translation[1]);
+    let layout = MoveHandleLayout::at([origin.x, origin.y]);
+    let hover_part = hover.and_then(|p| layout.hit([p.x, p.y]));
+    let painter = ui.painter();
+
+    let x_col = if hover_part == Some(TranslateHandle::X) {
+        egui::Color32::from_rgb(255, 120, 120)
+    } else {
+        theme::AXIS_X
+    };
+    let y_col = if hover_part == Some(TranslateHandle::Y) {
+        egui::Color32::from_rgb(140, 220, 100)
+    } else {
+        theme::AXIS_Y
+    };
+    let free_col = if hover_part == Some(TranslateHandle::Free) {
+        egui::Color32::from_rgb(230, 230, 230)
+    } else {
+        egui::Color32::from_rgb(200, 200, 200)
+    };
+
+    let x_base = egui::pos2(layout.x_base()[0], layout.x_base()[1]);
+    let x_tip = egui::pos2(layout.x_tip()[0], layout.x_tip()[1]);
+    let y_base = egui::pos2(layout.y_base()[0], layout.y_base()[1]);
+    let y_tip = egui::pos2(layout.y_tip()[0], layout.y_tip()[1]);
+    painter.line_segment([x_base, x_tip], egui::Stroke::new(3.0, x_col));
+    painter.line_segment([y_base, y_tip], egui::Stroke::new(3.0, y_col));
+
+    let arrow = MoveHandleLayout::ARROW;
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            x_tip,
+            egui::pos2(x_tip.x - arrow, x_tip.y - arrow * 0.55),
+            egui::pos2(x_tip.x - arrow, x_tip.y + arrow * 0.55),
+        ],
+        x_col,
+        egui::Stroke::NONE,
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            y_tip,
+            egui::pos2(y_tip.x - arrow * 0.55, y_tip.y - arrow),
+            egui::pos2(y_tip.x + arrow * 0.55, y_tip.y - arrow),
+        ],
+        y_col,
+        egui::Stroke::NONE,
+    ));
+
+    let fmin = layout.free_min();
+    let fmax = layout.free_max();
+    let free = egui::Rect::from_min_max(egui::pos2(fmin[0], fmin[1]), egui::pos2(fmax[0], fmax[1]));
+    painter.rect_filled(
+        free,
+        1.0,
+        egui::Color32::from_rgba_unmultiplied(40, 40, 40, 180),
+    );
+    painter.rect_stroke(free, 1.0, egui::Stroke::new(1.5, free_col));
+    // Origin pivot
+    painter.circle_filled(origin, 3.0, egui::Color32::from_rgb(220, 220, 220));
+}
+
+/// Collider gizmos: seafoam AABB/circle (amber when `trigger`).
+/// Fill + corner/cardinal ticks so the shape reads at a glance; selection is 2px.
 fn paint_collider_gizmos(
     ui: &egui::Ui,
     image_rect: egui::Rect,
@@ -770,13 +1011,69 @@ fn paint_collider_gizmos(
                 let (min, max) = c.world_aabb(&world);
                 let r =
                     egui::Rect::from_min_max(to_screen(min[0], min[1]), to_screen(max[0], max[1]));
+                let fill =
+                    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 32);
+                painter.rect_filled(r, 0.0, fill);
                 painter.rect_stroke(r, 0.0, stroke);
+                let tick = 6.0_f32;
+                let corners = [
+                    (r.left_top(), egui::vec2(tick, 0.0), egui::vec2(0.0, tick)),
+                    (r.right_top(), egui::vec2(-tick, 0.0), egui::vec2(0.0, tick)),
+                    (
+                        r.left_bottom(),
+                        egui::vec2(tick, 0.0),
+                        egui::vec2(0.0, -tick),
+                    ),
+                    (
+                        r.right_bottom(),
+                        egui::vec2(-tick, 0.0),
+                        egui::vec2(0.0, -tick),
+                    ),
+                ];
+                for (p, a, b) in corners {
+                    painter.line_segment([p, p + a], stroke);
+                    painter.line_segment([p, p + b], stroke);
+                }
             }
             wiimaker_scene::SceneColliderKind::Circle => {
                 let center = c.world_center(&world);
                 let radius = c.world_radius(&world).unwrap_or(0.0);
+                let cpos = to_screen(center[0], center[1]);
                 let radius_px = radius / VIEW_W as f32 * image_rect.width();
-                painter.circle_stroke(to_screen(center[0], center[1]), radius_px, stroke);
+                let fill =
+                    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 32);
+                painter.circle_filled(cpos, radius_px, fill);
+                painter.circle_stroke(cpos, radius_px, stroke);
+                let tick = 6.0_f32;
+                painter.line_segment(
+                    [
+                        cpos - egui::vec2(radius_px, 0.0),
+                        cpos - egui::vec2(radius_px - tick, 0.0),
+                    ],
+                    stroke,
+                );
+                painter.line_segment(
+                    [
+                        cpos + egui::vec2(radius_px - tick, 0.0),
+                        cpos + egui::vec2(radius_px, 0.0),
+                    ],
+                    stroke,
+                );
+                painter.line_segment(
+                    [
+                        cpos - egui::vec2(0.0, radius_px),
+                        cpos - egui::vec2(0.0, radius_px - tick),
+                    ],
+                    stroke,
+                );
+                painter.line_segment(
+                    [
+                        cpos + egui::vec2(0.0, radius_px - tick),
+                        cpos + egui::vec2(0.0, radius_px),
+                    ],
+                    stroke,
+                );
+                painter.circle_filled(cpos, 2.0, color);
             }
         }
     }
