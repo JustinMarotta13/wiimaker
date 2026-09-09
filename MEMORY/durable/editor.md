@@ -20,11 +20,11 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - **Hierarchy click vs drag:** do **not** use `dnd_drag_source` for selectable rows. It overlays `Sense::drag()` on top of the row; egui then ignores click widgets underneath, so drag starts immediately and Inspector selection never fires. Use `Sense::click_and_drag()` + `dnd_set_drag_payload` (+ Tooltip layer ghost while `is_being_dragged`). Labels: `.selectable(false)` so text-select sense does not compete.
 - Toolbar primary: Save · Play · Build · Play in Dolphin · Build & Run. **Cook** lives under the painter ellipsis menu only. Host Play and Wii Build auto-prepare assets.
 - Sprite / Disc Inspector: checkbox toggles `enabled` (skipped by hydrate/pick/bake); Remove uses `remove_component_*`. CLI: `entity remove-component` / `set-component-enabled --enabled true|false`.
-- Viewport: Snap checkbox + grid size; Scene **Hand** pans (middle-drag also pans); scroll + `%` zoom; **Grid** overlay; **Gizmos** toggle; **2D** control is always-on. Arrow keys nudge 1px (or snap size when Snap/Shift). Multi-select via Cmd-click (Hierarchy + viewport); drag moves whole selection; Delete on a selected row removes all selected.
+- Viewport: Snap checkbox + grid size; Scene **Hand** pans (middle-drag also pans); scroll + `%` zoom; **Grid** overlay; **Gizmos** toggle (colliders/tilemaps/camera); Move handles are independent of that toggle. **2D** is always-on. Arrow keys nudge 1px (or snap size when Snap/Shift). Multi-select via Cmd-click (Hierarchy + viewport); drag moves whole selection; Delete on a selected row removes all selected.
 - Play toolbar = in-editor Play Mode (Play/Pause/Stop, WASD moves `Player`, Esc stops). Scene edits preserved on Stop. File → Run external… still shells `cargo run -p <game>`.
-- Viewport tools: Move · Scale · Rotate · Hand (drag on entity; Hand pans). Snap applies to translate + 45° rotate steps.
+- Viewport tools: Move · Scale · Rotate · Hand. **Move** draws red X / green Y axis handles (+ XY square) at the selected origin; X/Y drags constrain that axis; entity-body drag stays free. Snap applies to translate + 45° rotate steps.
 - Tilemap: viewport **Paint / Erase / Pick** (right-click erases while Painting). Inspector **+ Tilemap** (32×18, cell 16) · grid w/h · cell · origin · palette (id/color/sprite) · **Brush**. Selected tilemap AABB outlined; paint stamps `tile_brush_id` + solid onto the targeted grid.
-- Collider Inspector: solid · **Is Trigger** · **Filter Tag** (0 = any). Viewport gizmos: accent for walls, amber (`220,180,60`) for triggers. Keep dark theme.
+- Collider Inspector: solid · **Is Trigger** · **Filter Tag** (0 = any). Viewport gizmos (when **Gizmos** is on): seafoam fill+outline+corner ticks for AABB, fill+cardinals for circles; amber (`220,180,60`) for triggers. Tilemaps get bounds + cell grid. Keep dark theme.
 - Camera Inspector: Follow target combo (entity names) + Lerp. Scene view draws a 640×480 cyan rect centered on the active camera (Game tab applies offset). Play ticks `World::follow_cameras` after WASD / GridMover.
 - GridMover Inspector: Cell, Speed, queued cardinal combo. Add Component → GridMover. Play: `step_grid_movers` from WASD/arrows; if Player has GridMover, skip free WASD.
 - Prefabs: Inspector **Save as Prefab…**; Project strip + toolbar **Instantiate <name>** (or Prefab menu when many); File → Instantiate; **Cmd/Ctrl+I** first `.prefab.json`. Double-click / context menu also instantiate. CLI: `entity create-prefab` / `instantiate-prefab` / `apply-prefab` / `unpack-prefab`.
@@ -43,8 +43,8 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Duplicate/paste share `insert_entity_clone` (+16,+16, `unique_entity_name`).
 - Hierarchy: Search + Create Empty / right-click Duplicate·Delete; shortcuts Cmd/Ctrl+D/C/V/Z/Shift+Z/Y. No per-row D/x (see unity-chrome crops).
 - Editor chrome: `theme.rs` teal-accent charcoal Visuals; panel frames, section headers, centered viewport well. Apply via `theme::apply` in eframe CreationContext.
-- P0 viewport pick/drag lives in `wiimaker-scene` (`pick.rs`) + editor `handle_viewport_input`. Topmost = highest component z, then later entity index.
-- Translate gizmo P0 = drag-on-entity (no separate handle).
+- P0 viewport pick/drag lives in `wiimaker-scene` (`pick.rs` + `gizmo.rs`) + editor `handle_viewport_input`. Topmost = highest component z, then later entity index.
+- Translate gizmo: Unity-like 2D handles (`MoveHandleLayout` / `TranslateHandle`) in screen pixels; CLI n/a.
 - Scene discovery: `wiimaker_scene::list_scenes(game_dir)` → relative `*.scene.json` under `scenes/` plus `default_scene` if outside that dir.
 - Opening a non-default scene is editor-only preview; "Set as default scene" persists via `save_project`.
 - File → **Build Settings…** (also Project / Inspector on `game.toml`): ordered `game.toml` `scenes` list, star = `default_scene`, +/- add/remove, Open. CLI twins: `scene build-list` / `build-add` / `build-remove`.
@@ -57,7 +57,6 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 ## Open follow-ups
 
 - Optional: clear-color editor UI with undo.
-- Optional: richer gizmo handles / multi-select.
 - Optional: full rotation in parent/world compose (currently translation×scale).
 - Optional: collapsible folders / filter in Project explorer.
 - Optional: shorten window title when `game.toml` `title` already includes `wiimaker ·` (today: `wiimaker · wiimaker · hello-orb`).

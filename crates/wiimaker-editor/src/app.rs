@@ -14,7 +14,7 @@ use wiimaker_scene::{
     duplicate_entity, find_game_dir, hydrate_lenient_with_catalogs, insert_entity_clone,
     list_scenes, load_editor_prefs, load_project, load_scene, remove_build_scene, rename_entity,
     save_editor_prefs, save_scene, set_default_scene, EditorPrefs, EntityData, GameProject, Scene,
-    Severity, UndoStack,
+    Severity, TranslateHandle, UndoStack,
 };
 
 use crate::dock::{self, EditorTab};
@@ -40,6 +40,8 @@ pub(crate) struct ViewportDrag {
     /// Rotate tool: atan2 angle at drag start + entity Z angle at start.
     pub(crate) angle_start: f32,
     pub(crate) rot_z_start: f32,
+    /// Move tool: axis constraint (`Free` for body drag / XY square).
+    pub(crate) translate_handle: TranslateHandle,
 }
 
 #[derive(Clone)]

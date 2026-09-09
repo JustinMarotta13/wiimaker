@@ -3,6 +3,7 @@
 mod animate;
 mod collider;
 mod doctor;
+mod gizmo;
 mod hydrate;
 mod mutate;
 mod pick;
@@ -20,6 +21,7 @@ pub use collider::{
     remove_component_collider,
 };
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
+pub use gizmo::{constrain_translate, MoveHandleLayout, TranslateHandle};
 pub use hydrate::{
     hydrate, hydrate_into, hydrate_into_with_catalog, hydrate_into_with_catalogs, hydrate_lenient,
     hydrate_lenient_with_catalog, hydrate_lenient_with_catalogs, hydrate_with_catalog,
