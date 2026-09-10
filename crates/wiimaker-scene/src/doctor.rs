@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::project::GameProject;
 use crate::scene::{load_scene, Scene};
-use wiimaker_assets::{list_anim_clips, AnimClipMeta, SpriteCatalog};
+use wiimaker_assets::{inspect_wav, list_anim_clips, list_wav_clips, AnimClipMeta, SpriteCatalog};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -99,6 +99,16 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
     }
 
     let anim_names = list_anim_clips(&assets).unwrap_or_default();
+    let wav_names = list_wav_clips(&assets).unwrap_or_default();
+    for wname in &wav_names {
+        let path = assets.join(format!("{wname}.wav"));
+        if let Err(e) = inspect_wav(&path) {
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: format!("wav '{wname}': {e}"),
+            });
+        }
+    }
     for aname in &anim_names {
         let path = AnimClipMeta::path(&assets, aname);
         match AnimClipMeta::load(&path) {
@@ -128,7 +138,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
     }
 
     if let Some(scene) = &scene {
-        check_scene_refs(scene, &sprite_names, &anim_names, &assets, &mut issues);
+        check_scene_refs(scene, &sprite_names, &anim_names, &wav_names, &assets, &mut issues);
     }
 
     check_build_scenes(game_dir, project, &mut issues);
@@ -186,6 +196,7 @@ fn check_scene_refs(
     scene: &Scene,
     sprites: &[String],
     anims: &[String],
+    wavs: &[String],
     assets: &Path,
     issues: &mut Vec<Issue>,
 ) {
@@ -293,6 +304,30 @@ fn check_scene_refs(
                     severity: Severity::Warning,
                     message: format!("entity '{}': GridMover cell size must be > 0", ent.name),
                 });
+            }
+        }
+        if let Some(a) = &ent.components.audio_source {
+            if a.clip.is_empty() {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!("entity '{}': AudioSource has empty clip name", ent.name),
+                });
+            } else {
+                let stem = a
+                    .clip
+                    .trim_end_matches(".wav")
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or(a.clip.as_str());
+                if !wavs.iter().any(|n| n == stem) {
+                    issues.push(Issue {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "entity '{}': AudioSource clip '{}' missing (expected assets/{}.wav)",
+                            ent.name, a.clip, stem
+                        ),
+                    });
+                }
             }
         }
     }

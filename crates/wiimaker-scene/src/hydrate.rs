@@ -11,6 +11,7 @@ use wiimaker_core::draw::{Rect, TextureId};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::tilemap::{TileVisual, Tilemap};
 use wiimaker_core::world::{Animation, Camera, Disc, Follow, Sprite, World};
+use wiimaker_core::AudioSource;
 use wiimaker_core::GridMover;
 
 use crate::scene::{EntityData, Scene};
@@ -225,6 +226,12 @@ fn spawn_entity(
         }
     }
 
+    if let Some(a) = &ent.components.audio_source {
+        if a.enabled {
+            world.set_audio_source(id, Some(scene_audio_source_to_runtime(a)));
+        }
+    }
+
     Ok(())
 }
 
@@ -342,6 +349,11 @@ pub fn hydrate_lenient_with_catalogs(
                 world.set_grid_mover(id, Some(scene_grid_mover_to_runtime(g)));
             }
         }
+        if let Some(a) = &ent.components.audio_source {
+            if a.enabled {
+                world.set_audio_source(id, Some(scene_audio_source_to_runtime(a)));
+            }
+        }
     }
     world
 }
@@ -456,4 +468,8 @@ fn scene_grid_mover_to_runtime(g: &crate::scene::SceneGridMover) -> GridMover {
     let mut gm = GridMover::new(g.cell, g.speed);
     gm.queued_dir = g.queued_dir.map(|d| d.to_runtime());
     gm
+}
+
+fn scene_audio_source_to_runtime(a: &crate::scene::SceneAudioSource) -> AudioSource {
+    AudioSource::new(a.clip.clone(), a.volume, a.play_on_awake)
 }

@@ -3,16 +3,17 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use serde::Serialize;
 use wiimaker_scene::{
-    add_component_animation, add_component_camera, add_component_collider, add_component_disc,
-    add_component_follow, add_component_grid_mover, add_component_sprite, add_component_tilemap,
-    add_entity, apply_prefab, duplicate_entity, entities_overlap, entity_overlaps,
-    entity_to_prefab, entity_triggers_entered, instantiate_prefab, load_prefab,
-    remove_component_animation, remove_component_camera, remove_component_collider,
-    remove_component_disc, remove_component_follow, remove_component_grid_mover,
-    remove_component_sprite, remove_component_tilemap, remove_entity, rename_entity, save_prefab,
-    save_scene, set_component_enabled, set_entity_anim, set_entity_follow, set_entity_grid_mover,
-    set_entity_parent, set_entity_rotation_z, set_entity_scale, set_entity_transform,
-    unpack_prefab_instance, MutateOpts, Scene, SceneColliderKind, SceneDir,
+    add_component_animation, add_component_audio_source, add_component_camera,
+    add_component_collider, add_component_disc, add_component_follow, add_component_grid_mover,
+    add_component_sprite, add_component_tilemap, add_entity, apply_prefab, duplicate_entity,
+    entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered, instantiate_prefab,
+    load_prefab, remove_component_animation, remove_component_audio_source, remove_component_camera,
+    remove_component_collider, remove_component_disc, remove_component_follow,
+    remove_component_grid_mover, remove_component_sprite, remove_component_tilemap, remove_entity,
+    rename_entity, save_prefab, save_scene, set_component_enabled, set_entity_anim,
+    set_entity_audio_source, set_entity_follow, set_entity_grid_mover, set_entity_parent,
+    set_entity_rotation_z, set_entity_scale, set_entity_transform, unpack_prefab_instance,
+    MutateOpts, Scene, SceneColliderKind, SceneDir,
 };
 
 use crate::args::EntityCmd;
@@ -77,6 +78,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             cell,
             speed,
             queued_dir,
+            audio_clip,
+            volume,
+            play_on_awake,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -91,8 +95,11 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 && cell.is_none()
                 && speed.is_none()
                 && queued_dir.is_none()
+                && audio_clip.is_none()
+                && volume.is_none()
+                && play_on_awake.is_none()
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -129,6 +136,15 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 };
                 set_entity_grid_mover(&mut sc, &name, cell, speed, q)?;
             }
+            if audio_clip.is_some() || volume.is_some() || play_on_awake.is_some() {
+                set_entity_audio_source(
+                    &mut sc,
+                    &name,
+                    audio_clip.as_deref(),
+                    volume,
+                    play_on_awake,
+                )?;
+            }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("updated entity {name}"))
         }
@@ -154,6 +170,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             lerp,
             speed,
             queued_dir,
+            volume,
+            play_on_awake,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -214,8 +232,12 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                         set_entity_grid_mover(&mut sc, &name, None, None, Some(Some(dir)))?;
                     }
                 }
+                "audiosource" | "audio_source" | "audio-source" | "audio" => {
+                    let clip = clip.unwrap_or_default();
+                    add_component_audio_source(&mut sc, &name, &clip, volume, play_on_awake)?;
+                }
                 other => {
-                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Camera|Follow|GridMover)")
+                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Camera|Follow|GridMover|AudioSource)")
                 }
             }
             save_scene(&path, &sc)?;
@@ -333,7 +355,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "gridmover" | "grid_mover" | "grid-mover" => {
                     remove_component_grid_mover(&mut sc, &name)?
                 }
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|Follow|GridMover)"),
+                "audiosource" | "audio_source" | "audio-source" | "audio" => {
+                    remove_component_audio_source(&mut sc, &name)?
+                }
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|Follow|GridMover|AudioSource)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed {kind} from {name}"))

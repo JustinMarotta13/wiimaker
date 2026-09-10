@@ -3,12 +3,12 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use eframe::egui;
-use wiimaker_assets::{AnimClipCatalog, SpriteCatalog, WPack};
+use wiimaker_assets::{list_wav_clips, AnimClipCatalog, SpriteCatalog, WPack};
 use wiimaker_core::input::{Button, Input};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::move_and_collide;
 use wiimaker_core::world::World;
-use wiimaker_host::{Framebuffer, TextureAtlas};
+use wiimaker_host::{HostAudio, PlayOutcome, TextureAtlas, Framebuffer};
 use wiimaker_scene::{
     add_build_scene, add_component_sprite, animate_world, create_named_scene, diagnose,
     duplicate_entity, find_game_dir, hydrate_lenient_with_catalogs, insert_entity_clone,
@@ -117,6 +117,8 @@ pub(crate) struct EditorApp {
     pub(crate) project_entries: Vec<ProjectEntry>,
     pub(crate) catalog: SpriteCatalog,
     pub(crate) anim_catalog: AnimClipCatalog,
+    pub(crate) wav_names: Vec<String>,
+    pub(crate) host_audio: HostAudio,
     pub(crate) sprite_editor: Option<SpriteEditorState>,
     pub(crate) sprite_editor_open: bool,
     /// Pending stem to open in Sprite Editor (set from context menu).
@@ -195,6 +197,8 @@ impl EditorApp {
             project_entries: Vec::new(),
             catalog: SpriteCatalog::empty(),
             anim_catalog: AnimClipCatalog::empty(),
+            wav_names: Vec::new(),
+            host_audio: HostAudio::new(),
             sprite_editor: None,
             sprite_editor_open: false,
             open_sprite_editor_stem: None,
@@ -465,6 +469,7 @@ impl EditorApp {
 
         self.catalog = SpriteCatalog::load_dir(&assets, |stem| self.atlas.size_of(stem))?;
         self.anim_catalog = AnimClipCatalog::load_dir(&assets)?;
+        self.wav_names = list_wav_clips(&assets).unwrap_or_default();
         self.refresh_project_tree();
         Ok(())
     }
@@ -788,8 +793,8 @@ impl EditorApp {
         self.cook();
     }
 
-    /// Copy PNGs into `assets/`, then cook + refresh (Project drag-drop / import).
-    pub(crate) fn import_png_paths(&mut self, paths: &[PathBuf]) {
+    /// Copy PNG/WAV into `assets/`, then cook + refresh (Project drag-drop / import).
+    pub(crate) fn import_asset_paths(&mut self, paths: &[PathBuf]) {
         if paths.is_empty() {
             return;
         }
@@ -799,11 +804,13 @@ impl EditorApp {
             return;
         }
         let mut imported = Vec::new();
+        let mut need_cook = false;
         for src in paths {
             let Some(ext) = src.extension().and_then(|e| e.to_str()) else {
                 continue;
             };
-            if !ext.eq_ignore_ascii_case("png") {
+            let ext_l = ext.to_ascii_lowercase();
+            if ext_l != "png" && ext_l != "wav" {
                 continue;
             }
             let stem = src
@@ -811,9 +818,14 @@ impl EditorApp {
                 .and_then(|s| s.to_str())
                 .unwrap_or("tex")
                 .to_string();
-            let dest = assets.join(format!("{stem}.png"));
+            let dest = assets.join(format!("{stem}.{ext_l}"));
             match std::fs::copy(src, &dest) {
-                Ok(_) => imported.push(stem),
+                Ok(_) => {
+                    imported.push(format!("{stem}.{ext_l}"));
+                    if ext_l == "png" {
+                        need_cook = true;
+                    }
+                }
                 Err(e) => {
                     self.status = format!("import {} failed: {e}", src.display());
                     return;
@@ -821,11 +833,35 @@ impl EditorApp {
             }
         }
         if imported.is_empty() {
-            self.status = "drop PNG files to import".into();
+            self.status = "drop PNG or WAV files to import".into();
             return;
         }
-        self.cook();
+        if need_cook {
+            self.cook();
+        } else if let Err(e) = self.reload_assets() {
+            self.status = format!("refresh failed: {e}");
+            return;
+        }
         self.status = format!("imported {} · assets ready", imported.join(", "));
+    }
+
+    pub(crate) fn preview_wav_clip(&mut self, clip: &str, volume: f32) {
+        if clip.is_empty() {
+            self.status = "AudioSource has no clip".into();
+            return;
+        }
+        let assets = self.project.assets_path(&self.game_dir);
+        match self.host_audio.play_clip(&assets, clip, volume) {
+            Ok((PlayOutcome::Played, path)) => {
+                self.status = format!("played {}", path.display());
+            }
+            Ok((PlayOutcome::SkippedNoDevice, path)) => {
+                self.status = format!("audio skipped (no device) {}", path.display());
+            }
+            Err(e) => {
+                self.status = format!("audio: {e}");
+            }
+        }
     }
 
     pub(crate) fn save_entity_as_prefab(&mut self, name: &str) {
@@ -903,6 +939,11 @@ impl EditorApp {
             PlayMode::Edit => {
                 self.prepare_assets();
                 self.rehydrate();
+                self.world.queue_awake_audio();
+                let assets = self.project.assets_path(&self.game_dir);
+                for err in self.host_audio.play_world(&mut self.world, &assets) {
+                    self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
+                }
                 self.play_mode = PlayMode::Playing;
                 self.last_play_hit = None;
                 self.log_line(
@@ -1028,6 +1069,10 @@ impl EditorApp {
             }
         }
         self.world.follow_cameras();
+        let assets = self.project.assets_path(&self.game_dir);
+        for err in self.host_audio.play_world(&mut self.world, &assets) {
+            self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
+        }
     }
 
     fn spawn_wiimaker(&mut self, args: &[&str], ok_status: &str) {
@@ -1195,7 +1240,7 @@ impl eframe::App for EditorApp {
                 .collect()
         });
         if !dropped.is_empty() {
-            self.import_png_paths(&dropped);
+            self.import_asset_paths(&dropped);
         }
 
         self.end_inspector_gesture_if_released(ctx);

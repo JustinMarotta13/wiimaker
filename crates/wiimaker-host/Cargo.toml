@@ -10,3 +10,4 @@ wiimaker-core = { workspace = true }
 wiimaker-assets = { workspace = true }
 wiimaker-scene = { workspace = true }
 minifb = { workspace = true }
+anyhow = { workspace = true }

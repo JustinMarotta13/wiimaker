@@ -6,6 +6,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod app;
+pub mod audio;
 pub mod collider;
 pub mod color;
 pub mod draw;
@@ -17,6 +18,7 @@ pub mod time;
 pub mod world;
 
 pub use app::{App, FrameCtx};
+pub use audio::{queue_awake_audio, AudioSource, Oneshot};
 pub use collider::{
     move_and_collide, overlap_solid, overlapping, overlaps, triggers_entered, Collider,
     ColliderKind, MoveHit,

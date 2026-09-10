@@ -214,6 +214,15 @@ pub enum EntityCmd {
         /// GridMover queued cardinal: Up, Down, Left, Right (empty string clears)
         #[arg(long)]
         queued_dir: Option<String>,
+        /// AudioSource clip stem (`assets/<clip>.wav`); creates AudioSource if missing
+        #[arg(long)]
+        audio_clip: Option<String>,
+        /// AudioSource volume 0..1
+        #[arg(long)]
+        volume: Option<f32>,
+        /// AudioSource play-on-awake
+        #[arg(long, action = clap::ArgAction::Set)]
+        play_on_awake: Option<bool>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -221,7 +230,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Camera, Follow, or GridMover
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Camera, Follow, GridMover, or AudioSource
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -254,7 +263,7 @@ pub enum EntityCmd {
         /// Trigger filter tag (0 = any)
         #[arg(long, default_value_t = 0)]
         filter: u32,
-        /// Animation clip stem (`assets/<clip>.anim.json`)
+        /// Animation clip stem (`assets/<clip>.anim.json`) or AudioSource clip (`assets/<clip>.wav`)
         #[arg(long)]
         clip: Option<String>,
         /// Animation fps override (omit to use clip file)
@@ -275,6 +284,12 @@ pub enum EntityCmd {
         /// GridMover queued cardinal: Up, Down, Left, Right
         #[arg(long)]
         queued_dir: Option<String>,
+        /// AudioSource volume 0..1 (default 1)
+        #[arg(long, default_value_t = 1.0)]
+        volume: f32,
+        /// AudioSource play-on-awake
+        #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
+        play_on_awake: bool,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -316,7 +331,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, Follow, or GridMover (Follow removal clears fields; use entity set --follow "" to clear)
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, Follow, GridMover, or AudioSource (Follow removal clears fields; use entity set --follow "" to clear)
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -326,7 +341,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, or GridMover
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, GridMover, or AudioSource
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,
@@ -465,6 +480,22 @@ pub enum AssetCmd {
     /// List `*.anim.json` clip stems
     ListAnims {
         game: String,
+    },
+    /// List `*.wav` clip stems under assets/
+    ListWavs {
+        game: String,
+    },
+    /// Play a oneshot WAV on the host (`assets/<name>.wav`)
+    Play {
+        game: String,
+        /// Clip stem or path (`beep` or `beep.wav`)
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value_t = 1.0)]
+        volume: f32,
+        /// Wait for the clip to finish when a device is present (default true)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        wait: bool,
     },
 }
 

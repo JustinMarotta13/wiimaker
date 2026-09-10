@@ -68,6 +68,9 @@ static void init_video(void) {
     GX_CopyDisp(xfb[fbi], GX_TRUE);
     GX_SetDispCopyGamma(GX_GM_1_0);
 
+    /* Audio oneshots: host plays PCM16 WAV (ARCHITECTURE M3).
+     * Wii ASND / AESND is not wired yet — do not call ASND_Init here. */
+
     SYS_SetResetCallback(reset_cb);
     SYS_SetPowerCallback(power_cb);
 }

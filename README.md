@@ -29,7 +29,7 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | SpriteRenderer | `Sprite` component |
 | Tilemap / TilemapCollider2D | `Tilemap` component (cell ids + solid bits) |
 | BoxCollider2D / CircleCollider2D | `Collider` (`Aabb` / `Circle`, `solid`) |
-| Prefab | `.prefab.json` |
+| AudioSource | `AudioSource` (`clip`, `volume`, `play_on_awake`) + host oneshots |
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
 | Play | `wiimaker run` / `cargo run -p <game>` |
 | Scenes in Build / LoadScene | `game.toml` `scenes = [...]` · `load_scene_into_world` · File → Build Settings… |
@@ -67,6 +67,10 @@ wiimaker scene build-list my-game --json
 wiimaker scene set-game-view my-game --preset 640x480 --scale 1
 wiimaker editor set-scene-view my-game --zoom 1.25 --grid true --gizmos true
 wiimaker editor prefs my-game --json
+wiimaker asset import my-game ./beep.wav
+wiimaker asset play my-game --name beep
+wiimaker entity add-component my-game --name Player AudioSource --clip beep --volume 1 --play-on-awake false
+# or: wiimaker entity set my-game --name Player --audio-clip beep --volume 0.8 --play-on-awake true
 wiimaker entity add my-game --name Player --sprite hero_2 --x 320 --y 240
 wiimaker entity add-component my-game --name Maze Tilemap --cols 28 --rows 31 --cell 16
 wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'
@@ -93,6 +97,8 @@ Scene / entity edits write `.scene.json` — the same files the egui editor save
 Editor Scene/Game chrome (zoom, grid, gizmos, Game aspect) lives in `<game>/.wiimaker/prefs.toml`, not `game.toml`. `wiimaker scene set-game-view` and `wiimaker editor set-scene-view` mutate that file; the editor toolbar writes the same store.
 
 Sprite sheets keep one PNG; cells live in `assets/<stem>.sprites.json` (Grid By Cell Count + normalized pivot). Scenes reference cell names like `hero_2`.
+
+A tiny PCM16 beep lives at `crates/wiimaker-assets/fixtures/beep.wav` (also copied into `templates/basic-game/assets/` for new games). Host-only; not packed into `.wpack` yet.
 
 ## Quick start (Wii)
 

@@ -15,8 +15,13 @@ use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
 
 mod anim;
 mod sprites;
+mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
+pub use wav::{
+    inspect_wav, list_wav_clips, load_pcm16_wav, resolve_wav, spawn_wav_player, write_beep_wav,
+    write_pcm16_wav, WavInfo,
+};
 pub use sprites::{
     grid_by_cell_count, set_sprite_pivot, slice_sheet, ResolvedSprite, SpriteCatalog, SpriteCell,
     SpriteSheetMeta, PixelRect, Pivot,
@@ -122,6 +127,9 @@ impl WPack {
     }
 
     /// Cook every PNG in a directory into this pack.
+    ///
+    /// WAV files are left as `assets/*.wav` for host playback (ARCHITECTURE M3).
+    /// They must not be treated as textures. A Wii/ASND audio TOC is not packed yet.
     pub fn cook_dir(&mut self, dir: &Path) -> Result<Vec<CookWarning>> {
         let mut warnings = Vec::new();
         let mut entries: Vec<_> = fs::read_dir(dir)
@@ -140,6 +148,16 @@ impl WPack {
             if let Some(w) = self.add_png(name, &path)? {
                 warnings.push(w);
             }
+        }
+        let wavs = crate::list_wav_clips(dir).unwrap_or_default();
+        if !wavs.is_empty() {
+            warnings.push(CookWarning {
+                texture: "audio".into(),
+                message: format!(
+                    "{} wav clip(s) stay in assets/ for host playback (Wii ASND TOC not packed yet)",
+                    wavs.len()
+                ),
+            });
         }
         Ok(warnings)
     }

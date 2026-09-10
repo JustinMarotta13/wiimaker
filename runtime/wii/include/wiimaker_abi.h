@@ -46,6 +46,8 @@ uint16_t wiimaker_tex_height(uint32_t tex_id);
 uint32_t wiimaker_tex_count(void);
 void wiimaker_tex_shutdown(void);
 
+/* Audio oneshots are host-only. Wii ASND playback is not implemented. */
+
 #ifdef __cplusplus
 }
 #endif

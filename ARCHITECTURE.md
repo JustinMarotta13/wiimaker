@@ -91,7 +91,7 @@ Offline (`wiimaker-assets` + CLI):
 |---|---|
 | PNG/TGA | RGB5A3 or CMPR tiles, 32-byte aligned |
 | OBJ/glTF | Interleaved POS/NRM/UV as f32 or s16, 32-byte aligned |
-| WAV | Mono/stereo PCM16 (ASND-friendly) |
+| WAV | Mono/stereo PCM16 (ASND-friendly). **Host** plays `assets/*.wav` (validated PCM16; `aplay`/`paplay` when present). `.wpack` audio TOC / Wii ASND is not packed yet. |
 
 A `.wpack` is a tiny TOC + blobs — no runtime parsing of PNG on console.
 

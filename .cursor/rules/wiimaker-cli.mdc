@@ -18,7 +18,7 @@ clap binary in `crates/wiimaker-cli`. Agents build games as: `new` → `asset im
 | Scene | `scene list\|show\|new\|set-default\|build-list\|build-add\|build-remove\|set-clear\|set-game-view` |
 | Editor prefs | `editor prefs` · `editor set-scene-view` |
 | Entity | `entity list\|add\|set\|add-component\|remove\|duplicate\|rename\|set-parent` |
-| Asset | `asset list\|import\|slice\|set-pivot\|list-sprites` |
+| Asset | `asset list\|import\|slice\|set-pivot\|list-sprites\|anim\|list-anims\|list-wavs\|play` |
 
 Global `--json` must work on mutating and query commands for machine output.
 

@@ -1,10 +1,11 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
-    add_component_animation, add_component_camera, add_component_collider, add_component_disc,
-    add_component_grid_mover, add_component_sprite, add_component_tilemap, remove_component_animation,
-    remove_component_camera, remove_component_collider, remove_component_disc,
-    remove_component_grid_mover, remove_component_sprite, remove_component_tilemap, save_project,
-    set_component_enabled, tilemap_resize, SceneColliderKind, SceneDir,
+    add_component_animation, add_component_audio_source, add_component_camera, add_component_collider,
+    add_component_disc, add_component_grid_mover, add_component_sprite, add_component_tilemap,
+    remove_component_animation, remove_component_audio_source, remove_component_camera,
+    remove_component_collider, remove_component_disc, remove_component_grid_mover,
+    remove_component_sprite, remove_component_tilemap, save_project, set_component_enabled,
+    tilemap_resize, SceneColliderKind, SceneDir,
 };
 
 use crate::app::EditorApp;
@@ -55,6 +56,7 @@ impl EditorApp {
         let mut add_animation = false;
         let mut add_camera = false;
         let mut add_grid_mover = false;
+        let mut add_audio_source = false;
         let mut remove_sprite = false;
         let mut remove_disc = false;
         let mut remove_tilemap = false;
@@ -62,6 +64,7 @@ impl EditorApp {
         let mut remove_animation = false;
         let mut remove_camera = false;
         let mut remove_grid_mover = false;
+        let mut remove_audio_source = false;
         let mut toggle_sprite: Option<bool> = None;
         let mut toggle_disc: Option<bool> = None;
         let mut toggle_tilemap: Option<bool> = None;
@@ -69,6 +72,8 @@ impl EditorApp {
         let mut toggle_animation: Option<bool> = None;
         let mut toggle_camera: Option<bool> = None;
         let mut toggle_grid_mover: Option<bool> = None;
+        let mut toggle_audio_source: Option<bool> = None;
+        let mut preview_audio = false;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
@@ -561,6 +566,75 @@ impl EditorApp {
                 ui.add_space(4.0);
             }
 
+            if let Some(a) = ent.components.audio_source.as_mut() {
+                let hdr = theme::component_card_header(
+                    ui,
+                    "audiosource",
+                    "AudioSource",
+                    Some(a.enabled),
+                    true,
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_audio_source = Some(en);
+                }
+                if hdr.remove {
+                    remove_audio_source = true;
+                }
+                if hdr.open {
+                theme::inspector_props().show(ui, |ui| {
+                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                    let mut clip_changed = false;
+                    let mut new_clip = a.clip.clone();
+                    egui::ComboBox::from_id_salt("audio_clip")
+                        .selected_text(if a.clip.is_empty() { "(none)" } else { &a.clip })
+                        .width(combo_w)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(a.clip.is_empty(), "(none)")
+                                .clicked()
+                            {
+                                new_clip.clear();
+                                clip_changed = true;
+                            }
+                            for name in &self.wav_names {
+                                if ui.selectable_label(a.clip == *name, name).clicked() {
+                                    new_clip = name.clone();
+                                    clip_changed = true;
+                                }
+                            }
+                        });
+                    if clip_changed {
+                        a.clip = new_clip;
+                        dirty = true;
+                    }
+                    dirty |= theme::labeled_drag(ui, "Volume", &mut a.volume, 0.01);
+                    if a.volume < 0.0 {
+                        a.volume = 0.0;
+                    }
+                    if a.volume > 1.0 {
+                        a.volume = 1.0;
+                    }
+                    dirty |= ui.checkbox(&mut a.play_on_awake, "Play On Awake").changed();
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("Play").color(theme::TEXT))
+                                .fill(theme::ACCENT_DIM),
+                        )
+                        .on_hover_text("Host oneshot preview")
+                        .clicked()
+                    {
+                        preview_audio = true;
+                    }
+                    ui.label(
+                        RichText::new("Host PCM16 WAV · Wii ASND not wired")
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
+                });
+                }
+                ui.add_space(4.0);
+            }
+
 
             let missing_sprite = ent.components.sprite.is_none();
             let missing_disc = ent.components.disc.is_none();
@@ -569,6 +643,7 @@ impl EditorApp {
             let missing_animation = ent.components.animation.is_none();
             let missing_camera = ent.components.camera.is_none();
             let missing_grid_mover = ent.components.grid_mover.is_none();
+            let missing_audio_source = ent.components.audio_source.is_none();
             ui.add_space(12.0);
             let add_w = ui.available_width();
             ui.allocate_ui_with_layout(
@@ -607,6 +682,10 @@ impl EditorApp {
                         add_grid_mover = true;
                         ui.close_menu();
                     }
+                    if missing_audio_source && ui.button("AudioSource").clicked() {
+                        add_audio_source = true;
+                        ui.close_menu();
+                    }
                     if !missing_sprite
                         && !missing_disc
                         && !missing_tilemap
@@ -614,6 +693,7 @@ impl EditorApp {
                         && !missing_animation
                         && !missing_camera
                         && !missing_grid_mover
+                        && !missing_audio_source
                     {
                         ui.label(
                             RichText::new("All components present")
@@ -846,6 +926,42 @@ impl EditorApp {
                 let _ = self.undo.undo(&mut self.scene);
             }
         }
+        if add_audio_source {
+            let clip = self.wav_names.first().cloned().unwrap_or_default();
+            self.push_undo();
+            let _ = add_component_audio_source(&mut self.scene, &sel, &clip, 1.0, false);
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_audio_source {
+            self.push_undo();
+            if remove_component_audio_source(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_audio_source {
+            self.push_undo();
+            if set_component_enabled(&mut self.scene, &sel, "audiosource", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if preview_audio {
+            if let Some(a) = self
+                .scene
+                .find_entity(&sel)
+                .and_then(|e| e.components.audio_source.as_ref())
+            {
+                let clip = a.clip.clone();
+                let vol = a.volume;
+                self.preview_wav_clip(&clip, vol);
+            }
+        }
 
         if let Some((w, h)) = pending_tm_resize {
             self.begin_inspector_gesture();
@@ -1011,6 +1127,19 @@ impl EditorApp {
                 if ui.button("Open Build Settings…").clicked() {
                     self.show_build_settings = true;
                 }
+            } else if ext == "wav" {
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new("Play").strong()).fill(theme::ACCENT_DIM),
+                    )
+                    .on_hover_text("Preview this WAV on the host")
+                    .clicked()
+                {
+                    if let Some(stem) = rel.file_stem().and_then(|s| s.to_str()) {
+                        self.preview_wav_clip(stem, 1.0);
+                    }
+                }
+                theme::muted(ui, "PCM16 mono/stereo oneshot · not packed into .wpack yet");
             } else if abs.is_dir() {
                 theme::muted(ui, "Folder — select a file for actions");
             } else {
