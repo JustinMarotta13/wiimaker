@@ -248,6 +248,8 @@ pub struct SceneComponents {
     pub animation: Option<SceneAnimation>,
     #[serde(default, rename = "GridMover", skip_serializing_if = "Option::is_none")]
     pub grid_mover: Option<SceneGridMover>,
+    #[serde(default, rename = "AudioSource", skip_serializing_if = "Option::is_none")]
+    pub audio_source: Option<SceneAudioSource>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -593,6 +595,53 @@ impl SceneGridMover {
             cell: if cell <= 0.0 { default_grid_cell() } else { cell },
             speed: speed.max(0.0),
             queued_dir: None,
+            enabled: true,
+        }
+    }
+}
+
+/// Host-first oneshot clip (Unity AudioSource analogue). Not in WSCN.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SceneAudioSource {
+    /// `assets/<clip>.wav` stem (or `name.wav`).
+    #[serde(default)]
+    pub clip: String,
+    #[serde(
+        default = "default_audio_volume",
+        skip_serializing_if = "is_default_audio_volume"
+    )]
+    pub volume: f32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub play_on_awake: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+}
+
+fn default_audio_volume() -> f32 {
+    1.0
+}
+
+fn is_default_audio_volume(v: &f32) -> bool {
+    (*v - 1.0).abs() < 1e-6
+}
+
+impl Default for SceneAudioSource {
+    fn default() -> Self {
+        Self {
+            clip: String::new(),
+            volume: default_audio_volume(),
+            play_on_awake: false,
+            enabled: true,
+        }
+    }
+}
+
+impl SceneAudioSource {
+    pub fn new(clip: impl Into<String>, volume: f32, play_on_awake: bool) -> Self {
+        Self {
+            clip: clip.into(),
+            volume: volume.clamp(0.0, 1.0),
+            play_on_awake,
             enabled: true,
         }
     }

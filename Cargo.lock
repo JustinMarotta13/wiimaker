@@ -3972,6 +3972,7 @@ dependencies = [
 name = "wiimaker-host"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "minifb",
  "wiimaker-assets",
  "wiimaker-core",

@@ -1,5 +1,6 @@
-//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation).
+//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/AudioSource).
 
+use crate::audio::{AudioSource, Oneshot};
 use crate::collider::Collider;
 use crate::color::Rgba8;
 use crate::draw::{Rect, TextureId};
@@ -179,17 +180,22 @@ struct Slot {
     collider: Option<Collider>,
     animation: Option<Animation>,
     grid_mover: Option<GridMover>,
+    audio_source: Option<AudioSource>,
 }
 
 /// Tiny entity world — Unity GameObject feel without a full ECS.
 #[derive(Clone, Debug, Default)]
 pub struct World {
     slots: Vec<Slot>,
+    pending_oneshots: Vec<Oneshot>,
 }
 
 impl World {
     pub fn new() -> Self {
-        Self { slots: Vec::new() }
+        Self {
+            slots: Vec::new(),
+            pending_oneshots: Vec::new(),
+        }
     }
 
     pub fn spawn(&mut self, transform: Transform) -> EntityId {
@@ -211,6 +217,7 @@ impl World {
             slot.collider = None;
             slot.animation = None;
             slot.grid_mover = None;
+            slot.audio_source = None;
             return EntityId(idx as u32);
         }
         let id = EntityId(self.slots.len() as u32);
@@ -227,6 +234,7 @@ impl World {
             collider: None,
             animation: None,
             grid_mover: None,
+            audio_source: None,
         });
         id
     }
@@ -239,6 +247,7 @@ impl World {
 
     pub fn clear(&mut self) {
         self.slots.clear();
+        self.pending_oneshots.clear();
     }
 
     pub fn find_by_name(&self, name: &str) -> Option<EntityId> {
@@ -514,6 +523,31 @@ impl World {
         if let Some(slot) = self.slot_mut(id) {
             slot.grid_mover = grid_mover;
         }
+    }
+
+    pub fn audio_source(&self, id: EntityId) -> Option<&AudioSource> {
+        self.slot(id).and_then(|s| s.audio_source.as_ref())
+    }
+
+    pub fn audio_source_mut(&mut self, id: EntityId) -> Option<&mut AudioSource> {
+        self.slot_mut(id).and_then(|s| s.audio_source.as_mut())
+    }
+
+    pub fn set_audio_source(&mut self, id: EntityId, audio: Option<AudioSource>) {
+        if let Some(slot) = self.slot_mut(id) {
+            slot.audio_source = audio;
+        }
+    }
+
+    /// Queue a host oneshot (`assets/<clip>.wav`). Backends drain via [`Self::drain_oneshots`].
+    pub fn play_oneshot(&mut self, clip: impl Into<String>, volume: f32) {
+        self.pending_oneshots
+            .push(Oneshot::new(clip, volume.clamp(0.0, 1.0)));
+    }
+
+    /// Take pending oneshots (host / editor / CLI). Empty if nothing queued.
+    pub fn drain_oneshots(&mut self) -> Vec<Oneshot> {
+        core::mem::take(&mut self.pending_oneshots)
     }
 
     fn slot(&self, id: EntityId) -> Option<&Slot> {

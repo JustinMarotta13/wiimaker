@@ -389,9 +389,17 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no GridMover"))?;
             g.enabled = enabled;
         }
+        "audiosource" | "audio_source" | "audio-source" | "audio" => {
+            let a = ent
+                .components
+                .audio_source
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no AudioSource"))?;
+            a.enabled = enabled;
+        }
         other => {
             bail!(
-                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|GridMover)"
+                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|GridMover|AudioSource)"
             )
         }
     }
@@ -597,6 +605,57 @@ pub fn set_entity_grid_mover(
         gm.queued_dir = q;
     }
     gm.enabled = true;
+    Ok(())
+}
+
+pub fn add_component_audio_source(
+    scene: &mut Scene,
+    name: &str,
+    clip: &str,
+    volume: f32,
+    play_on_awake: bool,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let mut src = crate::scene::SceneAudioSource::new(clip, volume, play_on_awake);
+    if let Some(prev) = ent.components.audio_source.as_ref() {
+        src.enabled = prev.enabled;
+    }
+    ent.components.audio_source = Some(src);
+    Ok(())
+}
+
+pub fn remove_component_audio_source(scene: &mut Scene, name: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    if ent.components.audio_source.is_none() {
+        bail!("entity '{name}' has no AudioSource");
+    }
+    ent.components.audio_source = None;
+    Ok(())
+}
+
+/// Create or update AudioSource. `None` fields leave the existing value (or defaults).
+pub fn set_entity_audio_source(
+    scene: &mut Scene,
+    name: &str,
+    clip: Option<&str>,
+    volume: Option<f32>,
+    play_on_awake: Option<bool>,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let a = ent
+        .components
+        .audio_source
+        .get_or_insert_with(crate::scene::SceneAudioSource::default);
+    if let Some(c) = clip {
+        a.clip = c.to_string();
+    }
+    if let Some(v) = volume {
+        a.volume = v.clamp(0.0, 1.0);
+    }
+    if let Some(p) = play_on_awake {
+        a.play_on_awake = p;
+    }
+    a.enabled = true;
     Ok(())
 }
 
@@ -869,6 +928,41 @@ mod tests {
             .unwrap()
             .components
             .grid_mover
+            .is_none());
+    }
+
+    #[test]
+    fn audio_source_add_set_remove() {
+        let mut scene = empty_scene();
+        add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
+        add_component_audio_source(&mut scene, "Player", "beep", 0.5, true).unwrap();
+        let a = scene
+            .find_entity("Player")
+            .unwrap()
+            .components
+            .audio_source
+            .as_ref()
+            .unwrap();
+        assert_eq!(a.clip, "beep");
+        assert!((a.volume - 0.5).abs() < 1e-6);
+        assert!(a.play_on_awake);
+        set_entity_audio_source(&mut scene, "Player", Some("hit"), Some(1.0), Some(false)).unwrap();
+        let a = scene
+            .find_entity("Player")
+            .unwrap()
+            .components
+            .audio_source
+            .as_ref()
+            .unwrap();
+        assert_eq!(a.clip, "hit");
+        assert!((a.volume - 1.0).abs() < 1e-6);
+        assert!(!a.play_on_awake);
+        remove_component_audio_source(&mut scene, "Player").unwrap();
+        assert!(scene
+            .find_entity("Player")
+            .unwrap()
+            .components
+            .audio_source
             .is_none());
     }
 }

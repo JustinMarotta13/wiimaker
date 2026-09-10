@@ -3,7 +3,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
-use wiimaker_assets::{list_anim_clips, set_sprite_pivot, slice_sheet, write_anim_clip, SpriteCatalog};
+use wiimaker_assets::{
+    inspect_wav, list_anim_clips, list_wav_clips, resolve_wav, set_sprite_pivot, slice_sheet,
+    spawn_wav_player, write_anim_clip, SpriteCatalog,
+};
 use wiimaker_scene::{find_game_dir, load_project};
 
 use crate::args::AssetCmd;
@@ -46,7 +49,18 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
                     .unwrap_or("tex")
                     .to_string()
             });
-            let dest = assets.join(format!("{stem}.png"));
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let dest = match ext.as_str() {
+                "wav" => assets.join(format!("{stem}.wav")),
+                "png" | "" => assets.join(format!("{stem}.png")),
+                other => anyhow::bail!(
+                    "asset import: expected .png or .wav, got .{other}"
+                ),
+            };
             fs::copy(&path, &dest)
                 .with_context(|| format!("copy {} → {}", path.display(), dest.display()))?;
             if json {
@@ -206,6 +220,78 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
                 for n in names {
                     println!("{n}");
                 }
+            }
+            Ok(())
+        }
+        AssetCmd::ListWavs { game } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let names = list_wav_clips(&assets)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&names)?);
+            } else {
+                for n in names {
+                    println!("{n}");
+                }
+            }
+            Ok(())
+        }
+        AssetCmd::Play {
+            game,
+            name,
+            volume,
+            wait,
+        } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let path = resolve_wav(&assets, &name)?;
+            inspect_wav(&path)?;
+            let disabled = std::env::var("WIIMAKER_AUDIO")
+                .ok()
+                .map(|v| {
+                    let v = v.trim();
+                    v == "0" || v.eq_ignore_ascii_case("off") || v.eq_ignore_ascii_case("false")
+                })
+                .unwrap_or(false);
+            let skipped = if disabled {
+                true
+            } else {
+                spawn_wav_player(&path)?.is_none()
+            };
+            if wait && !skipped {
+                if let Ok(info) = inspect_wav(&path) {
+                    let secs = info.duration_secs().min(5.0);
+                    if secs > 0.0 {
+                        std::thread::sleep(std::time::Duration::from_secs_f32(secs + 0.05));
+                    }
+                }
+            }
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    played: String,
+                    path: String,
+                    volume: f32,
+                    skipped: bool,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Out {
+                        played: name,
+                        path: path.display().to_string(),
+                        volume,
+                        skipped,
+                    })?
+                );
+            } else if skipped {
+                println!(
+                    "audio skipped (no device / WIIMAKER_AUDIO=0) {}",
+                    path.display()
+                );
+            } else {
+                println!("played {} ({})", name, path.display());
             }
             Ok(())
         }

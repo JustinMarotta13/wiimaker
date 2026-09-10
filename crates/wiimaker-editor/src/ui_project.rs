@@ -29,7 +29,7 @@ impl EditorApp {
                         }
                     });
                 });
-                theme::muted(ui, "Drop PNG files anywhere to import + prepare assets");
+                theme::muted(ui, "Drop PNG or WAV files anywhere to import");
                 // Prefab quick actions stay above the scroll list so Instantiate is always visible.
                 let prefabs: Vec<_> = self
                     .project_entries
@@ -159,6 +159,20 @@ impl EditorApp {
             {
                 self.open_sprite_editor_stem = Some(stem);
             }
+        } else if name.ends_with(".anim.json") {
+            if let Some(stem) = entry.rel.file_stem().and_then(|s| s.to_str()) {
+                self.status = format!("anim clip · {stem}");
+            }
+        } else if entry
+            .rel
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("wav"))
+            == Some(true)
+        {
+            if let Some(stem) = entry.rel.file_stem().and_then(|s| s.to_str()) {
+                self.preview_wav_clip(stem, 1.0);
+            }
         }
     }
 
@@ -180,6 +194,20 @@ impl EditorApp {
         if entry.rel.to_string_lossy().ends_with(".prefab.json") {
             if ui.button("Instantiate in scene").clicked() {
                 self.instantiate_prefab_rel(&entry.rel);
+                ui.close_menu();
+            }
+        }
+        if entry
+            .rel
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("wav"))
+            == Some(true)
+        {
+            if ui.button("Play preview").clicked() {
+                if let Some(stem) = entry.rel.file_stem().and_then(|s| s.to_str()) {
+                    self.preview_wav_clip(stem, 1.0);
+                }
                 ui.close_menu();
             }
         }
@@ -458,6 +486,7 @@ fn entry_visuals(entry: &ProjectEntry, is_open_scene: bool) -> (&'static str, Co
     } else {
         match entry.rel.extension().and_then(|e| e.to_str()) {
             Some("png") => ("~", theme::TEXT, "PNG"),
+            Some("wav") => (">", theme::ACCENT, "WAV"),
             Some("toml") => ("@", theme::TEXT, "TOML"),
             Some("json") => ("=", theme::TEXT, "JSON"),
             Some("wpack") => ("$", theme::TEXT, "Pack"),
@@ -523,6 +552,7 @@ pub(crate) fn file_kind_label(rel: &Path, is_dir: bool) -> &'static str {
     } else {
         match rel.extension().and_then(|e| e.to_str()) {
             Some("png") => "PNG texture",
+            Some("wav") => "WAV oneshot",
             Some("json") => "JSON",
             Some("toml") => "TOML",
             Some("wpack") => "Asset pack",

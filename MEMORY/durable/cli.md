@@ -17,6 +17,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - Collider / Trigger: `entity add-component … Collider|--trigger|--filter` or kind `Trigger`; `entity triggers <game> <name>`; `entity despawn <game> <name>`; `entity set --tag N`.
 - Camera / Follow: `entity add-component <game> --name Cam Camera` · `Follow --target Player --lerp 0.15`. Same mutate helpers as the editor.
 - GridMover: `entity add-component <game> --name Player GridMover --cell 20 --speed 6 [--queued-dir Right]`. `entity set --name Player --cell --speed --queued-dir` creates/updates (empty `--queued-dir ""` clears queue). Diagonals use horizontal axis only.
+- AudioSource: `entity add-component <game> --name Player AudioSource --clip beep --volume 1 --play-on-awake false`. `entity set --audio-clip --volume --play-on-awake`. `asset import` copies `.wav`; `asset play --name beep` (`--json` includes `skipped` when no device / `WIIMAKER_AUDIO=0`). `asset list-wavs`.
 - `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
 - `scene set-game-view <game> [--width --height] [--aspect free|fixed] [--preset free|640x480|16:9|4:3|custom] [--scale]` writes `.wiimaker/prefs.toml` (same as Game tab).
 - `editor prefs <game>` dumps Scene/Game chrome; `editor set-scene-view` sets zoom/pan/grid/gizmos/snap (`--json`). Move-tool axis handles are editor-only (CLI n/a).
