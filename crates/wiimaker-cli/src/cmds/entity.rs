@@ -12,8 +12,8 @@ use wiimaker_scene::{
     remove_component_grid_mover, remove_component_sprite, remove_component_tilemap, remove_entity,
     rename_entity, save_prefab, save_scene, set_component_enabled, set_entity_anim,
     set_entity_audio_source, set_entity_follow, set_entity_grid_mover, set_entity_parent,
-    set_entity_rotation_z, set_entity_scale, set_entity_transform, unpack_prefab_instance,
-    MutateOpts, Scene, SceneColliderKind, SceneDir,
+    set_entity_rotation_z, set_entity_scale, set_entity_sorting, set_entity_transform,
+    unpack_prefab_instance, MutateOpts, Scene, SceneColliderKind, SceneDir,
 };
 
 use crate::args::EntityCmd;
@@ -81,9 +81,11 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             audio_clip,
             volume,
             play_on_awake,
+            sorting_layer,
+            order_in_layer,
             scene,
         } => {
-            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            let (_gd, project, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             if x.is_none()
                 && y.is_none()
                 && sx.is_none()
@@ -98,8 +100,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 && audio_clip.is_none()
                 && volume.is_none()
                 && play_on_awake.is_none()
+                && sorting_layer.is_none()
+                && order_in_layer.is_none()
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --sorting-layer --order-in-layer");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -143,6 +147,17 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     audio_clip.as_deref(),
                     volume,
                     play_on_awake,
+                )?;
+            }
+            if sorting_layer.is_some() || order_in_layer.is_some() {
+                if let Some(layer) = sorting_layer.as_deref() {
+                    wiimaker_scene::require_sorting_layer(&project, layer)?;
+                }
+                set_entity_sorting(
+                    &mut sc,
+                    &name,
+                    sorting_layer.as_deref(),
+                    order_in_layer,
                 )?;
             }
             save_scene(&path, &sc)?;

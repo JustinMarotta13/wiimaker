@@ -6,6 +6,7 @@ use crate::color::Rgba8;
 use crate::draw::{Rect, TextureId};
 use crate::grid_mover::GridMover;
 use crate::math::{Quat, Vec2, Vec3};
+use crate::sorting::{default_sorting_layer_index, default_sorting_layers};
 use crate::tilemap::Tilemap;
 
 /// Host / scene framebuffer size (Wii VI analogue for v0 ortho).
@@ -62,7 +63,10 @@ pub struct Sprite {
     /// Normalized pivot in sprite space (`0.5, 0.5` = center).
     pub pivot: Vec2,
     pub color: Rgba8,
+    /// Order in layer (Unity Order in Layer). Combined with [`Sprite::sorting_layer`].
     pub z: f32,
+    /// Index into [`World::sorting_layers`] (Unity Sorting Layer).
+    pub sorting_layer: u16,
 }
 
 impl Sprite {
@@ -74,6 +78,7 @@ impl Sprite {
             pivot: Vec2::new(0.5, 0.5),
             color: Rgba8::WHITE,
             z: 0.0,
+            sorting_layer: default_sorting_layer_index(),
         }
     }
 }
@@ -83,7 +88,10 @@ impl Sprite {
 pub struct Disc {
     pub radius: f32,
     pub color: Rgba8,
+    /// Order in layer (Unity Order in Layer). Combined with [`Disc::sorting_layer`].
     pub z: f32,
+    /// Index into [`World::sorting_layers`] (Unity Sorting Layer).
+    pub sorting_layer: u16,
 }
 
 impl Disc {
@@ -92,6 +100,7 @@ impl Disc {
             radius,
             color,
             z: 0.0,
+            sorting_layer: default_sorting_layer_index(),
         }
     }
 }
@@ -184,10 +193,18 @@ struct Slot {
 }
 
 /// Tiny entity world — Unity GameObject feel without a full ECS.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct World {
     slots: Vec<Slot>,
     pending_oneshots: Vec<Oneshot>,
+    /// Ordered sorting layer names (Unity Tags & Layers). Index is draw order.
+    sorting_layers: Vec<String>,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl World {
@@ -195,6 +212,7 @@ impl World {
         Self {
             slots: Vec::new(),
             pending_oneshots: Vec::new(),
+            sorting_layers: default_sorting_layers(),
         }
     }
 
@@ -248,6 +266,26 @@ impl World {
     pub fn clear(&mut self) {
         self.slots.clear();
         self.pending_oneshots.clear();
+        // Keep sorting_layers so hydrate can set the table then clear slots.
+    }
+
+    /// Ordered sorting layer names. Empty should not happen (`new` fills defaults).
+    pub fn sorting_layers(&self) -> &[String] {
+        &self.sorting_layers
+    }
+
+    /// Replace the layer table. Empty input restores built-in defaults.
+    pub fn set_sorting_layers(&mut self, layers: Vec<String>) {
+        if layers.is_empty() {
+            self.sorting_layers = default_sorting_layers();
+        } else {
+            self.sorting_layers = layers;
+        }
+    }
+
+    /// Resolve a scene layer name against this world's table.
+    pub fn sorting_layer_index(&self, name: &str) -> u16 {
+        crate::sorting::sorting_layer_index(&self.sorting_layers, name)
     }
 
     pub fn find_by_name(&self, name: &str) -> Option<EntityId> {

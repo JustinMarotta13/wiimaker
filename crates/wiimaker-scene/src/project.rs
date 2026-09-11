@@ -22,6 +22,9 @@ pub struct GameProject {
     /// Ordered Scenes in Build list (`game.toml` `scenes = [...]`). Empty = unset.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scenes: Vec<String>,
+    /// Unity Sorting Layers (`game.toml` `sorting_layers = [...]`). Empty = built-in defaults.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sorting_layers: Vec<String>,
 }
 
 fn default_title() -> String {
@@ -51,6 +54,7 @@ impl GameProject {
             wpack: default_wpack(),
             wscn: default_wscn(),
             scenes: Vec::new(),
+            sorting_layers: Vec::new(),
         }
     }
 
@@ -68,6 +72,15 @@ impl GameProject {
 
     pub fn wscn_path(&self, game_dir: &Path) -> PathBuf {
         game_dir.join(&self.wscn)
+    }
+
+    /// Ordered sorting layer names. Empty `game.toml` list → Background / Default / Foreground.
+    pub fn effective_sorting_layers(&self) -> Vec<String> {
+        if self.sorting_layers.is_empty() {
+            wiimaker_core::default_sorting_layers()
+        } else {
+            self.sorting_layers.clone()
+        }
     }
 }
 

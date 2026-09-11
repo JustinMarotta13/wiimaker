@@ -2,12 +2,12 @@
 
 use std::path::PathBuf;
 
-use wiimaker_assets::SpriteCatalog;
+use wiimaker_assets::{AnimClipCatalog, SpriteCatalog};
 use wiimaker_core::app::{App, FrameCtx};
 use wiimaker_core::draw::DrawList;
 use wiimaker_core::world::World;
 use wiimaker_host::{load_atlas_for_project, run_with_atlas, HostAudio, TextureAtlas};
-use wiimaker_scene::{hydrate_with_catalog, load_project, load_scene, render_world};
+use wiimaker_scene::{load_project, load_scene_into_world, render_world};
 
 struct Game {
     title: String,
@@ -22,16 +22,25 @@ impl Game {
         let game_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let project = load_project(&game_dir)?;
         let atlas = load_atlas_for_project(&game_dir, &project)?;
-        let scene = load_scene(&project.scene_path(&game_dir))?;
         let assets = project.assets_path(&game_dir);
         let catalog = SpriteCatalog::load_dir(&assets, |stem| atlas.size_of(stem))?;
-        let mut world = hydrate_with_catalog(&scene, atlas.map(), Some(&catalog))?;
+        let anims = AnimClipCatalog::load_dir(&assets)?;
+        let mut world = World::new();
+        let clear = load_scene_into_world(
+            &mut world,
+            &game_dir,
+            &project,
+            "",
+            atlas.map(),
+            Some(&catalog),
+            Some(&anims),
+        )?;
         world.queue_awake_audio();
         Ok((
             Self {
                 title: project.title.clone(),
                 world,
-                clear: scene.clear_rgba(),
+                clear,
                 audio: HostAudio::new(),
                 assets,
             },

@@ -3,3 +3,4 @@ title = "wiimaker · {{name}}"
 default_scene = "scenes/main.scene.json"
 assets_dir = "assets"
 wpack = "assets.wpack"
+sorting_layers = ["Background", "Default", "Foreground"]

@@ -11,7 +11,7 @@ use wiimaker_core::world::World;
 use wiimaker_host::{HostAudio, PlayOutcome, TextureAtlas, Framebuffer};
 use wiimaker_scene::{
     add_build_scene, add_component_sprite, animate_world, create_named_scene, diagnose,
-    duplicate_entity, find_game_dir, hydrate_lenient_with_catalogs, insert_entity_clone,
+    duplicate_entity, find_game_dir, hydrate_lenient_with_sorting_layers, insert_entity_clone,
     list_scenes, load_editor_prefs, load_project, load_scene, remove_build_scene, rename_entity,
     save_editor_prefs, save_scene, set_default_scene, EditorPrefs, EntityData, GameProject, Scene,
     Severity, TranslateHandle, UndoStack,
@@ -141,6 +141,10 @@ pub(crate) struct EditorApp {
     pub(crate) build_settings_pick: Option<String>,
     /// Combo draft for adding a discovered scene to the build list.
     pub(crate) build_add_draft: String,
+    /// Draft name for a new Sorting Layer (game.toml inspector).
+    pub(crate) sorting_layer_draft: String,
+    /// Selected Sorting Layer row (for rename).
+    pub(crate) sorting_layer_pick: String,
     /// Unused: dock splitters own leaf size now.
     #[allow(dead_code)]
     pub(crate) project_panel_height: f32,
@@ -213,6 +217,8 @@ impl EditorApp {
             show_build_settings: false,
             build_settings_pick: None,
             build_add_draft: String::new(),
+            sorting_layer_draft: String::new(),
+            sorting_layer_pick: String::new(),
             project_panel_height: 200.0,
             hierarchy_width: 240.0,
             inspector_width: 300.0,
@@ -434,6 +440,75 @@ impl EditorApp {
         }
     }
 
+    pub(crate) fn add_project_sorting_layer(&mut self, name: &str) {
+        match wiimaker_scene::add_sorting_layer(&self.game_dir, name, None) {
+            Ok(_) => {
+                self.reload_project();
+                self.sorting_layer_draft.clear();
+                self.rehydrate();
+                self.log_line(ConsoleLevel::Info, format!("sorting layers += {name}"));
+            }
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("sorting layer add: {e}")),
+        }
+    }
+
+    pub(crate) fn rename_project_sorting_layer(&mut self, from: &str, to: &str) {
+        match wiimaker_scene::rename_sorting_layer(
+            &self.game_dir,
+            from,
+            to,
+            Some(&self.scene_path),
+        ) {
+            Ok(_) => {
+                let n = wiimaker_scene::remap_scene_sorting_layer(&mut self.scene, from, to);
+                if n > 0 {
+                    self.dirty = true;
+                }
+                self.reload_project();
+                self.rehydrate();
+                self.log_line(
+                    ConsoleLevel::Info,
+                    format!("sorting layer '{from}' → '{to}'"),
+                );
+            }
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("sorting layer rename: {e}")),
+        }
+    }
+
+    pub(crate) fn move_project_sorting_layer(&mut self, name: &str, index: usize) {
+        match wiimaker_scene::move_sorting_layer(&self.game_dir, name, index) {
+            Ok(_) => {
+                self.reload_project();
+                self.rehydrate();
+                self.log_line(
+                    ConsoleLevel::Info,
+                    format!("sorting layer '{name}' → {index}"),
+                );
+            }
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("sorting layer move: {e}")),
+        }
+    }
+
+    pub(crate) fn remove_project_sorting_layer(&mut self, name: &str) {
+        match wiimaker_scene::remove_sorting_layer(&self.game_dir, name, Some(&self.scene_path))
+        {
+            Ok(_) => {
+                let n = wiimaker_scene::remap_scene_sorting_layer(
+                    &mut self.scene,
+                    name,
+                    wiimaker_core::DEFAULT_SORTING_LAYER,
+                );
+                if n > 0 {
+                    self.dirty = true;
+                }
+                self.reload_project();
+                self.rehydrate();
+                self.log_line(ConsoleLevel::Info, format!("sorting layers -= {name}"));
+            }
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("sorting layer remove: {e}")),
+        }
+    }
+
     pub(crate) fn open_build_scene_rel(&mut self, rel: &str) {
         self.request_open_scene(self.game_dir.join(rel));
     }
@@ -475,11 +550,13 @@ impl EditorApp {
     }
 
     pub(crate) fn rehydrate(&mut self) {
-        self.world = hydrate_lenient_with_catalogs(
+        let layers = self.project.effective_sorting_layers();
+        self.world = hydrate_lenient_with_sorting_layers(
             &self.scene,
             self.atlas.map(),
             Some(&self.catalog),
             Some(&self.anim_catalog),
+            Some(&layers),
         );
     }
 

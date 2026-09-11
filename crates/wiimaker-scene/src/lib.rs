@@ -11,6 +11,7 @@ mod prefs;
 mod project;
 mod render;
 mod scene;
+mod sorting;
 mod tilemap;
 mod undo;
 mod wscn;
@@ -24,7 +25,8 @@ pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use gizmo::{constrain_translate, MoveHandleLayout, TranslateHandle};
 pub use hydrate::{
     hydrate, hydrate_into, hydrate_into_with_catalog, hydrate_into_with_catalogs, hydrate_lenient,
-    hydrate_lenient_with_catalog, hydrate_lenient_with_catalogs, hydrate_with_catalog,
+    hydrate_lenient_with_catalog, hydrate_lenient_with_catalogs, hydrate_lenient_with_sorting_layers,
+    hydrate_with_catalog,
     hydrate_with_catalogs, load_scene_into_world, TextureMap,
 };
 pub use mutate::{
@@ -37,7 +39,10 @@ pub use mutate::{
     set_entity_parent, set_entity_rotation_z, set_entity_scale, set_entity_transform,
     set_entity_world_xy, set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
-pub use pick::{pick_entity_at, pick_entity_at_with_catalog, pointer_to_scene};
+pub use pick::{
+    pick_entity_at, pick_entity_at_with_catalog, pick_entity_at_with_catalog_and_layers,
+    pointer_to_scene,
+};
 pub use prefs::{
     apply_game_view, apply_scene_view, editor_prefs_path, fitted_blit_rect, infer_game_view_preset,
     load_editor_prefs, save_editor_prefs, scene_blit_rect, set_game_view, set_scene_view,
@@ -50,15 +55,22 @@ pub use project::{
 };
 pub use render::{render_world, render_world_ex};
 pub use scene::{
-    load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab, Scene, SceneAnimation,
-    SceneAudioSource, SceneCamera, SceneCollider, SceneColliderKind, SceneComponents, SceneDir, SceneDisc,
-    SceneGridMover, SceneSprite, SceneTilePalette, SceneTilemap, SceneTransform,
+    display_sorting_layer, load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab,
+    Scene, SceneAnimation, SceneAudioSource, SceneCamera, SceneCollider, SceneColliderKind,
+    SceneComponents, SceneDir, SceneDisc, SceneGridMover, SceneSprite, SceneTilePalette,
+    SceneTilemap, SceneTransform,
+};
+pub use sorting::{
+    add_sorting_layer, entity_max_sorting_key, list_sorting_layers, move_sorting_layer,
+    remap_scene_sorting_layer, remove_sorting_layer, rename_sorting_layer, require_sorting_layer,
+    set_entity_sorting, validate_sorting_layer_name,
 };
 pub use tilemap::{
     add_component_tilemap, ensure_tilemap, remove_component_tilemap, tilemap_fill,
     tilemap_get_cell, tilemap_resize, tilemap_set_cell, tilemap_stamp, tilemap_stamp_ascii,
 };
 pub use undo::UndoStack;
+pub use wiimaker_core::{DEFAULT_SORTING_LAYER, DEFAULT_SORTING_LAYERS};
 pub use wscn::{
     bake_scene_wscn, bake_scene_wscn_with_catalog, write_scene_wscn, write_scene_wscn_with_catalog,
     KIND_DISC, KIND_NONE, KIND_SPRITE, KIND_TILEMAP, WSCN_MAGIC,

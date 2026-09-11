@@ -4,7 +4,7 @@ use wiimaker_core::draw::DrawList;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
-    constrain_translate, fitted_blit_rect, pick_entity_at_with_catalog, pointer_to_scene,
+    constrain_translate, fitted_blit_rect, pick_entity_at_with_catalog_and_layers, pointer_to_scene,
     render_world_ex, scene_blit_rect, set_entity_rotation_z, set_entity_scale, set_entity_world_xy,
     tilemap_set_cell, GameViewAspect, GameViewPreset, MoveHandleLayout, Scene, TranslateHandle,
 };
@@ -384,7 +384,14 @@ impl EditorApp {
         };
 
         let pick_at = |app: &Self, pos: [f32; 2]| -> Option<(String, [f32; 2])> {
-            let name = pick_entity_at_with_catalog(&app.scene, pos[0], pos[1], Some(&app.catalog))?;
+            let layers = app.project.effective_sorting_layers();
+            let name = pick_entity_at_with_catalog_and_layers(
+                &app.scene,
+                pos[0],
+                pos[1],
+                Some(&app.catalog),
+                &layers,
+            )?;
             let world = app.scene.world_transform(&name)?;
             let grab_offset = [pos[0] - world.translation[0], pos[1] - world.translation[1]];
             Some((name, grab_offset))
@@ -653,14 +660,19 @@ impl EditorApp {
                     }
                 }
             }
-            pick_entity_at_with_catalog(&app.scene, pos[0], pos[1], Some(&app.catalog)).and_then(
-                |name| {
-                    app.scene
-                        .find_entity(&name)
-                        .and_then(|e| e.components.tilemap.as_ref())
-                        .map(|_| name)
-                },
+            pick_entity_at_with_catalog_and_layers(
+                &app.scene,
+                pos[0],
+                pos[1],
+                Some(&app.catalog),
+                &app.project.effective_sorting_layers(),
             )
+            .and_then(|name| {
+                app.scene
+                    .find_entity(&name)
+                    .and_then(|e| e.components.tilemap.as_ref())
+                    .map(|_| name)
+            })
         };
 
         if response.clicked() && self.edit_tool == EditTool::Pick {

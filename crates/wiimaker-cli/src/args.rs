@@ -67,6 +67,11 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: EditorCmd,
     },
+    /// Project Sorting Layers (Unity Tags & Layers analogue)
+    SortingLayer {
+        #[command(subcommand)]
+        cmd: SortingLayerCmd,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -158,6 +163,43 @@ pub enum EditorCmd {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum SortingLayerCmd {
+    /// Print `game.toml` sorting_layers (defaults if omitted)
+    List { game: String },
+    /// Append or insert a named layer
+    Add {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// Insert at this index (0 = back / drawn first). Omit to append.
+        #[arg(long)]
+        index: Option<usize>,
+    },
+    /// Rename a layer and remap scene/prefab assignments
+    Rename {
+        game: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+    },
+    /// Reorder a layer (`--index 0` draws first)
+    Move {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        index: usize,
+    },
+    /// Remove a layer (not Default); assignments remap to Default
+    Remove {
+        game: String,
+        #[arg(long)]
+        name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum EntityCmd {
     List {
         game: String,
@@ -223,6 +265,12 @@ pub enum EntityCmd {
         /// AudioSource play-on-awake
         #[arg(long, action = clap::ArgAction::Set)]
         play_on_awake: Option<bool>,
+        /// Sorting Layer name (Sprite/Disc/Tilemap). Empty string = Default.
+        #[arg(long)]
+        sorting_layer: Option<String>,
+        /// Order in Layer (component `z` within the sorting layer)
+        #[arg(long, visible_alias = "z")]
+        order_in_layer: Option<f32>,
         #[arg(long)]
         scene: Option<String>,
     },
