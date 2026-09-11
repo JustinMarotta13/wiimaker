@@ -13,6 +13,7 @@ pub mod draw;
 pub mod grid_mover;
 pub mod input;
 pub mod math;
+pub mod sorting;
 pub mod tilemap;
 pub mod time;
 pub mod world;
@@ -27,6 +28,10 @@ pub use color::Rgba8;
 pub use draw::{DrawCmd, DrawList, MeshId, Rect, TextureId};
 pub use grid_mover::{cardinal, cell_center, step_grid_movers, Dir, GridMover, CARDINAL_DEADZONE};
 pub use input::{Button, Input, Stick};
+pub use sorting::{
+    cmp_sorting, default_sorting_layer_index, default_sorting_layers, is_default_sorting_layer_name,
+    sorting_layer_index, DEFAULT_SORTING_LAYER, DEFAULT_SORTING_LAYERS,
+};
 pub use tilemap::{
     tile_get, tile_solid, tile_solid_world, world_to_cell, world_to_cell_on, TileVisual, Tilemap,
 };

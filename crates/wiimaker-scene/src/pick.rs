@@ -4,6 +4,7 @@
 //! disc is a circle centered on transform XY with radius scaled by max(sx, sy).
 
 use wiimaker_assets::SpriteCatalog;
+use wiimaker_core::{cmp_sorting, default_sorting_layers, sorting_layer_index};
 
 use crate::scene::{EntityData, Scene};
 
@@ -43,32 +44,61 @@ pub fn pick_entity_at_with_catalog(
     sy: f32,
     catalog: Option<&SpriteCatalog>,
 ) -> Option<String> {
-    let mut best: Option<(usize, f32, String)> = None;
+    let layers = default_sorting_layers();
+    pick_entity_at_with_catalog_and_layers(scene, sx, sy, catalog, &layers)
+}
+
+/// Like [`pick_entity_at_with_catalog`], using the project's Sorting Layer list.
+pub fn pick_entity_at_with_catalog_and_layers(
+    scene: &Scene,
+    sx: f32,
+    sy: f32,
+    catalog: Option<&SpriteCatalog>,
+    layers: &[String],
+) -> Option<String> {
+    let mut best: Option<(usize, u16, f32, String)> = None;
     for (idx, ent) in scene.entities.iter().enumerate() {
-        if let Some(z) = entity_hit_z(scene, ent, sx, sy, catalog) {
+        if let Some((layer, z)) = entity_hit_key(scene, ent, sx, sy, catalog, layers) {
             let better = match &best {
                 None => true,
-                Some((bi, bz, _)) => z > *bz || (z == *bz && idx > *bi),
+                Some((bi, bl, bz, _)) => {
+                    match cmp_sorting(layer, z, *bl, *bz) {
+                        std::cmp::Ordering::Greater => true,
+                        std::cmp::Ordering::Equal => idx > *bi,
+                        std::cmp::Ordering::Less => false,
+                    }
+                }
             };
             if better {
-                best = Some((idx, z, ent.name.clone()));
+                best = Some((idx, layer, z, ent.name.clone()));
             }
         }
     }
-    best.map(|(_, _, name)| name)
+    best.map(|(_, _, _, name)| name)
 }
 
-fn entity_hit_z(
+fn entity_hit_key(
     scene: &Scene,
     ent: &EntityData,
     sx: f32,
     sy: f32,
     catalog: Option<&SpriteCatalog>,
-) -> Option<f32> {
+    layers: &[String],
+) -> Option<(u16, f32)> {
     let world = scene
         .world_transform(&ent.name)
         .unwrap_or_else(|| ent.transform.clone());
-    let mut hit_z: Option<f32> = None;
+    let mut hit: Option<(u16, f32)> = None;
+    let bump = |hit: &mut Option<(u16, f32)>, name: &str, z: f32| {
+        let key = (sorting_layer_index(layers, name), z);
+        let better = match *hit {
+            None => true,
+            Some(h) => cmp_sorting(key.0, key.1, h.0, h.1).is_ge(),
+        };
+        if better {
+            *hit = Some(key);
+        }
+    };
     if let Some(sp) = &ent.components.sprite {
         if sp.enabled {
             let pivot = catalog
@@ -76,33 +106,29 @@ fn entity_hit_z(
                 .map(|r| r.pivot)
                 .unwrap_or([0.5, 0.5]);
             if point_in_sprite(&world, sp.size, pivot, sx, sy) {
-                hit_z = Some(sp.z);
+                bump(&mut hit, sp.sorting_layer_name(), sp.z);
             }
         }
     }
     if let Some(d) = &ent.components.disc {
         if d.enabled && point_in_disc(&world, d.radius, sx, sy) {
-            hit_z = Some(match hit_z {
-                Some(z) => z.max(d.z),
-                None => d.z,
-            });
+            bump(&mut hit, d.sorting_layer_name(), d.z);
         }
     }
     if let Some(tm) = &ent.components.tilemap {
         if tm.enabled && point_in_tilemap(&world, tm, sx, sy) {
-            hit_z = Some(match hit_z {
-                Some(z) => z.max(tm.z),
-                None => tm.z,
-            });
+            bump(&mut hit, tm.sorting_layer_name(), tm.z);
         }
     }
     if let Some(c) = &ent.components.collider {
         if c.enabled && c.contains_point(&world, sx, sy) {
-            // Collider-only entities are pickable; visuals still win on z.
-            hit_z = Some(hit_z.unwrap_or(0.0));
+            // Collider-only entities are pickable; visuals still win on layer/z.
+            if hit.is_none() {
+                hit = Some((sorting_layer_index(layers, ""), 0.0));
+            }
         }
     }
-    hit_z
+    hit
 }
 
 fn point_in_tilemap(
@@ -161,6 +187,7 @@ mod tests {
                     size: [w, h],
                     color: [255, 255, 255, 255],
                     z,
+                    sorting_layer: String::new(),
                     enabled: true,
                 }),
                 ..Default::default()
@@ -179,6 +206,7 @@ mod tests {
                     radius,
                     color: [72, 210, 160, 255],
                     z,
+                    sorting_layer: String::new(),
                     enabled: true,
                 }),
                 ..Default::default()
@@ -312,5 +340,17 @@ mod tests {
         assert_eq!(pick_entity_at(&scene, 100.0, 80.0).as_deref(), Some("Wall"));
         assert_eq!(pick_entity_at(&scene, 110.0, 85.0).as_deref(), Some("Wall"));
         assert_eq!(pick_entity_at(&scene, 111.0, 80.0), None);
+    }
+
+    #[test]
+    fn sorting_layer_beats_z_for_pick() {
+        let mut scene = Scene::new("t");
+        let mut back = sprite_ent("back", 100.0, 100.0, 40.0, 40.0, 50.0);
+        back.components.sprite.as_mut().unwrap().sorting_layer = "Background".into();
+        let mut front = sprite_ent("front", 100.0, 100.0, 40.0, 40.0, 0.0);
+        front.components.sprite.as_mut().unwrap().sorting_layer = "Foreground".into();
+        scene.entities.push(back);
+        scene.entities.push(front);
+        assert_eq!(pick_entity_at(&scene, 100.0, 100.0).as_deref(), Some("front"));
     }
 }

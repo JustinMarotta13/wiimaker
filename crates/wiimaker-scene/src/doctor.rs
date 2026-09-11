@@ -138,10 +138,19 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
     }
 
     if let Some(scene) = &scene {
-        check_scene_refs(scene, &sprite_names, &anim_names, &wav_names, &assets, &mut issues);
+        check_scene_refs(
+            scene,
+            &sprite_names,
+            &anim_names,
+            &wav_names,
+            &assets,
+            &project.effective_sorting_layers(),
+            &mut issues,
+        );
     }
 
     check_build_scenes(game_dir, project, &mut issues);
+    check_sorting_layers(project, &mut issues);
 
     let wpack = project.wpack_path(game_dir);
     if !wpack.is_file() {
@@ -192,12 +201,55 @@ fn check_build_scenes(game_dir: &Path, project: &GameProject, issues: &mut Vec<I
     }
 }
 
+fn check_sorting_layers(project: &GameProject, issues: &mut Vec<Issue>) {
+    if project.sorting_layers.is_empty() {
+        return;
+    }
+    let mut seen = std::collections::HashSet::new();
+    for name in &project.sorting_layers {
+        let t = name.trim();
+        if t.is_empty() {
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: "game.toml sorting_layers contains an empty name".into(),
+            });
+            continue;
+        }
+        if !seen.insert(t.to_string()) {
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: format!("duplicate sorting layer '{t}' in game.toml"),
+            });
+        }
+    }
+}
+
+fn warn_unknown_sorting_layer(
+    ent: &crate::scene::EntityData,
+    kind: &str,
+    layer: &str,
+    layers: &[String],
+    issues: &mut Vec<Issue>,
+) {
+    let key = crate::scene::display_sorting_layer(layer);
+    if !layers.iter().any(|n| n == key) {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message: format!(
+                "entity '{}': {kind} sorting layer '{key}' is not in game.toml sorting_layers (will draw as Default)",
+                ent.name
+            ),
+        });
+    }
+}
+
 fn check_scene_refs(
     scene: &Scene,
     sprites: &[String],
     anims: &[String],
     wavs: &[String],
     assets: &Path,
+    sorting_layers: &[String],
     issues: &mut Vec<Issue>,
 ) {
     for ent in &scene.entities {
@@ -211,6 +263,21 @@ fn check_scene_refs(
                     ),
                 });
             }
+        }
+        if let Some(sp) = &ent.components.sprite {
+            warn_unknown_sorting_layer(ent, "Sprite", sp.sorting_layer_name(), sorting_layers, issues);
+        }
+        if let Some(d) = &ent.components.disc {
+            warn_unknown_sorting_layer(ent, "Disc", d.sorting_layer_name(), sorting_layers, issues);
+        }
+        if let Some(tm) = &ent.components.tilemap {
+            warn_unknown_sorting_layer(
+                ent,
+                "Tilemap",
+                tm.sorting_layer_name(),
+                sorting_layers,
+                issues,
+            );
         }
         if let Some(tm) = &ent.components.tilemap {
             let n = (tm.width as usize).saturating_mul(tm.height as usize);

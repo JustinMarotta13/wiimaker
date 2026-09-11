@@ -28,6 +28,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Camera Inspector: Follow target combo (entity names) + Lerp. Scene view draws a 640×480 cyan rect centered on the active camera (Game tab applies offset). Play ticks `World::follow_cameras` after WASD / GridMover.
 - GridMover Inspector: Cell, Speed, queued cardinal combo. Add Component → GridMover. Play: `step_grid_movers` from WASD/arrows; if Player has GridMover, skip free WASD.
 - AudioSource Inspector: clip combo (Project `*.wav`), Volume, Play On Awake, Play (host oneshot). Project: `.wav` rows, double-click / context Play preview. Drop WAV into the editor to copy into `assets/`.
+- Sorting layers: Inspector Sprite/Disc/Tilemap **Sorting Layer** combo + **Order in Layer** (`z`). Project `game.toml` inspector: ordered list with ↑↓, –, select + draft **+ Add** / **Rename**. Mutate helpers in `wiimaker-scene` remap other scenes/prefabs on rename/remove; editor remaps the open scene in memory.
 - Prefabs: Inspector **Save as Prefab…**; Project strip + toolbar **Instantiate <name>** (or Prefab menu when many); File → Instantiate; **Cmd/Ctrl+I** first `.prefab.json`. Double-click / context menu also instantiate. CLI: `entity create-prefab` / `instantiate-prefab` / `apply-prefab` / `unpack-prefab`.
 - Multi-select: status `selected N: A, B`; Hierarchy uses full-width blue selection (Unity), not `>`/`+` prefixes.
 - Drop PNG anywhere in the editor window → copy into `assets/` + cook refresh.
@@ -44,7 +45,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Duplicate/paste share `insert_entity_clone` (+16,+16, `unique_entity_name`).
 - Hierarchy: Search + Create Empty / right-click Duplicate·Delete; shortcuts Cmd/Ctrl+D/C/V/Z/Shift+Z/Y. No per-row D/x (see unity-chrome crops).
 - Editor chrome: `theme.rs` teal-accent charcoal Visuals; panel frames, section headers, centered viewport well. Apply via `theme::apply` in eframe CreationContext.
-- P0 viewport pick/drag lives in `wiimaker-scene` (`pick.rs` + `gizmo.rs`) + editor `handle_viewport_input`. Topmost = highest component z, then later entity index.
+- P0 viewport pick/drag lives in `wiimaker-scene` (`pick.rs` + `gizmo.rs`) + editor `handle_viewport_input`. Topmost = highest Sorting Layer, then order-in-layer `z`, then later entity index.
 - Translate gizmo: Unity-like 2D handles (`MoveHandleLayout` / `TranslateHandle`) in screen pixels; CLI n/a.
 - Scene discovery: `wiimaker_scene::list_scenes(game_dir)` → relative `*.scene.json` under `scenes/` plus `default_scene` if outside that dir.
 - Opening a non-default scene is editor-only preview; "Set as default scene" persists via `save_project`.

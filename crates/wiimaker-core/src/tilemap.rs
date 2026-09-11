@@ -3,6 +3,7 @@
 use crate::color::Rgba8;
 use crate::draw::{Rect, TextureId};
 use crate::math::Vec2;
+use crate::sorting::default_sorting_layer_index;
 use crate::world::{EntityId, Transform, World};
 
 #[cfg(feature = "std")]
@@ -39,6 +40,8 @@ pub struct Tilemap {
     /// Bit-packed solid flags, row-major, same length as `cells`.
     pub solid: Vec<u8>,
     pub z: f32,
+    /// Index into [`crate::world::World::sorting_layers`].
+    pub sorting_layer: u16,
     /// Palette used at render time (id 0 is never drawn).
     pub palette: Vec<TileVisual>,
 }
@@ -54,6 +57,7 @@ impl Tilemap {
             cells: vec![0; n],
             solid: vec![0; (n + 7) / 8],
             z: -1.0,
+            sorting_layer: default_sorting_layer_index(),
             palette: Vec::new(),
         }
     }

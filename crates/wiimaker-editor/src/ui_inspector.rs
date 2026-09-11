@@ -2,10 +2,11 @@ use eframe::egui::{self, RichText};
 use wiimaker_scene::{
     add_component_animation, add_component_audio_source, add_component_camera, add_component_collider,
     add_component_disc, add_component_grid_mover, add_component_sprite, add_component_tilemap,
-    remove_component_animation, remove_component_audio_source, remove_component_camera,
-    remove_component_collider, remove_component_disc, remove_component_grid_mover,
-    remove_component_sprite, remove_component_tilemap, save_project, set_component_enabled,
-    tilemap_resize, SceneColliderKind, SceneDir,
+    display_sorting_layer, remove_component_animation, remove_component_audio_source,
+    remove_component_camera, remove_component_collider, remove_component_disc,
+    remove_component_grid_mover, remove_component_sprite, remove_component_tilemap, save_project,
+    set_component_enabled, tilemap_resize, SceneColliderKind, SceneDir,
+    DEFAULT_SORTING_LAYER,
 };
 
 use crate::app::EditorApp;
@@ -102,6 +103,7 @@ impl EditorApp {
 
         let catalog_names: Vec<String> = self.catalog.names().to_vec();
         let entity_names: Vec<String> = self.scene.entities.iter().map(|e| e.name.clone()).collect();
+        let layer_names: Vec<String> = self.project.effective_sorting_layers();
         let mut pending_sprite_tex: Option<(String, [f32; 2])> = None;
 
         if let Some(ent) = self.scene.entities.iter_mut().find(|e| e.name == sel) {
@@ -167,7 +169,13 @@ impl EditorApp {
                         pending_sprite_tex = Some((new_tex, [0.0, 0.0]));
                     }
                     dirty |= theme::vec2_row(ui, "Size", &mut sp.size, 0.5);
-                    dirty |= theme::labeled_drag(ui, "Z", &mut sp.z, 0.05);
+                    dirty |= sorting_layer_fields(
+                        ui,
+                        "sprite_sort",
+                        &layer_names,
+                        &mut sp.sorting_layer,
+                        &mut sp.z,
+                    );
                 });
                 }
                 ui.add_space(4.0);
@@ -257,7 +265,13 @@ impl EditorApp {
                 if hdr.open {
                 theme::inspector_props().show(ui, |ui| {
                     dirty |= theme::labeled_drag(ui, "Radius", &mut d.radius, 0.5);
-                    dirty |= theme::labeled_drag(ui, "Z", &mut d.z, 0.05);
+                    dirty |= sorting_layer_fields(
+                        ui,
+                        "disc_sort",
+                        &layer_names,
+                        &mut d.sorting_layer,
+                        &mut d.z,
+                    );
                 });
                 }
             }
@@ -290,7 +304,13 @@ impl EditorApp {
                     });
                     dirty |= theme::labeled_drag(ui, "Cell", &mut tm.cell, 0.25);
                     dirty |= theme::vec2_row(ui, "Origin", &mut tm.origin, 1.0);
-                    dirty |= theme::labeled_drag(ui, "Z", &mut tm.z, 0.05);
+                    dirty |= sorting_layer_fields(
+                        ui,
+                        "tilemap_sort",
+                        &layer_names,
+                        &mut tm.sorting_layer,
+                        &mut tm.z,
+                    );
                     let occupied = tm.cells.iter().filter(|c| **c != 0).count();
                     ui.label(
                         RichText::new(format!(
@@ -1120,9 +1140,11 @@ impl EditorApp {
                 }
                 theme::muted(ui, "Creates a new entity from this prefab");
             } else if name == "game.toml" {
-                theme::muted(ui, "Project settings — Scenes in Build");
+                theme::muted(ui, "Project settings — Scenes in Build · Sorting Layers");
                 ui.add_space(6.0);
                 self.ui_build_settings_body(ui);
+                ui.add_space(8.0);
+                self.ui_sorting_layers_body(ui);
                 ui.add_space(6.0);
                 if ui.button("Open Build Settings…").clicked() {
                     self.show_build_settings = true;
@@ -1147,4 +1169,134 @@ impl EditorApp {
             }
         });
     }
+
+    fn ui_sorting_layers_body(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            RichText::new("Sorting Layers")
+                .size(13.0)
+                .strong()
+                .color(theme::TEXT),
+        );
+        theme::muted(ui, "Ordered list on game.toml. Back = drawn first.");
+        ui.add_space(4.0);
+        let layers = self.project.effective_sorting_layers();
+        let mut move_to: Option<(String, usize)> = None;
+        let mut remove: Option<String> = None;
+        theme::card_frame().show(ui, |ui| {
+            for (i, name) in layers.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("{i}"))
+                            .size(11.0)
+                            .color(theme::TEXT_DIM)
+                            .monospace(),
+                    );
+                    let selected = self.sorting_layer_pick == *name;
+                    let resp = ui.selectable_label(selected, name);
+                    if resp.clicked() {
+                        self.sorting_layer_pick = name.clone();
+                    }
+                    if ui
+                        .add_enabled(i > 0, egui::Button::new("↑").small())
+                        .on_hover_text("Move earlier (draw behind)")
+                        .clicked()
+                    {
+                        move_to = Some((name.clone(), i - 1));
+                    }
+                    if ui
+                        .add_enabled(i + 1 < layers.len(), egui::Button::new("↓").small())
+                        .on_hover_text("Move later (draw in front)")
+                        .clicked()
+                    {
+                        move_to = Some((name.clone(), i + 1));
+                    }
+                    let can_remove = !name.eq_ignore_ascii_case(DEFAULT_SORTING_LAYER)
+                        && layers.len() > 1;
+                    if ui
+                        .add_enabled(can_remove, egui::Button::new("–").small())
+                        .on_hover_text("Remove (assignments → Default)")
+                        .clicked()
+                    {
+                        remove = Some(name.clone());
+                    }
+                });
+            }
+        });
+        let mut pending_add: Option<String> = None;
+        let mut pending_rename: Option<(String, String)> = None;
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.sorting_layer_draft)
+                    .hint_text("New layer")
+                    .desired_width(120.0),
+            );
+            let draft = self.sorting_layer_draft.trim().to_string();
+            if ui
+                .add_enabled(!draft.is_empty(), egui::Button::new("+ Add"))
+                .clicked()
+            {
+                pending_add = Some(draft.clone());
+            }
+            let pick = self.sorting_layer_pick.clone();
+            if ui
+                .add_enabled(
+                    !draft.is_empty() && !pick.is_empty() && pick != draft,
+                    egui::Button::new("Rename"),
+                )
+                .on_hover_text("Rename the selected layer to the draft name")
+                .clicked()
+            {
+                pending_rename = Some((pick, draft));
+            }
+        });
+        if let Some((name, idx)) = move_to {
+            self.move_project_sorting_layer(&name, idx);
+        }
+        if let Some(name) = remove {
+            self.remove_project_sorting_layer(&name);
+        }
+        if let Some(name) = pending_add {
+            self.add_project_sorting_layer(&name);
+        }
+        if let Some((from, to)) = pending_rename {
+            self.rename_project_sorting_layer(&from, &to);
+            self.sorting_layer_pick = to;
+        }
+    }
+}
+
+fn sorting_layer_fields(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    layers: &[String],
+    layer: &mut String,
+    z: &mut f32,
+) -> bool {
+    let mut dirty = false;
+    let current = display_sorting_layer(layer).to_string();
+    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+    ui.horizontal(|ui| {
+        theme::inspector_label(ui, "Sorting Layer");
+        let mut picked = current.clone();
+        egui::ComboBox::from_id_salt(id_salt)
+            .selected_text(&current)
+            .width(combo_w)
+            .show_ui(ui, |ui| {
+                for name in layers {
+                    if ui.selectable_label(current == *name, name).clicked() {
+                        picked = name.clone();
+                    }
+                }
+            });
+        if picked != current {
+            *layer = if picked.eq_ignore_ascii_case(DEFAULT_SORTING_LAYER) {
+                String::new()
+            } else {
+                picked
+            };
+            dirty = true;
+        }
+    });
+    dirty |= theme::labeled_drag(ui, "Order in Layer", z, 0.05);
+    dirty
 }

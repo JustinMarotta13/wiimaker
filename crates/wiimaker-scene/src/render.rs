@@ -1,12 +1,53 @@
 //! Default World → DrawList renderer (scene player).
 
 use wiimaker_core::color::Rgba8;
+use wiimaker_core::cmp_sorting;
 use wiimaker_core::draw::{DrawList, Rect, TextureId};
 use wiimaker_core::math::Vec2;
-use wiimaker_core::world::World;
+use wiimaker_core::tilemap::Tilemap;
+use wiimaker_core::world::{Disc, Sprite, Transform, World};
 
 /// Sentinel texture: host atlas samples white, then tint supplies the cell color.
 const QUAD_TEX: TextureId = TextureId(u32::MAX);
+
+enum DrawItem<'a> {
+    Tilemap {
+        layer: u16,
+        z: f32,
+        xf: &'a Transform,
+        tm: &'a Tilemap,
+    },
+    Sprite {
+        layer: u16,
+        z: f32,
+        xf: &'a Transform,
+        sp: &'a Sprite,
+    },
+    Disc {
+        layer: u16,
+        z: f32,
+        xf: &'a Transform,
+        d: &'a Disc,
+    },
+}
+
+impl DrawItem<'_> {
+    fn layer(&self) -> u16 {
+        match self {
+            DrawItem::Tilemap { layer, .. }
+            | DrawItem::Sprite { layer, .. }
+            | DrawItem::Disc { layer, .. } => *layer,
+        }
+    }
+
+    fn z(&self) -> f32 {
+        match self {
+            DrawItem::Tilemap { z, .. } | DrawItem::Sprite { z, .. } | DrawItem::Disc { z, .. } => {
+                *z
+            }
+        }
+    }
+}
 
 /// Emit clear + tilemaps + Sprite/Disc components.
 ///
@@ -15,6 +56,9 @@ const QUAD_TEX: TextureId = TextureId(u32::MAX);
 /// center (camera at `320, 240` matches the no-camera identity). No active camera
 /// → today's identity dests. Camera transforms are intentionally not emitted as
 /// [`DrawCmd::SetCamera`] because host backends apply the offset in these dests.
+///
+/// Draw order is Unity Sorting Layer then Order in Layer (`z`) across Sprite,
+/// Disc, and Tilemap. Missing layers hydrate to Default.
 pub fn render_world(world: &World, draw: &mut DrawList, clear: Rgba8) {
     render_world_ex(world, draw, clear, true);
 }
@@ -30,75 +74,91 @@ pub fn render_world_ex(world: &World, draw: &mut DrawList, clear: Rgba8, apply_c
         Vec2::ZERO
     };
 
-    let mut tiles: Vec<_> = world.iter_tilemaps().collect();
-    tiles.sort_by(|a, b| {
-        a.2.z
-            .partial_cmp(&b.2.z)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for (_id, xf, tm) in tiles {
-        let cell_w = tm.cell * xf.scale.x;
-        let cell_h = tm.cell * xf.scale.y;
-        if cell_w.abs() < 1e-6 || cell_h.abs() < 1e-6 {
-            continue;
-        }
-        let ox = xf.translation.x + tm.origin.x * xf.scale.x - offset.x;
-        let oy = xf.translation.y + tm.origin.y * xf.scale.y - offset.y;
-        for y in 0..tm.height as i32 {
-            for x in 0..tm.width as i32 {
-                let id = tm.get(x, y);
-                if id == 0 {
-                    continue;
-                }
+    // Collect tilemaps, then sprites, then discs so equal (layer, z) stays stable
+    // (old scenes without named layers still draw tiles → sprites → discs).
+    let mut items: Vec<DrawItem<'_>> = Vec::new();
+    for (_id, xf, tm) in world.iter_tilemaps() {
+        items.push(DrawItem::Tilemap {
+            layer: tm.sorting_layer,
+            z: tm.z,
+            xf,
+            tm,
+        });
+    }
+    for (_id, xf, sp) in world.iter_sprites() {
+        items.push(DrawItem::Sprite {
+            layer: sp.sorting_layer,
+            z: sp.z,
+            xf,
+            sp,
+        });
+    }
+    for (_id, xf, d) in world.iter_discs() {
+        items.push(DrawItem::Disc {
+            layer: d.sorting_layer,
+            z: d.z,
+            xf,
+            d,
+        });
+    }
+    items.sort_by(|a, b| cmp_sorting(a.layer(), a.z(), b.layer(), b.z()));
+
+    for item in items {
+        match item {
+            DrawItem::Tilemap { xf, tm, z, .. } => {
+                emit_tilemap(draw, xf, tm, z, offset);
+            }
+            DrawItem::Sprite { xf, sp, z, .. } => {
                 let dest = Rect::new(
-                    ox + x as f32 * cell_w,
-                    oy + y as f32 * cell_h,
-                    cell_w,
-                    cell_h,
+                    xf.translation.x - sp.size.x * sp.pivot.x * xf.scale.x - offset.x,
+                    xf.translation.y - sp.size.y * sp.pivot.y * xf.scale.y - offset.y,
+                    sp.size.x * xf.scale.x,
+                    sp.size.y * xf.scale.y,
                 );
-                if let Some(vis) = tm.visual_for(id) {
-                    match vis.texture {
-                        Some((tex, uv)) => draw.sprite_ex(tex, dest, uv, vis.color, tm.z),
-                        None => draw.sprite_ex(QUAD_TEX, dest, Rect::unit(), vis.color, tm.z),
-                    }
-                } else {
-                    let color = Rgba8::rgb(48, 88, 176);
-                    draw.sprite_ex(QUAD_TEX, dest, Rect::unit(), color, tm.z);
-                }
+                draw.sprite_ex(sp.texture, dest, sp.uv, sp.color, z);
+            }
+            DrawItem::Disc { xf, d, z, .. } => {
+                draw.disc(
+                    Vec2::new(xf.translation.x - offset.x, xf.translation.y - offset.y),
+                    d.radius * xf.scale.x.max(xf.scale.y),
+                    d.color,
+                    z,
+                );
             }
         }
     }
+}
 
-    // Collect and sort by z so draw order is stable.
-    let mut sprites: Vec<_> = world.iter_sprites().collect();
-    sprites.sort_by(|a, b| {
-        a.2.z
-            .partial_cmp(&b.2.z)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for (_id, xf, sp) in sprites {
-        let dest = Rect::new(
-            xf.translation.x - sp.size.x * sp.pivot.x * xf.scale.x - offset.x,
-            xf.translation.y - sp.size.y * sp.pivot.y * xf.scale.y - offset.y,
-            sp.size.x * xf.scale.x,
-            sp.size.y * xf.scale.y,
-        );
-        draw.sprite_ex(sp.texture, dest, sp.uv, sp.color, sp.z);
+fn emit_tilemap(draw: &mut DrawList, xf: &Transform, tm: &Tilemap, z: f32, offset: Vec2) {
+    let cell_w = tm.cell * xf.scale.x;
+    let cell_h = tm.cell * xf.scale.y;
+    if cell_w.abs() < 1e-6 || cell_h.abs() < 1e-6 {
+        return;
     }
-
-    let mut discs: Vec<_> = world.iter_discs().collect();
-    discs.sort_by(|a, b| {
-        a.2.z
-            .partial_cmp(&b.2.z)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for (_id, xf, d) in discs {
-        draw.disc(
-            Vec2::new(xf.translation.x - offset.x, xf.translation.y - offset.y),
-            d.radius * xf.scale.x.max(xf.scale.y),
-            d.color,
-            d.z,
-        );
+    let ox = xf.translation.x + tm.origin.x * xf.scale.x - offset.x;
+    let oy = xf.translation.y + tm.origin.y * xf.scale.y - offset.y;
+    for y in 0..tm.height as i32 {
+        for x in 0..tm.width as i32 {
+            let id = tm.get(x, y);
+            if id == 0 {
+                continue;
+            }
+            let dest = Rect::new(
+                ox + x as f32 * cell_w,
+                oy + y as f32 * cell_h,
+                cell_w,
+                cell_h,
+            );
+            if let Some(vis) = tm.visual_for(id) {
+                match vis.texture {
+                    Some((tex, uv)) => draw.sprite_ex(tex, dest, uv, vis.color, z),
+                    None => draw.sprite_ex(QUAD_TEX, dest, Rect::unit(), vis.color, z),
+                }
+            } else {
+                let color = Rgba8::rgb(48, 88, 176);
+                draw.sprite_ex(QUAD_TEX, dest, Rect::unit(), color, z);
+            }
+        }
     }
 }
 
@@ -188,5 +248,70 @@ mod tests {
         render_world_ex(&world, &mut draw, Rgba8::BLACK, false);
         assert!(!has_set_camera(draw.cmds()));
         assert_eq!(sprite_dests(draw.cmds()), vec![(84.0, 34.0)]);
+    }
+
+    fn draw_kinds(cmds: &[DrawCmd]) -> Vec<&'static str> {
+        cmds.iter()
+            .filter_map(|c| match c {
+                DrawCmd::DrawSprite { .. } => Some("sprite"),
+                DrawCmd::DrawDisc { .. } => Some("disc"),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn layer_order_beats_z_across_kinds() {
+        let mut world = World::new();
+        // Background disc with huge z still draws behind Default sprite.
+        let disc_id = world.spawn_named("back", Transform::from_xy(10.0, 10.0));
+        let mut disc = Disc::new(4.0, Rgba8::WHITE);
+        disc.z = 99.0;
+        disc.sorting_layer = world.sorting_layer_index("Background");
+        world.set_disc(disc_id, Some(disc));
+
+        let spr_id = world.spawn_named("front", Transform::from_xy(20.0, 20.0));
+        let mut spr = Sprite::new(TextureId(0), Vec2::new(8.0, 8.0));
+        spr.z = 0.0;
+        spr.sorting_layer = world.sorting_layer_index("Default");
+        world.set_sprite(spr_id, Some(spr));
+
+        let mut draw = DrawList::new();
+        render_world(&world, &mut draw, Rgba8::BLACK);
+        assert_eq!(draw_kinds(draw.cmds()), vec!["disc", "sprite"]);
+    }
+
+    #[test]
+    fn order_in_layer_within_same_layer() {
+        let mut world = World::new();
+        let a = world.spawn_named("a", Transform::from_xy(0.0, 0.0));
+        let mut sa = Sprite::new(TextureId(1), Vec2::new(8.0, 8.0));
+        sa.z = 2.0;
+        sa.sorting_layer = world.sorting_layer_index("Foreground");
+        world.set_sprite(a, Some(sa));
+        let b = world.spawn_named("b", Transform::from_xy(40.0, 0.0));
+        let mut sb = Sprite::new(TextureId(2), Vec2::new(8.0, 8.0));
+        sb.z = -1.0;
+        sb.sorting_layer = world.sorting_layer_index("Foreground");
+        world.set_sprite(b, Some(sb));
+
+        let mut draw = DrawList::new();
+        render_world(&world, &mut draw, Rgba8::BLACK);
+        let dests = sprite_dests(draw.cmds());
+        // b (z=-1) then a (z=2); pivot 0.5 → dest x = translation - 4
+        assert_eq!(dests, vec![(36.0, -4.0), (-4.0, -4.0)]);
+    }
+
+    #[test]
+    fn missing_layer_uses_default() {
+        let mut world = World::new();
+        let id = world.spawn_named("orb", Transform::from_xy(100.0, 50.0));
+        let mut spr = Sprite::new(TextureId(0), Vec2::new(32.0, 32.0));
+        spr.sorting_layer = world.sorting_layer_index("no-such-layer");
+        world.set_sprite(id, Some(spr));
+        assert_eq!(
+            world.sprite(id).unwrap().sorting_layer,
+            world.sorting_layer_index("Default")
+        );
     }
 }

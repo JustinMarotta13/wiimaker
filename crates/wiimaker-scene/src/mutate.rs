@@ -55,6 +55,7 @@ pub fn add_entity(scene: &mut Scene, name: &str, opts: &MutateOpts) -> Result<()
             size: [opts.sprite_w.unwrap_or(32.0), opts.sprite_h.unwrap_or(32.0)],
             color: opts.color.unwrap_or([255, 255, 255, 255]),
             z: 0.0,
+            sorting_layer: String::new(),
             enabled: true,
         });
     }
@@ -63,6 +64,7 @@ pub fn add_entity(scene: &mut Scene, name: &str, opts: &MutateOpts) -> Result<()
             radius,
             color: opts.color.unwrap_or([72, 210, 160, 255]),
             z: 0.0,
+            sorting_layer: String::new(),
             enabled: true,
         });
     }
@@ -286,6 +288,7 @@ pub fn add_component_sprite(
         size,
         color: [255, 255, 255, 255],
         z: 0.0,
+        sorting_layer: String::new(),
         enabled: true,
     });
     Ok(())
@@ -302,6 +305,7 @@ pub fn add_component_disc(
         radius,
         color,
         z: 0.0,
+        sorting_layer: String::new(),
         enabled: true,
     });
     Ok(())

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::math::{Quat, Vec2, Vec3};
 use wiimaker_core::world::Transform;
+use wiimaker_core::{is_default_sorting_layer_name, DEFAULT_SORTING_LAYER};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Scene {
@@ -261,6 +262,12 @@ pub struct SceneSprite {
     pub color: [u8; 4],
     #[serde(default)]
     pub z: f32,
+    /// Unity Sorting Layer name. Empty / omitted / `"Default"` → Default.
+    #[serde(
+        default,
+        skip_serializing_if = "is_default_sorting_layer_name"
+    )]
+    pub sorting_layer: String,
     /// When false, skipped by hydrate / pick / bake (Unity component checkbox).
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled: bool,
@@ -281,6 +288,21 @@ impl SceneSprite {
     pub fn color_rgba(&self) -> Rgba8 {
         Rgba8::new(self.color[0], self.color[1], self.color[2], self.color[3])
     }
+
+    /// Display name: empty → [`DEFAULT_SORTING_LAYER`].
+    pub fn sorting_layer_name(&self) -> &str {
+        display_sorting_layer(&self.sorting_layer)
+    }
+}
+
+/// Empty layer name means Unity Default.
+pub fn display_sorting_layer(name: &str) -> &str {
+    let t = name.trim();
+    if t.is_empty() {
+        DEFAULT_SORTING_LAYER
+    } else {
+        t
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -290,6 +312,12 @@ pub struct SceneDisc {
     pub color: [u8; 4],
     #[serde(default)]
     pub z: f32,
+    /// Unity Sorting Layer name. Empty / omitted / `"Default"` → Default.
+    #[serde(
+        default,
+        skip_serializing_if = "is_default_sorting_layer_name"
+    )]
+    pub sorting_layer: String,
     /// When false, skipped by hydrate / pick / bake (Unity component checkbox).
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled: bool,
@@ -302,6 +330,10 @@ fn mintish() -> [u8; 4] {
 impl SceneDisc {
     pub fn color_rgba(&self) -> Rgba8 {
         Rgba8::new(self.color[0], self.color[1], self.color[2], self.color[3])
+    }
+
+    pub fn sorting_layer_name(&self) -> &str {
+        display_sorting_layer(&self.sorting_layer)
     }
 }
 
@@ -378,6 +410,12 @@ pub struct SceneTilemap {
     pub palette: Vec<SceneTilePalette>,
     #[serde(default)]
     pub z: f32,
+    /// Unity Sorting Layer name. Empty / omitted / `"Default"` → Default.
+    #[serde(
+        default,
+        skip_serializing_if = "is_default_sorting_layer_name"
+    )]
+    pub sorting_layer: String,
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled: bool,
 }
@@ -404,8 +442,13 @@ impl SceneTilemap {
                 color: wall_color(),
             }],
             z: -1.0,
+            sorting_layer: String::new(),
             enabled: true,
         }
+    }
+
+    pub fn sorting_layer_name(&self) -> &str {
+        display_sorting_layer(&self.sorting_layer)
     }
 
     pub fn len(&self) -> usize {

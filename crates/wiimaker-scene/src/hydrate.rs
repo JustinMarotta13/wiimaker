@@ -120,6 +120,7 @@ pub fn load_scene_into_world(
     };
     let rel = crate::project::resolve_scene_rel(game_dir, key)?;
     let scene = crate::scene::load_scene(&game_dir.join(&rel))?;
+    world.set_sorting_layers(project.effective_sorting_layers());
     hydrate_into_with_catalogs(world, &scene, textures, catalog, anims)?;
     Ok(scene.clear_rgba())
 }
@@ -153,6 +154,7 @@ fn spawn_entity(
             sprite.pivot = pivot;
             sprite.color = sp.color_rgba();
             sprite.z = sp.z;
+            sprite.sorting_layer = world.sorting_layer_index(&sp.sorting_layer);
             world.set_sprite(id, Some(sprite));
         }
     }
@@ -161,6 +163,7 @@ fn spawn_entity(
         if d.enabled {
             let mut disc = Disc::new(d.radius, d.color_rgba());
             disc.z = d.z;
+            disc.sorting_layer = world.sorting_layer_index(&d.sorting_layer);
             world.set_disc(id, Some(disc));
         }
     }
@@ -171,7 +174,11 @@ fn spawn_entity(
 
     if let Some(tm) = &ent.components.tilemap {
         if tm.enabled {
-            world.set_tilemap(id, Some(scene_tilemap_to_runtime(tm, textures, catalog)));
+            let layer = world.sorting_layer_index(&tm.sorting_layer);
+            world.set_tilemap(
+                id,
+                Some(scene_tilemap_to_runtime(tm, textures, catalog, layer)),
+            );
         }
     }
 
@@ -275,7 +282,21 @@ pub fn hydrate_lenient_with_catalogs(
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
 ) -> World {
+    hydrate_lenient_with_sorting_layers(scene, textures, catalog, anims, None)
+}
+
+/// Like [`hydrate_lenient_with_catalogs`], but resolve Sorting Layers from `game.toml`.
+pub fn hydrate_lenient_with_sorting_layers(
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+    sorting_layers: Option<&[String]>,
+) -> World {
     let mut world = World::new();
+    if let Some(layers) = sorting_layers {
+        world.set_sorting_layers(layers.to_vec());
+    }
     for ent in &scene.entities {
         let xf = scene
             .world_transform(&ent.name)
@@ -291,6 +312,7 @@ pub fn hydrate_lenient_with_catalogs(
                     sprite.pivot = pivot;
                     sprite.color = sp.color_rgba();
                     sprite.z = sp.z;
+                    sprite.sorting_layer = world.sorting_layer_index(&sp.sorting_layer);
                     world.set_sprite(id, Some(sprite));
                 }
             }
@@ -299,6 +321,7 @@ pub fn hydrate_lenient_with_catalogs(
             if d.enabled {
                 let mut disc = Disc::new(d.radius, d.color_rgba());
                 disc.z = d.z;
+                disc.sorting_layer = world.sorting_layer_index(&d.sorting_layer);
                 world.set_disc(id, Some(disc));
             }
         }
@@ -307,7 +330,11 @@ pub fn hydrate_lenient_with_catalogs(
         }
         if let Some(tm) = &ent.components.tilemap {
             if tm.enabled {
-                world.set_tilemap(id, Some(scene_tilemap_to_runtime(tm, textures, catalog)));
+                let layer = world.sorting_layer_index(&tm.sorting_layer);
+                world.set_tilemap(
+                    id,
+                    Some(scene_tilemap_to_runtime(tm, textures, catalog, layer)),
+                );
             }
         }
         if let Some(c) = &ent.components.collider {
@@ -362,10 +389,12 @@ fn scene_tilemap_to_runtime(
     tm: &crate::scene::SceneTilemap,
     textures: &TextureMap,
     catalog: Option<&SpriteCatalog>,
+    sorting_layer: u16,
 ) -> Tilemap {
     let mut out = Tilemap::new(tm.width.max(1), tm.height.max(1), tm.cell);
     out.origin = Vec2::new(tm.origin[0], tm.origin[1]);
     out.z = tm.z;
+    out.sorting_layer = sorting_layer;
     let n = out.len();
     out.cells = tm.cells.clone();
     if out.cells.len() < n {

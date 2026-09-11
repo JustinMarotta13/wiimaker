@@ -2,6 +2,10 @@
 //!
 //! Texture names / sprite cells are resolved to wpack indices + UV/pivot at bake
 //! time so the C runtime never parses JSON or string-matches asset names.
+//!
+//! Host-first Sorting Layers are **not** packed: WSCN0003 still stores raw `z`
+//! (order-in-layer). The C player sorts by `z` only. Do not bump the magic for
+//! this feature.
 
 use std::fs::File;
 use std::io::Write;
