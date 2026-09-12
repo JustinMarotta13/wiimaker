@@ -373,6 +373,18 @@ fn check_scene_refs(
                 });
             }
         }
+        if let Some(src) = ent.prefab.as_deref().filter(|s| !s.is_empty()) {
+            let game_dir = assets.parent().unwrap_or(assets);
+            if crate::prefab::resolve_prefab_asset(game_dir, src).is_err() {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "entity '{}': prefab '{}' not found (expected assets/prefabs/)",
+                        ent.name, src
+                    ),
+                });
+            }
+        }
         if let Some(a) = &ent.components.audio_source {
             if a.clip.is_empty() {
                 issues.push(Issue {

@@ -12,7 +12,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - `entity duplicate <game> <name>` / `entity rename <game> <old> <new>` return new/renamed name in `--json`.
 - `entity set-parent <game> --name Child [--parent Parent]` — omit `--parent` to unparent; preserves world pose.
 - `entity remove-component` / `set-component-enabled --enabled true|false` (clap `ArgAction::Set`).
-- Prefabs: `entity create-prefab` · `instantiate-prefab` · `apply-prefab` · `unpack-prefab` (files under `assets/prefabs/`).
+- Prefabs: `entity create-prefab` (writes asset + links the source entity) · `instantiate-prefab` (records `prefab` link) · `apply-prefab` (Unity Apply: push instance → asset; prefab arg optional when linked) · `revert-prefab` · `unpack-prefab` (clears link) · `prefab-status` (`--json`: `instance`, `prefab`, `overrides`). Files under `assets/prefabs/`.
 - `entity set --name X [--x --y --sx --sy --rotation-deg --tag --follow --lerp]` — scale/rotate via `set_entity_scale` / `set_entity_rotation_z` (degrees → radians). `--follow` creates Camera if missing.
 - Collider / Trigger: `entity add-component … Collider|--trigger|--filter` or kind `Trigger`; `entity triggers <game> <name>`; `entity despawn <game> <name>`; `entity set --tag N`.
 - Camera / Follow: `entity add-component <game> --name Cam Camera` · `Follow --target Player --lerp 0.15`. Same mutate helpers as the editor.

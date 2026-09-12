@@ -38,7 +38,7 @@ Scenes are JSON on disk (`scenes/*.scene.json`). The egui editor and CLI share
 mutation helpers in `wiimaker-scene` so agents and humans never diverge.
 
 Unity mapping: Project → `game.toml`, Scene → `.scene.json`, GameObject → named
-entity with `Transform` + `Sprite` / `Disc` / `Camera` (+ optional follow) / `Tilemap` / `Collider` / `GridMover`, Prefab → `.prefab.json`.
+entity with `Transform` + `Sprite` / `Disc` / `Camera` (+ optional follow) / `Tilemap` / `Collider` / `GridMover`, Prefab → `.prefab.json` (instance `prefab` link + property overrides).
 
 ### `wiimaker-core`
 

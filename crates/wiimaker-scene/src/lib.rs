@@ -7,6 +7,7 @@ mod gizmo;
 mod hydrate;
 mod mutate;
 mod pick;
+mod prefab;
 mod prefs;
 mod project;
 mod render;
@@ -32,12 +33,17 @@ pub use hydrate::{
 pub use mutate::{
     add_component_animation, add_component_camera, add_component_disc, add_component_follow,
     add_component_grid_mover, add_component_audio_source, add_component_sprite, add_entity, apply_prefab,
-    duplicate_entity, entity_to_prefab, insert_entity_clone, instantiate_prefab, remove_component_animation,
-    remove_component_audio_source, remove_component_camera, remove_component_disc, remove_component_follow,
-    remove_component_grid_mover, remove_component_sprite, remove_entity, rename_entity,
-    set_component_enabled, set_entity_anim, set_entity_audio_source, set_entity_follow, set_entity_grid_mover,
-    set_entity_parent, set_entity_rotation_z, set_entity_scale, set_entity_transform,
-    set_entity_world_xy, set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
+    attach_prefab_instance, duplicate_entity, entity_to_prefab, insert_entity_clone, instantiate_prefab,
+    remove_component_animation, remove_component_audio_source, remove_component_camera,
+    remove_component_disc, remove_component_follow, remove_component_grid_mover, remove_component_sprite,
+    remove_entity, rename_entity, revert_prefab_instance, set_component_enabled, set_entity_anim,
+    set_entity_audio_source, set_entity_follow, set_entity_grid_mover, set_entity_parent,
+    set_entity_rotation_z, set_entity_scale, set_entity_transform, set_entity_world_xy, set_scene_clear,
+    unique_entity_name, unpack_prefab_instance, MutateOpts,
+};
+pub use prefab::{
+    load_prefab_for_instance, normalize_prefab_source, prefab_overrides, prefab_stem,
+    resolve_prefab_asset, PrefabOverrides,
 };
 pub use pick::{
     pick_entity_at, pick_entity_at_with_catalog, pick_entity_at_with_catalog_and_layers,

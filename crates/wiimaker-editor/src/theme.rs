@@ -36,6 +36,8 @@ pub const SELECT_BG: Color32 = Color32::from_rgb(44, 93, 135);
 pub const SELECT_STROKE: Color32 = Color32::from_rgb(109, 180, 232);
 
 pub const DIRTY: Color32 = Color32::from_rgb(232, 168, 56);
+/// Unity Prefab override chrome (orange/bold on dark Pro — never light skin).
+pub const PREFAB_OVERRIDE: Color32 = Color32::from_rgb(230, 148, 64);
 pub const SAVED: Color32 = Color32::from_rgb(90, 168, 130);
 pub const DANGER: Color32 = Color32::from_rgb(220, 96, 96);
 pub const WARN_OUTLINE: Color32 = Color32::from_rgb(255, 200, 64);
@@ -170,11 +172,20 @@ pub fn inspector_props() -> Frame {
     Frame::none().inner_margin(Margin::symmetric(8.0, 4.0))
 }
 
+#[allow(dead_code)]
 pub fn inspector_label(ui: &mut egui::Ui, text: &str) {
-    ui.add_sized(
-        [64.0, 18.0],
-        egui::Label::new(RichText::new(text).size(12.0).color(TEXT_MUTED)).selectable(false),
-    );
+    inspector_label_ov(ui, text, false);
+}
+
+/// Inspector field label; overridden prefab properties are orange + bold.
+pub fn inspector_label_ov(ui: &mut egui::Ui, text: &str, overridden: bool) {
+    let mut rt = RichText::new(text).size(12.0);
+    rt = if overridden {
+        rt.color(PREFAB_OVERRIDE).strong()
+    } else {
+        rt.color(TEXT_MUTED)
+    };
+    ui.add_sized([64.0, 18.0], egui::Label::new(rt).selectable(false));
 }
 
 fn axis_color(axis: char) -> Color32 {
@@ -207,14 +218,25 @@ pub fn axis_drag(ui: &mut egui::Ui, axis: char, v: &mut f32, speed: f32) -> bool
 }
 
 /// One Unity Transform line: label + X + Y on the same row.
+#[allow(dead_code)]
 pub fn vec2_row(ui: &mut egui::Ui, label: &str, xy: &mut [f32], speed: f32) -> bool {
+    vec2_row_ov(ui, label, xy, speed, false)
+}
+
+pub fn vec2_row_ov(
+    ui: &mut egui::Ui,
+    label: &str,
+    xy: &mut [f32],
+    speed: f32,
+    overridden: bool,
+) -> bool {
     let mut changed = false;
     if xy.len() < 2 {
         return false;
     }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        inspector_label(ui, label);
+        inspector_label_ov(ui, label, overridden);
         changed |= axis_drag(ui, 'X', &mut xy[0], speed);
         changed |= axis_drag(ui, 'Y', &mut xy[1], speed);
     });
@@ -222,14 +244,25 @@ pub fn vec2_row(ui: &mut egui::Ui, label: &str, xy: &mut [f32], speed: f32) -> b
 }
 
 /// One Unity Transform line: label + X + Y + Z. `xyz` must be at least 3 long.
+#[allow(dead_code)]
 pub fn vec3_row(ui: &mut egui::Ui, label: &str, xyz: &mut [f32], speed: f32) -> bool {
+    vec3_row_ov(ui, label, xyz, speed, false)
+}
+
+pub fn vec3_row_ov(
+    ui: &mut egui::Ui,
+    label: &str,
+    xyz: &mut [f32],
+    speed: f32,
+    overridden: bool,
+) -> bool {
     let mut changed = false;
     if xyz.len() < 3 {
         return false;
     }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        inspector_label(ui, label);
+        inspector_label_ov(ui, label, overridden);
         changed |= axis_drag(ui, 'X', &mut xyz[0], speed);
         changed |= axis_drag(ui, 'Y', &mut xyz[1], speed);
         changed |= axis_drag(ui, 'Z', &mut xyz[2], speed);
@@ -238,10 +271,21 @@ pub fn vec3_row(ui: &mut egui::Ui, label: &str, xyz: &mut [f32], speed: f32) -> 
 }
 
 /// Label + one DragValue.
+#[allow(dead_code)]
 pub fn labeled_drag(ui: &mut egui::Ui, label: &str, v: &mut f32, speed: f32) -> bool {
+    labeled_drag_ov(ui, label, v, speed, false)
+}
+
+pub fn labeled_drag_ov(
+    ui: &mut egui::Ui,
+    label: &str,
+    v: &mut f32,
+    speed: f32,
+    overridden: bool,
+) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
-        inspector_label(ui, label);
+        inspector_label_ov(ui, label, overridden);
         changed = ui
             .add(egui::DragValue::new(v).speed(speed).max_decimals(2))
             .changed();
@@ -503,6 +547,17 @@ pub fn component_card_header(
     enabled: Option<bool>,
     removable: bool,
 ) -> CardHeaderOut {
+    component_card_header_ov(ui, id, title, enabled, removable, false)
+}
+
+pub fn component_card_header_ov(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    title: &str,
+    enabled: Option<bool>,
+    removable: bool,
+    overridden: bool,
+) -> CardHeaderOut {
     let persist = ui.make_persistent_id(("comp_open", std::any::TypeId::of::<()>(), id));
     let mut open = ui.ctx().data_mut(|d| *d.get_temp_mut_or(persist, true));
     let mut toggle = None;
@@ -523,7 +578,12 @@ pub fn component_card_header(
                     toggle = Some(!en);
                 }
             }
-            ui.label(RichText::new(title).strong().size(13.0).color(TEXT));
+            let title_color = if overridden {
+                PREFAB_OVERRIDE
+            } else {
+                TEXT
+            };
+            ui.label(RichText::new(title).strong().size(13.0).color(title_color));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if removable {
                     if let Some(clicked) = icon_menu_button(ui, persist, MenuIcon::Kebab, |ui| {
