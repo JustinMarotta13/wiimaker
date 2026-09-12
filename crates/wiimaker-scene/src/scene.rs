@@ -61,6 +61,9 @@ pub struct EntityData {
     pub components: SceneComponents,
     #[serde(default)]
     pub tag: u32,
+    /// Source `*.prefab.json` (game-relative path or stem). Missing = not an instance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefab: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

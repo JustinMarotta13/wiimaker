@@ -16,25 +16,24 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, **Move axis handles** (red X / green Y), Snap + nudge |
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop (hardcoded WASD on entity named `Player`; does **not** run game `App::update`) · File → Run external → `cargo run -p <game>` |
-| Prefab | `.prefab.json` · Save as Prefab / Instantiate / Apply / Unpack (unpack is a no-op) |
+| Prefab | `.prefab.json` · instance `prefab` link · Save as Prefab / Instantiate / Apply (push to asset) / Revert / Unpack Completely · orange-bold Inspector overrides |
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
 Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host cpal). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** prefab variants, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped), Wii ASND.
+**Not present:** nested prefabs / prefab variants, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped), Wii ASND.
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-09-11):** Prefab variants / overrides (unpack is a no-op; no orange-bold overrides). Sorting layers shipped.
+**Recommended next morning (2026-09-12):** Play-in-editor runs `App` (today’s Play is hello-orb WASD). Prefab instance links + overrides shipped.
 
 ---
 
 ## Later
 
-- **Prefab variants / overrides** (GUI+CLI) — unpack is a no-op; no orange-bold overrides. Dot/Ghost instances need this.
 - **Play-in-editor runs `App`** (GUI) — today's Play is hello-orb WASD, not the game crate. Load game as dylib or interpret a tiny script graph. CLI already has `run`.
 - **Text / HUD** (GUI+CLI) — DrawList has no glyphs; score lives in stdout. Bitmap font in `.wpack` + `DrawText`.
 - **Animated tiles / auto-tile** (GUI+CLI) — after tilemap.
@@ -61,7 +60,7 @@ Shipped. Keep here so we do not rebuild them.
 - egui editor: Hierarchy, Inspector, Scene viewport, Project, Sprite Editor, theme
 - Editor Play/Pause/Stop (Player WASD only) · Build · Play in Dolphin · Build & Run · Cook under ⋯
 - Undo/redo, duplicate/copy/paste, parent/unparent, multi-select, snap, Move/Scale/Rotate
-- Prefab create / instantiate / apply / unpack(no-op)
+- Prefab create / instantiate / apply / unpack (link + overrides shipped 2026-09-12)
 - Agent CLI twin of mutations (`--json`): see command list below
 - Doctor (project/scene/assets)
 - Parent local transforms (translate×scale; full rotation compose still open)
@@ -82,6 +81,8 @@ Shipped. Keep here so we do not rebuild them.
 - **Audio oneshots** (2026-09-10) — `AudioSource` (`clip`, `volume`, `play_on_awake`) on scene JSON; `World::play_oneshot` queue; host plays `assets/*.wav` (PCM16 mono/stereo) via `aplay`/`paplay` when present. Missing clip errors; no player / `WIIMAKER_AUDIO=0` skips. Inspector foldout + Project play / double-click; CLI `asset import` `.wav`, `asset play --name`, `asset list-wavs`, `entity add-component … AudioSource`, `entity set --audio-clip --volume --play-on-awake`. Cook still PNG-only (WAV stay on disk). WSCN unchanged. Wii ASND stub comments only. Fixture: `crates/wiimaker-assets/fixtures/beep.wav`.
 
 - **Sorting layers** (2026-09-11) — Unity Sorting Layer + Order in Layer. `game.toml` `sorting_layers` (default Background / Default / Foreground). Sprite/Disc/Tilemap `sorting_layer` name + `z` as order-in-layer. `render_world` sorts (layer, then z) across kinds; missing/unknown → Default. Inspector combo + Order in Layer; Project `game.toml` list (↑↓ – Add Rename). CLI `sorting-layer list|add|rename|move|remove` (`--json`); `entity set --sorting-layer --order-in-layer` (alias `--z`). Doctor warns unknown names. Host-first; WSCN0003 unchanged (C still sorts by raw z).
+
+- **Prefab instance links + overrides** (2026-09-12) — scene `EntityData.prefab` (relative `*.prefab.json` / stem; missing = not an instance). `instantiate_prefab` records the link; `unpack_prefab_instance` clears it (values stay). Override detect vs loaded asset (`transform.position`, `Disc.radius`, …). Inspector dark Pro: orange-bold labels + **Apply** / **Revert** / **Unpack Completely**. Apply writes the `.prefab.json` asset; Revert resets the instance. CLI twins: `create-prefab` (also links source) · `instantiate-prefab` · `apply-prefab` · `revert-prefab` · `unpack-prefab` · `prefab-status` (`--json`). One-entity prefabs only — no nested children / variants / per-property Apply. Host-first; WSCN unchanged.
 
 ### CLI commands (exact names)
 
@@ -105,7 +106,7 @@ Global: `--json`
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
 | `entity overlaps` · `entity triggers` | `--name` [ `--other` ] · pairwise/list overlaps; `triggers <name>` lists entered triggers |
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
-| `entity create-prefab` · `entity instantiate-prefab` · `entity apply-prefab` · `entity unpack-prefab` | |
+| `entity create-prefab` · `entity instantiate-prefab` · `entity apply-prefab` · `entity revert-prefab` · `entity unpack-prefab` · `entity prefab-status` | apply writes asset; revert restores; status lists overrides |
 | `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` · `asset anim` · `asset list-anims` · `asset list-wavs` · `asset play --name` | `asset import` copies `.png` or `.wav`; `asset play` host oneshot (`--json` `skipped` if no device) |
 | `tilemap set` · `tilemap fill` · `tilemap stamp` · `tilemap get` | `--name --x --y --id` · `--ascii` / `--cells --width` · `--json` |
 | `sorting-layer list` · `sorting-layer add --name [--index]` · `sorting-layer rename --from --to` · `sorting-layer move --name --index` · `sorting-layer remove --name` | project Tags & Layers analogue on `game.toml`; rename/remove remap scenes + prefabs |
@@ -121,12 +122,12 @@ Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
 Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Sprite/Disc/Tilemap **Sorting Layer** combo + **Order in Layer** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename)
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Sprite/Disc/Tilemap **Sorting Layer** combo + **Order in Layer** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename)
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship Prefab variants / overrides (Later).** Unpack is a no-op; no orange-bold overrides. Dot/Ghost instances need this.
+**Ship Play-in-editor runs `App` (Later).** Today's Play is hello-orb WASD, not the game crate.
 

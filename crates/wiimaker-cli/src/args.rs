@@ -457,17 +457,36 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
-    /// Overwrite entity transform/components from a prefab (keeps name/parent)
+    /// Push instance overrides onto the prefab asset (Unity Apply)
     ApplyPrefab {
         game: String,
         #[arg(long)]
         name: String,
-        prefab: String,
+        /// Prefab stem or path (defaults to the entity's instance link)
+        prefab: Option<String>,
         #[arg(long)]
         scene: Option<String>,
     },
-    /// Unpack prefab instance (v0: no-op beyond verifying entity exists)
+    /// Reset instance transform/components from the prefab asset (Unity Revert)
+    RevertPrefab {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// Prefab stem or path (defaults to the entity's instance link)
+        prefab: Option<String>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Clear the prefab instance link; current values stay as a plain entity
     UnpackPrefab {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Report prefab link + overridden properties (`--json`)
+    PrefabStatus {
         game: String,
         #[arg(long)]
         name: String,

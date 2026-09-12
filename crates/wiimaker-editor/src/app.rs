@@ -951,8 +951,20 @@ impl EditorApp {
                     .join(format!("{name}.prefab.json"));
                 match wiimaker_scene::save_prefab(&dest, &prefab) {
                     Ok(()) => {
+                        let link = format!("assets/prefabs/{name}.prefab.json");
+                        self.push_undo();
+                        if let Err(e) = wiimaker_scene::attach_prefab_instance(
+                            &mut self.scene,
+                            name,
+                            &link,
+                        ) {
+                            self.status = format!("prefab saved, link failed: {e}");
+                        } else {
+                            self.sync_baseline();
+                            self.mark_dirty();
+                            self.status = format!("prefab → {link}");
+                        }
                         self.refresh_project_tree();
-                        self.status = format!("prefab → {}", dest.display());
                     }
                     Err(e) => self.status = format!("save prefab failed: {e}"),
                 }
@@ -966,9 +978,11 @@ impl EditorApp {
         match wiimaker_scene::load_prefab(&abs) {
             Ok(prefab) => {
                 self.push_undo();
+                let source = rel.to_string_lossy().replace('\\', "/");
                 let new_name = wiimaker_scene::instantiate_prefab(
                     &mut self.scene,
                     &prefab,
+                    &source,
                     Some(320.0),
                     Some(240.0),
                 );
@@ -979,6 +993,80 @@ impl EditorApp {
             }
             Err(e) => self.status = format!("load prefab failed: {e}"),
         }
+    }
+
+    pub(crate) fn apply_selected_prefab(&mut self, name: &str) {
+        let Some(src) = self
+            .scene
+            .find_entity(name)
+            .and_then(|e| e.prefab.clone())
+        else {
+            self.status = format!("{name} is not a prefab instance");
+            return;
+        };
+        match wiimaker_scene::resolve_prefab_asset(&self.game_dir, &src) {
+            Ok(path) => match wiimaker_scene::load_prefab(&path) {
+                Ok(mut prefab) => {
+                    self.push_undo();
+                    if let Err(e) =
+                        wiimaker_scene::apply_prefab(&mut self.scene, name, &mut prefab, &src)
+                    {
+                        let _ = self.undo.undo(&mut self.scene);
+                        self.status = format!("apply prefab failed: {e}");
+                        return;
+                    }
+                    if let Err(e) = wiimaker_scene::save_prefab(&path, &prefab) {
+                        let _ = self.undo.undo(&mut self.scene);
+                        self.status = format!("write prefab failed: {e}");
+                        return;
+                    }
+                    self.sync_baseline();
+                    self.mark_dirty();
+                    self.refresh_project_tree();
+                    self.status = format!("applied {name} → {}", path.display());
+                }
+                Err(e) => self.status = format!("load prefab failed: {e}"),
+            },
+            Err(e) => self.status = format!("{e}"),
+        }
+    }
+
+    pub(crate) fn revert_selected_prefab(&mut self, name: &str) {
+        let Some(ent) = self.scene.find_entity(name).cloned() else {
+            self.status = format!("entity '{name}' not found");
+            return;
+        };
+        let Some(src) = ent.prefab.clone() else {
+            self.status = format!("{name} is not a prefab instance");
+            return;
+        };
+        match wiimaker_scene::load_prefab_for_instance(&self.game_dir, &ent) {
+            Ok(prefab) => {
+                self.push_undo();
+                if let Err(e) = wiimaker_scene::revert_prefab_instance(&mut self.scene, name, &prefab)
+                {
+                    let _ = self.undo.undo(&mut self.scene);
+                    self.status = format!("revert prefab failed: {e}");
+                    return;
+                }
+                self.sync_baseline();
+                self.mark_dirty();
+                self.status = format!("reverted {name} from {src}");
+            }
+            Err(e) => self.status = format!("{e}"),
+        }
+    }
+
+    pub(crate) fn unpack_selected_prefab(&mut self, name: &str) {
+        self.push_undo();
+        if let Err(e) = wiimaker_scene::unpack_prefab_instance(&mut self.scene, name) {
+            let _ = self.undo.undo(&mut self.scene);
+            self.status = format!("unpack failed: {e}");
+            return;
+        }
+        self.sync_baseline();
+        self.mark_dirty();
+        self.status = format!("unpacked {name}");
     }
 
     pub(crate) fn doctor(&mut self) {

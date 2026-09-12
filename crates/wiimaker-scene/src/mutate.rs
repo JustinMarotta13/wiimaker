@@ -74,6 +74,7 @@ pub fn add_entity(scene: &mut Scene, name: &str, opts: &MutateOpts) -> Result<()
         transform: SceneTransform::from_xy(x, y),
         components,
         tag: 0,
+        prefab: None,
     });
     Ok(())
 }
@@ -184,7 +185,7 @@ pub fn insert_entity_clone(scene: &mut Scene, entity: &EntityData) -> String {
     new_name
 }
 
-/// Snapshot an entity as a Prefab (root; parent cleared).
+/// Snapshot an entity as a Prefab (root; parent + instance link cleared).
 pub fn entity_to_prefab(scene: &Scene, name: &str) -> Result<crate::scene::Prefab> {
     let ent = scene
         .find_entity(name)
@@ -192,18 +193,33 @@ pub fn entity_to_prefab(scene: &Scene, name: &str) -> Result<crate::scene::Prefa
         .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
     let mut entity = ent;
     entity.parent = None;
+    entity.prefab = None;
     Ok(crate::scene::Prefab { entity })
 }
 
+/// Record `source` (stem or relative `*.prefab.json`) on an existing entity.
+pub fn attach_prefab_instance(scene: &mut Scene, name: &str, source: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let link = crate::prefab::normalize_prefab_source(source);
+    if link.is_empty() {
+        bail!("prefab source cannot be empty");
+    }
+    ent.prefab = Some(link);
+    Ok(())
+}
+
 /// Instantiate a prefab into the scene at optional world XY. Returns new entity name.
+/// `source` is stored on the instance (stem or game-relative `*.prefab.json`).
 pub fn instantiate_prefab(
     scene: &mut Scene,
     prefab: &crate::scene::Prefab,
+    source: &str,
     x: Option<f32>,
     y: Option<f32>,
 ) -> String {
     let mut entity = prefab.entity.clone();
     entity.parent = None;
+    entity.prefab = Some(crate::prefab::normalize_prefab_source(source));
     if let Some(x) = x {
         entity.transform.translation[0] = x;
     }
@@ -217,8 +233,35 @@ pub fn instantiate_prefab(
     new_name
 }
 
-/// Apply prefab components + local transform onto an existing entity (keeps name/parent).
-pub fn apply_prefab(scene: &mut Scene, name: &str, prefab: &crate::scene::Prefab) -> Result<()> {
+/// Unity Apply: push instance transform / components / tag onto the prefab asset blob.
+/// Keeps the prefab's own name; clears parent/link on the asset. Links the instance to `source`.
+pub fn apply_prefab(
+    scene: &mut Scene,
+    name: &str,
+    prefab: &mut crate::scene::Prefab,
+    source: &str,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    prefab.entity.transform = ent.transform.clone();
+    prefab.entity.components = ent.components.clone();
+    prefab.entity.tag = ent.tag;
+    prefab.entity.parent = None;
+    prefab.entity.prefab = None;
+    let link = crate::prefab::normalize_prefab_source(source);
+    if link.is_empty() {
+        bail!("prefab source cannot be empty");
+    }
+    ent.prefab = Some(link);
+    Ok(())
+}
+
+/// Unity Revert: reset instance transform / components / tag from the prefab asset.
+/// Keeps name, parent, and prefab link.
+pub fn revert_prefab_instance(
+    scene: &mut Scene,
+    name: &str,
+    prefab: &crate::scene::Prefab,
+) -> Result<()> {
     let ent = find_mut(scene, name)?;
     ent.transform = prefab.entity.transform.clone();
     ent.components = prefab.entity.components.clone();
@@ -226,10 +269,10 @@ pub fn apply_prefab(scene: &mut Scene, name: &str, prefab: &crate::scene::Prefab
     Ok(())
 }
 
-/// "Unpack" v0: clear any future prefab link — today just verifies the entity exists.
-/// Kept so CLI/editor can grow instance metadata later without renaming the verb.
+/// Clear the prefab instance link; current values stay as a plain entity.
 pub fn unpack_prefab_instance(scene: &mut Scene, name: &str) -> Result<()> {
-    let _ = find_mut(scene, name)?;
+    let ent = find_mut(scene, name)?;
+    ent.prefab = None;
     Ok(())
 }
 
@@ -968,5 +1011,79 @@ mod tests {
             .components
             .audio_source
             .is_none());
+    }
+
+    #[test]
+    fn instantiate_records_prefab_link_and_unpack_clears() {
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "Ghost",
+            &MutateOpts {
+                x: Some(80.0),
+                y: Some(90.0),
+                radius: Some(10.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let prefab = entity_to_prefab(&scene, "Ghost").unwrap();
+        assert!(prefab.entity.prefab.is_none());
+
+        let name = instantiate_prefab(&mut scene, &prefab, "ghost", Some(200.0), Some(210.0));
+        assert_eq!(name, "Ghost_1");
+        let inst = scene.find_entity(&name).unwrap();
+        assert_eq!(
+            inst.prefab.as_deref(),
+            Some("assets/prefabs/ghost.prefab.json")
+        );
+        assert_eq!(inst.transform.translation[0], 200.0);
+        assert!(inst.components.disc.is_some());
+
+        unpack_prefab_instance(&mut scene, &name).unwrap();
+        let plain = scene.find_entity(&name).unwrap();
+        assert!(plain.prefab.is_none());
+        assert_eq!(plain.transform.translation[0], 200.0);
+        assert!(plain.components.disc.is_some());
+    }
+
+    #[test]
+    fn apply_writes_prefab_blob_and_revert_restores() {
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "Dot",
+            &MutateOpts {
+                x: Some(16.0),
+                y: Some(32.0),
+                radius: Some(4.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut prefab = entity_to_prefab(&scene, "Dot").unwrap();
+        let name = instantiate_prefab(&mut scene, &prefab, "dot", None, None);
+        set_entity_transform(&mut scene, &name, Some(99.0), Some(88.0)).unwrap();
+        scene.entities.iter_mut().find(|e| e.name == name).unwrap().tag = 7;
+
+        apply_prefab(&mut scene, &name, &mut prefab, "dot").unwrap();
+        assert_eq!(prefab.entity.transform.translation[0], 99.0);
+        assert_eq!(prefab.entity.tag, 7);
+        assert!(prefab.entity.prefab.is_none());
+        assert_eq!(
+            scene.find_entity(&name).unwrap().prefab.as_deref(),
+            Some("assets/prefabs/dot.prefab.json")
+        );
+
+        set_entity_transform(&mut scene, &name, Some(1.0), Some(2.0)).unwrap();
+        revert_prefab_instance(&mut scene, &name, &prefab).unwrap();
+        let inst = scene.find_entity(&name).unwrap();
+        assert_eq!(inst.transform.translation[0], 99.0);
+        assert_eq!(inst.transform.translation[1], 88.0);
+        assert_eq!(inst.tag, 7);
+        assert_eq!(
+            inst.prefab.as_deref(),
+            Some("assets/prefabs/dot.prefab.json")
+        );
     }
 }

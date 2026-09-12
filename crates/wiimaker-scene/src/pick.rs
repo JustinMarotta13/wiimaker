@@ -193,6 +193,7 @@ mod tests {
                 ..Default::default()
             },
             tag: 0,
+            prefab: None,
         }
     }
 
@@ -212,6 +213,7 @@ mod tests {
                 ..Default::default()
             },
             tag: 0,
+            prefab: None,
         }
     }
 
@@ -317,6 +319,7 @@ mod tests {
                 ..Default::default()
             },
             tag: 0,
+            prefab: None,
         });
         assert_eq!(pick_entity_at(&scene, 5.0, 5.0).as_deref(), Some("Maze"));
         assert_eq!(pick_entity_at(&scene, 39.0, 29.0).as_deref(), Some("Maze"));
@@ -336,6 +339,7 @@ mod tests {
                 ..Default::default()
             },
             tag: 0,
+            prefab: None,
         });
         assert_eq!(pick_entity_at(&scene, 100.0, 80.0).as_deref(), Some("Wall"));
         assert_eq!(pick_entity_at(&scene, 110.0, 85.0).as_deref(), Some("Wall"));

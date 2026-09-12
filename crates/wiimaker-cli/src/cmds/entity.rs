@@ -5,12 +5,14 @@ use serde::Serialize;
 use wiimaker_scene::{
     add_component_animation, add_component_audio_source, add_component_camera,
     add_component_collider, add_component_disc, add_component_follow, add_component_grid_mover,
-    add_component_sprite, add_component_tilemap, add_entity, apply_prefab, duplicate_entity,
-    entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered, instantiate_prefab,
-    load_prefab, remove_component_animation, remove_component_audio_source, remove_component_camera,
-    remove_component_collider, remove_component_disc, remove_component_follow,
-    remove_component_grid_mover, remove_component_sprite, remove_component_tilemap, remove_entity,
-    rename_entity, save_prefab, save_scene, set_component_enabled, set_entity_anim,
+    add_component_sprite, add_component_tilemap, add_entity, apply_prefab, attach_prefab_instance,
+    duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered,
+    instantiate_prefab, load_prefab, load_prefab_for_instance, normalize_prefab_source,
+    prefab_overrides, remove_component_animation, remove_component_audio_source,
+    remove_component_camera, remove_component_collider, remove_component_disc,
+    remove_component_follow, remove_component_grid_mover, remove_component_sprite,
+    remove_component_tilemap, remove_entity, rename_entity, resolve_prefab_asset,
+    revert_prefab_instance, save_prefab, save_scene, set_component_enabled, set_entity_anim,
     set_entity_audio_source, set_entity_follow, set_entity_grid_mover, set_entity_parent,
     set_entity_rotation_z, set_entity_scale, set_entity_sorting, set_entity_transform,
     unpack_prefab_instance, MutateOpts, Scene, SceneColliderKind, SceneDir,
@@ -506,7 +508,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             as_name,
             scene,
         } => {
-            let (gd, _p, _path, sc) = open_scene(root, &game, scene.as_deref())?;
+            let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             let prefab = entity_to_prefab(&sc, &name)?;
             let stem = as_name.unwrap_or_else(|| name.clone());
             let dest = gd
@@ -514,22 +516,27 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 .join("prefabs")
                 .join(format!("{stem}.prefab.json"));
             save_prefab(&dest, &prefab)?;
+            let link = normalize_prefab_source(&stem);
+            attach_prefab_instance(&mut sc, &name, &link)?;
+            save_scene(&path, &sc)?;
             if json {
                 #[derive(Serialize)]
                 struct Out {
                     ok: bool,
                     path: String,
+                    prefab: String,
                 }
                 println!(
                     "{}",
                     serde_json::to_string(&Out {
                         ok: true,
                         path: dest.display().to_string(),
+                        prefab: link,
                     })?
                 );
                 Ok(())
             } else {
-                println!("wrote {}", dest.display());
+                println!("wrote {} (instance {name})", dest.display());
                 Ok(())
             }
         }
@@ -543,24 +550,27 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             let prefab_path = resolve_prefab_path(&gd, &prefab)?;
             let pf = load_prefab(&prefab_path)?;
-            let new_name = instantiate_prefab(&mut sc, &pf, x, y);
+            let link = normalize_prefab_source(&prefab);
+            let new_name = instantiate_prefab(&mut sc, &pf, &link, x, y);
             save_scene(&path, &sc)?;
             if json {
                 #[derive(Serialize)]
                 struct Out {
                     ok: bool,
                     name: String,
+                    prefab: String,
                 }
                 println!(
                     "{}",
                     serde_json::to_string(&Out {
                         ok: true,
                         name: new_name,
+                        prefab: link,
                     })?
                 );
                 Ok(())
             } else {
-                println!("instantiated → {new_name}");
+                println!("instantiated → {new_name} ({link})");
                 Ok(())
             }
         }
@@ -571,11 +581,48 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             scene,
         } => {
             let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
-            let prefab_path = resolve_prefab_path(&gd, &prefab)?;
-            let pf = load_prefab(&prefab_path)?;
-            apply_prefab(&mut sc, &name, &pf)?;
+            let source = instance_prefab_source(&sc, &name, prefab.as_deref())?;
+            let prefab_path = resolve_prefab_path(&gd, &source)?;
+            let mut pf = load_prefab(&prefab_path)?;
+            apply_prefab(&mut sc, &name, &mut pf, &source)?;
+            save_prefab(&prefab_path, &pf)?;
             save_scene(&path, &sc)?;
-            emit_ok(json, &format!("applied prefab to {name}"))
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    ok: bool,
+                    message: String,
+                    prefab: String,
+                    path: String,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&Out {
+                        ok: true,
+                        message: format!("applied prefab to {name}"),
+                        prefab: normalize_prefab_source(&source),
+                        path: prefab_path.display().to_string(),
+                    })?
+                );
+                Ok(())
+            } else {
+                println!("applied {name} → {}", prefab_path.display());
+                Ok(())
+            }
+        }
+        EntityCmd::RevertPrefab {
+            game,
+            name,
+            prefab,
+            scene,
+        } => {
+            let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            let source = instance_prefab_source(&sc, &name, prefab.as_deref())?;
+            let prefab_path = resolve_prefab_path(&gd, &source)?;
+            let pf = load_prefab(&prefab_path)?;
+            revert_prefab_instance(&mut sc, &name, &pf)?;
+            save_scene(&path, &sc)?;
+            emit_ok(json, &format!("reverted {name} from prefab"))
         }
         EntityCmd::UnpackPrefab { game, name, scene } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -583,28 +630,76 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("unpacked {name}"))
         }
+        EntityCmd::PrefabStatus {
+            game,
+            name,
+            scene,
+        } => {
+            let (gd, _p, _path, sc) = open_scene(root, &game, scene.as_deref())?;
+            let ent = sc
+                .find_entity(&name)
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
+            let source = ent.prefab.clone();
+            let (instance, overrides) = if source.is_some() {
+                match load_prefab_for_instance(&gd, ent) {
+                    Ok(pf) => (true, prefab_overrides(ent, &pf.entity).fields),
+                    Err(_) => (true, Vec::new()),
+                }
+            } else {
+                (false, Vec::new())
+            };
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    ok: bool,
+                    name: String,
+                    instance: bool,
+                    prefab: Option<String>,
+                    overrides: Vec<String>,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&Out {
+                        ok: true,
+                        name,
+                        instance,
+                        prefab: source,
+                        overrides,
+                    })?
+                );
+                Ok(())
+            } else if instance {
+                if overrides.is_empty() {
+                    println!("{name} instance of {}", source.unwrap_or_default());
+                } else {
+                    println!(
+                        "{name} instance of {} · {} overrides: {}",
+                        source.unwrap_or_default(),
+                        overrides.len(),
+                        overrides.join(", ")
+                    );
+                }
+                Ok(())
+            } else {
+                println!("{name} is not a prefab instance");
+                Ok(())
+            }
+        }
     }
 }
 
+fn instance_prefab_source(scene: &Scene, name: &str, explicit: Option<&str>) -> Result<String> {
+    if let Some(p) = explicit.filter(|s| !s.is_empty()) {
+        return Ok(p.to_string());
+    }
+    scene
+        .find_entity(name)
+        .and_then(|e| e.prefab.clone())
+        .ok_or_else(|| {
+            anyhow::anyhow!("entity '{name}' has no prefab link (pass a prefab stem or path)")
+        })
+}
+
 fn resolve_prefab_path(game_dir: &Path, prefab: &str) -> Result<std::path::PathBuf> {
-    let direct = game_dir.join(prefab);
-    if direct.is_file() {
-        return Ok(direct);
-    }
-    let with_ext = if prefab.ends_with(".prefab.json") {
-        game_dir.join("assets").join("prefabs").join(prefab)
-    } else {
-        game_dir
-            .join("assets")
-            .join("prefabs")
-            .join(format!("{prefab}.prefab.json"))
-    };
-    if with_ext.is_file() {
-        return Ok(with_ext);
-    }
-    bail!(
-        "prefab not found: {prefab} (tried {}, {})",
-        direct.display(),
-        with_ext.display()
-    )
+    resolve_prefab_asset(game_dir, prefab)
 }

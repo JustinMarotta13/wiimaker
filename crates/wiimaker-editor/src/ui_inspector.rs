@@ -78,6 +78,29 @@ impl EditorApp {
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
         let mut rename_committed = false;
+        let mut prefab_apply = false;
+        let mut prefab_revert = false;
+        let mut prefab_unpack = false;
+
+        let prefab_link = self
+            .scene
+            .find_entity(&sel)
+            .and_then(|e| e.prefab.clone())
+            .filter(|s| !s.is_empty());
+        let prefab_ov = if let Some(src) = prefab_link.as_deref() {
+            self.scene
+                .find_entity(&sel)
+                .and_then(|ent| {
+                    wiimaker_scene::resolve_prefab_asset(&self.game_dir, src)
+                        .ok()
+                        .and_then(|p| wiimaker_scene::load_prefab(&p).ok())
+                        .map(|pf| wiimaker_scene::prefab_overrides(ent, &pf.entity))
+                })
+                .unwrap_or_default()
+        } else {
+            wiimaker_scene::PrefabOverrides::default()
+        };
+        let is_prefab_instance = prefab_link.is_some();
 
         // GameObject header — inspector.png (name row, then Tag).
         ui.horizontal(|ui| {
@@ -92,11 +115,62 @@ impl EditorApp {
             }
         });
         ui.horizontal(|ui| {
-            theme::inspector_label(ui, "Tag");
+            theme::inspector_label_ov(ui, "Tag", prefab_ov.contains("tag"));
             if let Some(ent) = self.scene.entities.iter_mut().find(|e| e.name == sel) {
                 dirty |= ui.add(egui::DragValue::new(&mut ent.tag)).changed();
             }
         });
+        if is_prefab_instance {
+            ui.add_space(4.0);
+            theme::card_frame().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Prefab")
+                            .strong()
+                            .size(12.0)
+                            .color(theme::PREFAB_OVERRIDE),
+                    );
+                    ui.label(
+                        RichText::new(wiimaker_scene::prefab_stem(
+                            prefab_link.as_deref().unwrap_or(""),
+                        ))
+                        .size(12.0)
+                        .color(theme::TEXT),
+                    );
+                    if !prefab_ov.is_empty() {
+                        ui.label(
+                            RichText::new(format!("{} overrides", prefab_ov.len()))
+                                .size(11.0)
+                                .strong()
+                                .color(theme::PREFAB_OVERRIDE),
+                        );
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Apply")
+                        .on_hover_text("Push overrides to the prefab asset")
+                        .clicked()
+                    {
+                        prefab_apply = true;
+                    }
+                    if ui
+                        .button("Revert")
+                        .on_hover_text("Reset instance to the prefab asset")
+                        .clicked()
+                    {
+                        prefab_revert = true;
+                    }
+                    if ui
+                        .button("Unpack Completely")
+                        .on_hover_text("Break the prefab link; keep current values")
+                        .clicked()
+                    {
+                        prefab_unpack = true;
+                    }
+                });
+            });
+        }
         if rename_committed {
             self.commit_rename();
         }
@@ -116,30 +190,49 @@ impl EditorApp {
             let xform_hdr = theme::component_card_header(ui, "transform", xform_label, None, false);
             if xform_hdr.open {
             theme::inspector_props().show(ui, |ui| {
-                dirty |= theme::vec3_row(ui, "Position", &mut ent.transform.translation, 1.0);
+                dirty |= theme::vec3_row_ov(
+                    ui,
+                    "Position",
+                    &mut ent.transform.translation,
+                    1.0,
+                    prefab_ov.contains("transform.position"),
+                );
                 let rot = ent.transform.rotation;
                 let mut euler = [
                     0.0_f32,
                     0.0_f32,
                     (2.0 * rot[2] * rot[3]).atan2(rot[3] * rot[3] - rot[2] * rot[2]).to_degrees(),
                 ];
-                if theme::vec3_row(ui, "Rotation", &mut euler, 0.5) {
+                if theme::vec3_row_ov(
+                    ui,
+                    "Rotation",
+                    &mut euler,
+                    0.5,
+                    prefab_ov.contains("transform.rotation"),
+                ) {
                     let half = euler[2].to_radians() * 0.5;
                     ent.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
                     dirty = true;
                 }
-                dirty |= theme::vec3_row(ui, "Scale", &mut ent.transform.scale, 0.01);
+                dirty |= theme::vec3_row_ov(
+                    ui,
+                    "Scale",
+                    &mut ent.transform.scale,
+                    0.01,
+                    prefab_ov.contains("transform.scale"),
+                );
             });
             }
 
             ui.add_space(6.0);
             if let Some(sp) = ent.components.sprite.as_mut() {
-                let hdr = theme::component_card_header(
+                let hdr = theme::component_card_header_ov(
                     ui,
                     "sprite",
                     "Sprite",
                     Some(sp.enabled),
                     true,
+                    prefab_ov.component("Sprite"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_sprite = Some(en);
@@ -168,13 +261,21 @@ impl EditorApp {
                         // Size looked up after borrow ends via pending.
                         pending_sprite_tex = Some((new_tex, [0.0, 0.0]));
                     }
-                    dirty |= theme::vec2_row(ui, "Size", &mut sp.size, 0.5);
+                    dirty |= theme::vec2_row_ov(
+                        ui,
+                        "Size",
+                        &mut sp.size,
+                        0.5,
+                        prefab_ov.contains("Sprite.size"),
+                    );
                     dirty |= sorting_layer_fields(
                         ui,
                         "sprite_sort",
                         &layer_names,
                         &mut sp.sorting_layer,
                         &mut sp.z,
+                        prefab_ov.contains("Sprite.sorting_layer"),
+                        prefab_ov.contains("Sprite.z"),
                     );
                 });
                 }
@@ -182,12 +283,13 @@ impl EditorApp {
             }
 
             if let Some(a) = ent.components.animation.as_mut() {
-                let hdr = theme::component_card_header(
+                let hdr = theme::component_card_header_ov(
                     ui,
                     "animation",
                     "Animation",
                     Some(a.enabled),
                     true,
+                    prefab_ov.component("Animation"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_animation = Some(en);
@@ -233,7 +335,13 @@ impl EditorApp {
                         dirty = true;
                     }
                     if let Some(fps) = a.fps.as_mut() {
-                        dirty |= theme::labeled_drag(ui, "Fps", fps, 0.25);
+                        dirty |= theme::labeled_drag_ov(
+                            ui,
+                            "Fps",
+                            fps,
+                            0.25,
+                            prefab_ov.contains("Animation.fps"),
+                        );
                     } else if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
                         ui.label(
                             RichText::new(format!("clip fps · {:.1}", meta.fps))
@@ -255,7 +363,14 @@ impl EditorApp {
             }
 
             if let Some(d) = ent.components.disc.as_mut() {
-                let hdr = theme::component_card_header(ui, "disc", "Disc", Some(d.enabled), true);
+                let hdr = theme::component_card_header_ov(
+                    ui,
+                    "disc",
+                    "Disc",
+                    Some(d.enabled),
+                    true,
+                    prefab_ov.component("Disc"),
+                );
                 if let Some(en) = hdr.toggle {
                     toggle_disc = Some(en);
                 }
@@ -264,25 +379,34 @@ impl EditorApp {
                 }
                 if hdr.open {
                 theme::inspector_props().show(ui, |ui| {
-                    dirty |= theme::labeled_drag(ui, "Radius", &mut d.radius, 0.5);
+                    dirty |= theme::labeled_drag_ov(
+                        ui,
+                        "Radius",
+                        &mut d.radius,
+                        0.5,
+                        prefab_ov.contains("Disc.radius"),
+                    );
                     dirty |= sorting_layer_fields(
                         ui,
                         "disc_sort",
                         &layer_names,
                         &mut d.sorting_layer,
                         &mut d.z,
+                        prefab_ov.contains("Disc.sorting_layer"),
+                        prefab_ov.contains("Disc.z"),
                     );
                 });
                 }
             }
 
             if let Some(tm) = ent.components.tilemap.as_mut() {
-                let hdr = theme::component_card_header(
+                let hdr = theme::component_card_header_ov(
                     ui,
                     "tilemap",
                     "Tilemap",
                     Some(tm.enabled),
                     true,
+                    prefab_ov.component("Tilemap"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_tilemap = Some(en);
@@ -302,14 +426,28 @@ impl EditorApp {
                             pending_tm_resize = Some((w, h));
                         }
                     });
-                    dirty |= theme::labeled_drag(ui, "Cell", &mut tm.cell, 0.25);
-                    dirty |= theme::vec2_row(ui, "Origin", &mut tm.origin, 1.0);
+                    dirty |= theme::labeled_drag_ov(
+                        ui,
+                        "Cell",
+                        &mut tm.cell,
+                        0.25,
+                        prefab_ov.contains("Tilemap.cell"),
+                    );
+                    dirty |= theme::vec2_row_ov(
+                        ui,
+                        "Origin",
+                        &mut tm.origin,
+                        1.0,
+                        prefab_ov.contains("Tilemap.origin"),
+                    );
                     dirty |= sorting_layer_fields(
                         ui,
                         "tilemap_sort",
                         &layer_names,
                         &mut tm.sorting_layer,
                         &mut tm.z,
+                        prefab_ov.contains("Tilemap.sorting_layer"),
+                        prefab_ov.contains("Tilemap.z"),
                     );
                     let occupied = tm.cells.iter().filter(|c| **c != 0).count();
                     ui.label(
@@ -392,12 +530,13 @@ impl EditorApp {
             }
 
             if let Some(c) = ent.components.collider.as_mut() {
-                let hdr = theme::component_card_header(
+                let hdr = theme::component_card_header_ov(
                     ui,
                     "collider",
                     "Collider",
                     Some(c.enabled),
                     true,
+                    prefab_ov.component("Collider"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_collider = Some(en);
@@ -432,10 +571,22 @@ impl EditorApp {
                         });
                     match c.kind {
                         SceneColliderKind::Aabb => {
-                            dirty |= theme::vec2_row(ui, "Size", &mut c.size, 0.5);
+                            dirty |= theme::vec2_row_ov(
+                                ui,
+                                "Size",
+                                &mut c.size,
+                                0.5,
+                                prefab_ov.contains("Collider.size"),
+                            );
                         }
                         SceneColliderKind::Circle => {
-                            dirty |= theme::labeled_drag(ui, "Radius", &mut c.radius, 0.5);
+                            dirty |= theme::labeled_drag_ov(
+                                ui,
+                                "Radius",
+                                &mut c.radius,
+                                0.5,
+                                prefab_ov.contains("Collider.radius"),
+                            );
                         }
                     }
                     dirty |= ui.checkbox(&mut c.solid, "solid").changed();
@@ -447,18 +598,25 @@ impl EditorApp {
                         r.clone().on_hover_text("0 = any");
                         dirty |= r.changed();
                     });
-                    dirty |= theme::vec2_row(ui, "Offset", &mut c.offset, 0.5);
+                    dirty |= theme::vec2_row_ov(
+                        ui,
+                        "Offset",
+                        &mut c.offset,
+                        0.5,
+                        prefab_ov.contains("Collider.offset"),
+                    );
                 });
                 }
             }
 
             if let Some(cam) = ent.components.camera.as_mut() {
-                let hdr = theme::component_card_header(
+                let hdr = theme::component_card_header_ov(
                     ui,
                     "camera",
                     "Camera",
                     Some(cam.active),
                     true,
+                    prefab_ov.component("Camera"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_camera = Some(en);
@@ -505,7 +663,13 @@ impl EditorApp {
                         cam.follow = new_follow;
                         dirty = true;
                     }
-                    dirty |= theme::labeled_drag(ui, "Lerp", &mut cam.lerp, 0.01);
+                    dirty |= theme::labeled_drag_ov(
+                        ui,
+                        "Lerp",
+                        &mut cam.lerp,
+                        0.01,
+                        prefab_ov.contains("Camera.lerp"),
+                    );
                     if cam.lerp < 0.0 {
                         cam.lerp = 0.0;
                     }
@@ -518,12 +682,13 @@ impl EditorApp {
             }
 
             if let Some(g) = ent.components.grid_mover.as_mut() {
-                let hdr = theme::component_card_header(
+                let hdr = theme::component_card_header_ov(
                     ui,
                     "gridmover",
                     "GridMover",
                     Some(g.enabled),
                     true,
+                    prefab_ov.component("GridMover"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_grid_mover = Some(en);
@@ -533,11 +698,23 @@ impl EditorApp {
                 }
                 if hdr.open {
                 theme::inspector_props().show(ui, |ui| {
-                    dirty |= theme::labeled_drag(ui, "Cell", &mut g.cell, 0.25);
+                    dirty |= theme::labeled_drag_ov(
+                        ui,
+                        "Cell",
+                        &mut g.cell,
+                        0.25,
+                        prefab_ov.contains("GridMover.cell"),
+                    );
                     if g.cell < 0.01 {
                         g.cell = 0.01;
                     }
-                    dirty |= theme::labeled_drag(ui, "Speed", &mut g.speed, 0.5);
+                    dirty |= theme::labeled_drag_ov(
+                        ui,
+                        "Speed",
+                        &mut g.speed,
+                        0.5,
+                        prefab_ov.contains("GridMover.speed"),
+                    );
                     if g.speed < 0.0 {
                         g.speed = 0.0;
                     }
@@ -587,12 +764,13 @@ impl EditorApp {
             }
 
             if let Some(a) = ent.components.audio_source.as_mut() {
-                let hdr = theme::component_card_header(
+                let hdr = theme::component_card_header_ov(
                     ui,
                     "audiosource",
                     "AudioSource",
                     Some(a.enabled),
                     true,
+                    prefab_ov.component("AudioSource"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_audio_source = Some(en);
@@ -627,7 +805,13 @@ impl EditorApp {
                         a.clip = new_clip;
                         dirty = true;
                     }
-                    dirty |= theme::labeled_drag(ui, "Volume", &mut a.volume, 0.01);
+                    dirty |= theme::labeled_drag_ov(
+                        ui,
+                        "Volume",
+                        &mut a.volume,
+                        0.01,
+                        prefab_ov.contains("AudioSource.volume"),
+                    );
                     if a.volume < 0.0 {
                         a.volume = 0.0;
                     }
@@ -997,12 +1181,24 @@ impl EditorApp {
         }
 
         ui.add_space(8.0);
-        theme::card_frame().show(ui, |ui| {
-            if ui.button("Save as Prefab…").clicked() {
-                self.save_entity_as_prefab(&sel);
+        if is_prefab_instance {
+            if prefab_apply {
+                self.apply_selected_prefab(&sel);
             }
-            theme::muted(ui, "Writes assets/prefabs/<name>.prefab.json");
-        });
+            if prefab_revert {
+                self.revert_selected_prefab(&sel);
+            }
+            if prefab_unpack {
+                self.unpack_selected_prefab(&sel);
+            }
+        } else {
+            theme::card_frame().show(ui, |ui| {
+                if ui.button("Save as Prefab…").clicked() {
+                    self.save_entity_as_prefab(&sel);
+                }
+                theme::muted(ui, "Writes assets/prefabs/<name>.prefab.json");
+            });
+        }
     }
 
     fn ui_inspector_file(&mut self, ui: &mut egui::Ui) {
@@ -1271,12 +1467,14 @@ fn sorting_layer_fields(
     layers: &[String],
     layer: &mut String,
     z: &mut f32,
+    ov_layer: bool,
+    ov_order: bool,
 ) -> bool {
     let mut dirty = false;
     let current = display_sorting_layer(layer).to_string();
     let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
     ui.horizontal(|ui| {
-        theme::inspector_label(ui, "Sorting Layer");
+        theme::inspector_label_ov(ui, "Sorting Layer", ov_layer);
         let mut picked = current.clone();
         egui::ComboBox::from_id_salt(id_salt)
             .selected_text(&current)
@@ -1297,6 +1495,6 @@ fn sorting_layer_fields(
             dirty = true;
         }
     });
-    dirty |= theme::labeled_drag(ui, "Order in Layer", z, 0.05);
+    dirty |= theme::labeled_drag_ov(ui, "Order in Layer", z, 0.05, ov_order);
     dirty
 }
