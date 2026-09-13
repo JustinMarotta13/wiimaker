@@ -18,5 +18,6 @@ image = { workspace = true }
 wiimaker-core = { workspace = true }
 wiimaker-host = { workspace = true }
 wiimaker-scene = { workspace = true }
+wiimaker-play = { workspace = true }
 wiimaker-assets = { workspace = true }
 serde_json = { workspace = true }

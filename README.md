@@ -31,7 +31,7 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | BoxCollider2D / CircleCollider2D | `Collider` (`Aabb` / `Circle`, `solid`) |
 | AudioSource | `AudioSource` (`clip`, `volume`, `play_on_awake`) + host oneshots |
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
-| Play | `wiimaker run` / `cargo run -p <game>` |
+| Play | Editor Play ticks the game `App` (cdylib plugin) · `wiimaker run` / File → Run external |
 | Scenes in Build / LoadScene | `game.toml` `scenes = [...]` · `load_scene_into_world` · File → Build Settings… |
 | Build / Dolphin | `wiimaker build` · `wiimaker play-wii` |
 | Sprite Editor | `assets/<name>.sprites.json` + editor / `wiimaker asset slice` |
@@ -67,6 +67,7 @@ wiimaker scene build-list my-game --json
 wiimaker scene set-game-view my-game --preset 640x480 --scale 1
 wiimaker editor set-scene-view my-game --zoom 1.25 --grid true --gizmos true
 wiimaker editor prefs my-game --json
+wiimaker editor play-status my-game --json   # in-editor Play backend (plugin vs WASD fallback)
 wiimaker asset import my-game ./beep.wav
 wiimaker asset play my-game --name beep
 wiimaker entity add-component my-game --name Player AudioSource --clip beep --volume 1 --play-on-awake false
@@ -122,6 +123,7 @@ wiimaker/
 │   ├── wiimaker-host/     # desktop backend (minifb + texture atlas)
 │   ├── wiimaker-scene/    # game.toml / .scene.json + mutate helpers
 │   ├── wiimaker-assets/   # PNG → .wpack cooker
+│   ├── wiimaker-play/     # host/editor App tick + optional game cdylib
 │   ├── wiimaker-cli/      # `wiimaker` agent + human CLI
 │   └── wiimaker-editor/   # egui Hierarchy / Inspector / Scene / Project
 ├── runtime/wii/           # C Broadway bootstrap (VI/GX/PAD)

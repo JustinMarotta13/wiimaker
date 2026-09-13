@@ -1,13 +1,62 @@
 use std::path::Path;
 
 use anyhow::Result;
-use wiimaker_scene::{find_game_dir, load_editor_prefs, set_scene_view, EDITOR_PREFS_REL};
+use wiimaker_play::{build_play_plugin, inspect_play_plugin};
+use wiimaker_scene::{
+    find_game_dir, load_editor_prefs, load_project, set_scene_view, EDITOR_PREFS_REL,
+};
 
 use crate::args::EditorCmd;
 use crate::util::emit_ok;
 
 pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
     match cmd {
+        EditorCmd::PlayStatus { game, build } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let mut built = None;
+            if build {
+                built = Some(build_play_plugin(root, &project.name)?);
+            }
+            let st = inspect_play_plugin(root, &project.name, &game_dir);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "package": st.package,
+                        "backend": st.backend,
+                        "cdylib": st.cdylib,
+                        "dylib": st.dylib.to_string_lossy(),
+                        "dylib_exists": st.dylib_exists,
+                        "abi": st.abi,
+                        "force_fallback": st.force_fallback,
+                        "hint": st.hint,
+                        "built": built,
+                        "note": "CLI `run` is the external host twin. No new prefs — Play uses the game App plugin when present.",
+                    })
+                );
+            } else {
+                println!("play-status {}", st.package);
+                println!("  backend: {}", st.backend);
+                println!("  cdylib: {}", st.cdylib);
+                println!(
+                    "  dylib: {} (exists={})",
+                    st.dylib.display(),
+                    st.dylib_exists
+                );
+                if let Some(abi) = st.abi {
+                    println!("  abi: {abi}");
+                }
+                if let Some(h) = &st.hint {
+                    println!("  hint: {h}");
+                }
+                if let Some(b) = &built {
+                    println!("  {b}");
+                }
+            }
+            Ok(())
+        }
         EditorCmd::Prefs { game } => {
             let game_dir = find_game_dir(root, &game)?;
             let prefs = load_editor_prefs(&game_dir)?;

@@ -4,15 +4,15 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use eframe::egui;
 use wiimaker_assets::{list_wav_clips, AnimClipCatalog, SpriteCatalog, WPack};
-use wiimaker_core::input::{Button, Input};
-use wiimaker_core::math::Vec2;
-use wiimaker_core::move_and_collide;
+use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
-use wiimaker_host::{HostAudio, PlayOutcome, TextureAtlas, Framebuffer};
+use wiimaker_host::{Framebuffer, HostAudio, PlayOutcome, TextureAtlas};
+pub(crate) use wiimaker_play::PlayKind;
+use wiimaker_play::{apply_pad_keys, PadKeys, PlaySession, PlayStart};
 use wiimaker_scene::{
-    add_build_scene, add_component_sprite, animate_world, create_named_scene, diagnose,
-    duplicate_entity, find_game_dir, hydrate_lenient_with_sorting_layers, insert_entity_clone,
-    list_scenes, load_editor_prefs, load_project, load_scene, remove_build_scene, rename_entity,
+    add_build_scene, add_component_sprite, create_named_scene, diagnose, duplicate_entity,
+    find_game_dir, hydrate_lenient_with_sorting_layers, insert_entity_clone, list_scenes,
+    load_editor_prefs, load_project, load_scene, remove_build_scene, rename_entity,
     save_editor_prefs, save_scene, set_default_scene, EditorPrefs, EntityData, GameProject, Scene,
     Severity, TranslateHandle, UndoStack,
 };
@@ -157,6 +157,7 @@ pub(crate) struct EditorApp {
     pub(crate) prefs_dirty: bool,
     pub(crate) edit_tool: EditTool,
     pub(crate) play_mode: PlayMode,
+    pub(crate) play_session: Option<PlaySession>,
     pub(crate) tile_brush_id: u16,
     pub(crate) tile_brush_solid: bool,
     pub(crate) tile_paint: Option<TilePaintDrag>,
@@ -226,6 +227,7 @@ impl EditorApp {
             prefs_dirty: false,
             edit_tool: EditTool::Translate,
             play_mode: PlayMode::Edit,
+            play_session: None,
             tile_brush_id: 1,
             tile_brush_solid: true,
             tile_paint: None,
@@ -259,7 +261,7 @@ impl EditorApp {
             }
         }
         if std::env::var("WIIMAKER_EDITOR_PLAY").ok().as_deref() == Some("1") {
-            app.play_mode = PlayMode::Playing;
+            app.play();
         }
         Ok(app)
     }
@@ -453,12 +455,8 @@ impl EditorApp {
     }
 
     pub(crate) fn rename_project_sorting_layer(&mut self, from: &str, to: &str) {
-        match wiimaker_scene::rename_sorting_layer(
-            &self.game_dir,
-            from,
-            to,
-            Some(&self.scene_path),
-        ) {
+        match wiimaker_scene::rename_sorting_layer(&self.game_dir, from, to, Some(&self.scene_path))
+        {
             Ok(_) => {
                 let n = wiimaker_scene::remap_scene_sorting_layer(&mut self.scene, from, to);
                 if n > 0 {
@@ -490,8 +488,7 @@ impl EditorApp {
     }
 
     pub(crate) fn remove_project_sorting_layer(&mut self, name: &str) {
-        match wiimaker_scene::remove_sorting_layer(&self.game_dir, name, Some(&self.scene_path))
-        {
+        match wiimaker_scene::remove_sorting_layer(&self.game_dir, name, Some(&self.scene_path)) {
             Ok(_) => {
                 let n = wiimaker_scene::remap_scene_sorting_layer(
                     &mut self.scene,
@@ -953,11 +950,9 @@ impl EditorApp {
                     Ok(()) => {
                         let link = format!("assets/prefabs/{name}.prefab.json");
                         self.push_undo();
-                        if let Err(e) = wiimaker_scene::attach_prefab_instance(
-                            &mut self.scene,
-                            name,
-                            &link,
-                        ) {
+                        if let Err(e) =
+                            wiimaker_scene::attach_prefab_instance(&mut self.scene, name, &link)
+                        {
                             self.status = format!("prefab saved, link failed: {e}");
                         } else {
                             self.sync_baseline();
@@ -996,11 +991,7 @@ impl EditorApp {
     }
 
     pub(crate) fn apply_selected_prefab(&mut self, name: &str) {
-        let Some(src) = self
-            .scene
-            .find_entity(name)
-            .and_then(|e| e.prefab.clone())
-        else {
+        let Some(src) = self.scene.find_entity(name).and_then(|e| e.prefab.clone()) else {
             self.status = format!("{name} is not a prefab instance");
             return;
         };
@@ -1043,7 +1034,8 @@ impl EditorApp {
         match wiimaker_scene::load_prefab_for_instance(&self.game_dir, &ent) {
             Ok(prefab) => {
                 self.push_undo();
-                if let Err(e) = wiimaker_scene::revert_prefab_instance(&mut self.scene, name, &prefab)
+                if let Err(e) =
+                    wiimaker_scene::revert_prefab_instance(&mut self.scene, name, &prefab)
                 {
                     let _ = self.undo.undo(&mut self.scene);
                     self.status = format!("revert prefab failed: {e}");
@@ -1104,17 +1096,28 @@ impl EditorApp {
             PlayMode::Edit => {
                 self.prepare_assets();
                 self.rehydrate();
-                self.world.queue_awake_audio();
-                let assets = self.project.assets_path(&self.game_dir);
-                for err in self.host_audio.play_world(&mut self.world, &assets) {
-                    self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
+                let scene_json = serde_json::to_string(&self.scene).ok();
+                let mut session = PlaySession::start(PlayStart {
+                    workspace: &self.root,
+                    package: &self.project.name,
+                    game_dir: &self.game_dir,
+                    scene_json: scene_json.as_deref(),
+                    force_fallback: false,
+                    build_if_needed: true,
+                });
+                for line in session.take_logs() {
+                    self.log_line(ConsoleLevel::Info, line);
                 }
+                if !session.is_plugin() {
+                    self.world.queue_awake_audio();
+                    let assets = self.project.assets_path(&self.game_dir);
+                    for err in self.host_audio.play_world(&mut self.world, &assets) {
+                        self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
+                    }
+                }
+                self.play_session = Some(session);
                 self.play_mode = PlayMode::Playing;
                 self.last_play_hit = None;
-                self.log_line(
-                    ConsoleLevel::Info,
-                    "Play Mode · WASD/arrows move Player · Esc stops",
-                );
             }
             PlayMode::Paused => {
                 self.play_mode = PlayMode::Playing;
@@ -1132,9 +1135,14 @@ impl EditorApp {
             return;
         }
         self.play_mode = PlayMode::Edit;
+        self.play_session = None;
         self.last_play_hit = None;
         self.rehydrate();
         self.log_line(ConsoleLevel::Info, "stopped · edits preserved");
+    }
+
+    pub(crate) fn play_kind(&self) -> Option<PlayKind> {
+        self.play_session.as_ref().map(|s| s.kind())
     }
 
     pub(crate) fn play_external(&mut self) {
@@ -1149,7 +1157,7 @@ impl EditorApp {
         }
     }
 
-    /// In-editor play tick: move `Player` with WASD / arrows (does not dirty the scene).
+    /// In-editor play tick: game `App` plugin when present, else WASD `Player`.
     pub(crate) fn tick_play_mode(&mut self, ctx: &egui::Context) {
         if self.play_mode != PlayMode::Playing {
             return;
@@ -1159,49 +1167,47 @@ impl EditorApp {
             return;
         }
         let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
-        animate_world(&mut self.world, &self.catalog, self.atlas.map(), dt);
-
-        let mut play_input = Input::new();
-        let (dx, dy) = ctx.input(|i| {
-            let mut x = 0.0f32;
-            let mut y = 0.0f32;
-            let left = i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft);
-            let right = i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight);
-            let up = i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp);
-            let down = i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown);
-            if left {
-                x -= 1.0;
-            }
-            if right {
-                x += 1.0;
-            }
-            if up {
-                y -= 1.0;
-            }
-            if down {
-                y += 1.0;
-            }
-            play_input.set_down(Button::DPadLeft, left);
-            play_input.set_down(Button::DPadRight, right);
-            play_input.set_down(Button::DPadUp, up);
-            play_input.set_down(Button::DPadDown, down);
-            play_input.main.x = x;
-            play_input.main.y = -y; // world −Y is Up; stick +Y is Up
-            (x, y)
+        let keys = ctx.input(|i| PadKeys {
+            left: i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft),
+            right: i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight),
+            up: i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp),
+            down: i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown),
+            a: i.key_down(egui::Key::Z) || i.key_down(egui::Key::Space),
+            b: i.key_down(egui::Key::X),
+            start: i.key_down(egui::Key::Enter),
         });
-        self.world.step_grid_movers(&play_input, dt);
+        let mut play_input = Input::new();
+        play_input.begin_frame();
+        apply_pad_keys(&mut play_input, keys);
 
-        let player_uses_grid = self
-            .world
-            .find_by_name("Player")
-            .and_then(|id| self.world.grid_mover(id))
-            .is_some();
-        if !player_uses_grid && (dx != 0.0 || dy != 0.0) {
-            if let Some(id) = self.world.find_by_name("Player") {
-                let speed = 220.0 * dt;
-                let hit = move_and_collide(&mut self.world, id, Vec2::new(dx * speed, dy * speed));
-                if let Some(hid) = hit.hit {
-                    let name = self.world.name(hid).unwrap_or("?").to_string();
+        let Some(session) = self.play_session.as_mut() else {
+            return;
+        };
+        let plugin = session.is_plugin();
+        let tick = if plugin {
+            session.tick(
+                &play_input,
+                dt,
+                None,
+                None,
+                None,
+                VIEW_W as u32,
+                VIEW_H as u32,
+            )
+        } else {
+            session.tick(
+                &play_input,
+                dt,
+                Some(&mut self.world),
+                Some(&self.catalog),
+                Some(self.atlas.map()),
+                VIEW_W as u32,
+                VIEW_H as u32,
+            )
+        };
+        match tick {
+            Ok(result) => {
+                if let Some(name) = result.hit_name {
                     if self.last_play_hit.as_deref() != Some(name.as_str()) {
                         self.console_push(
                             ConsoleLevel::Info,
@@ -1209,34 +1215,17 @@ impl EditorApp {
                         );
                         self.last_play_hit = Some(name);
                     }
-                } else {
+                } else if !plugin {
                     self.last_play_hit = None;
                 }
-                // Identity 640×480 play clamps to the screen; an active camera can pan.
-                if self.world.active_camera().is_none() {
-                    let r = self.world.disc(id).map(|d| d.radius).unwrap_or(16.0);
-                    if let Some(xf) = self.world.transform_mut(id) {
-                        xf.translation.x = xf.translation.x.clamp(r, 640.0 - r);
-                        xf.translation.y = xf.translation.y.clamp(r, 480.0 - r);
-                    }
-                }
             }
+            Err(e) => self.log_line(ConsoleLevel::Error, format!("play tick: {e}")),
         }
-        if let Some(id) = self.world.find_by_name("Player") {
-            if let Some(shadow) = self.world.find_by_name("OrbShadow") {
-                if let (Some(player), Some(sxf)) = (
-                    self.world.transform(id).copied(),
-                    self.world.transform_mut(shadow),
-                ) {
-                    sxf.translation.x = player.translation.x + 4.0;
-                    sxf.translation.y = player.translation.y + 6.0;
-                }
+        if !plugin {
+            let assets = self.project.assets_path(&self.game_dir);
+            for err in self.host_audio.play_world(&mut self.world, &assets) {
+                self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
             }
-        }
-        self.world.follow_cameras();
-        let assets = self.project.assets_path(&self.game_dir);
-        for err in self.host_audio.play_world(&mut self.world, &assets) {
-            self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
         }
     }
 

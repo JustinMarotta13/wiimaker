@@ -15,26 +15,25 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource, enable checkbox, catalog combo, tile palette, **Sorting Layer** + **Order in Layer** |
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, **Move axis handles** (red X / green Y), Snap + nudge |
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
-| Play | toolbar Play/Pause/Stop (hardcoded WASD on entity named `Player`; does **not** run game `App::update`) · File → Run external → `cargo run -p <game>` |
+| Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
 | Prefab | `.prefab.json` · instance `prefab` link · Save as Prefab / Instantiate / Apply (push to asset) / Revert / Unpack Completely · orange-bold Inspector overrides |
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
 Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host cpal). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** nested prefabs / prefab variants, text/UI, play-mode running the game crate, Wii GX draw of tilemaps (payload skipped), Wii ASND.
+**Not present:** nested prefabs / prefab variants, text/UI, Wii GX draw of tilemaps (payload skipped), Wii ASND.
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-09-12):** Play-in-editor runs `App` (today’s Play is hello-orb WASD). Prefab instance links + overrides shipped.
+**Recommended next morning (2026-09-13):** Text / HUD — DrawList has no glyphs; score lives in stdout.
 
 ---
 
 ## Later
 
-- **Play-in-editor runs `App`** (GUI) — today's Play is hello-orb WASD, not the game crate. Load game as dylib or interpret a tiny script graph. CLI already has `run`.
 - **Text / HUD** (GUI+CLI) — DrawList has no glyphs; score lives in stdout. Bitmap font in `.wpack` + `DrawText`.
 - **Animated tiles / auto-tile** (GUI+CLI) — after tilemap.
 - **Tilemap CLI stamp from ASCII** (CLI, tiny GUI import) — `tilemap from-ascii maze.txt`.
@@ -58,7 +57,7 @@ Shipped. Keep here so we do not rebuild them.
 - `.wpack` cook (PNG → tiled RGB5A3) · sprite sheet sidecar + catalog + pivot
 - Scene JSON / prefab JSON · hydrate (strict + lenient) · WSCN0003 bake (UV + pivot + Tilemap payload)
 - egui editor: Hierarchy, Inspector, Scene viewport, Project, Sprite Editor, theme
-- Editor Play/Pause/Stop (Player WASD only) · Build · Play in Dolphin · Build & Run · Cook under ⋯
+- Editor Play/Pause/Stop (game `App` plugin, WASD fallback) · Build · Play in Dolphin · Build & Run · Cook under ⋯
 - Undo/redo, duplicate/copy/paste, parent/unparent, multi-select, snap, Move/Scale/Rotate
 - Prefab create / instantiate / apply / unpack (link + overrides shipped 2026-09-12)
 - Agent CLI twin of mutations (`--json`): see command list below
@@ -84,6 +83,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Prefab instance links + overrides** (2026-09-12) — scene `EntityData.prefab` (relative `*.prefab.json` / stem; missing = not an instance). `instantiate_prefab` records the link; `unpack_prefab_instance` clears it (values stay). Override detect vs loaded asset (`transform.position`, `Disc.radius`, …). Inspector dark Pro: orange-bold labels + **Apply** / **Revert** / **Unpack Completely**. Apply writes the `.prefab.json` asset; Revert resets the instance. CLI twins: `create-prefab` (also links source) · `instantiate-prefab` · `apply-prefab` · `revert-prefab` · `unpack-prefab` · `prefab-status` (`--json`). One-entity prefabs only — no nested children / variants / per-property Apply. Host-first; WSCN unchanged.
 
+- **Play-in-editor runs `App`** (2026-09-13) — `wiimaker-play` shared host/editor tick (`step_app`, `apply_pad_keys`, 60 Hz). Games export `cdylib` via `export_play_app!` (template + hello-orb). Editor Play loads the plugin and calls `App::update` / live World blit; Stop drops the plugin and rehydrates the authored scene; Pause skips ticks. No plugin → previous WASD/`Player` + OrbShadow fallback. No new prefs. CLI: `editor play-status [--build] [--json]`; `run` stays the external host twin. Tests: in-process `App` tick + `play_probe` cdylib (Marker moves; fallback would not). Host-first; WSCN unchanged.
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -100,7 +101,7 @@ Global: `--json`
 | `play-wii` | build then Dolphin |
 | `doctor` | validate |
 | `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` · `scene set-game-view` | build-* mutate `game.toml` `scenes`; set-game-view writes `.wiimaker/prefs.toml` |
-| `editor prefs` · `editor set-scene-view` | Scene zoom/pan/grid/gizmos/snap in the same prefs file |
+| `editor prefs` · `editor set-scene-view` · `editor play-status` | Scene zoom/pan/grid/gizmos/snap in prefs; play-status reports App plugin vs WASD fallback (no new prefs) |
 | `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --sorting-layer --order-in-layer` (`--z` alias) |
 | `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Camera` \| `Follow` (`--target` `--lerp`) \| `GridMover` (`--cell` `--speed` `--queued-dir`) \| `AudioSource` (`--clip` `--volume` `--play-on-awake`) |
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
@@ -129,5 +130,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Ship Play-in-editor runs `App` (Later).** Today's Play is hello-orb WASD, not the game crate.
+**Ship Text / HUD (Later).** DrawList has no glyphs; score lives in stdout. Bitmap font in `.wpack` + `DrawText`.
 

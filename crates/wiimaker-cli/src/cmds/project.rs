@@ -20,6 +20,8 @@ pub fn new_game(root: &Path, name: &str, json: bool) -> Result<()> {
     for rel in [
         "Cargo.toml",
         "src/main.rs",
+        "src/lib.rs",
+        "src/game.rs",
         "game.toml",
         "scenes/main.scene.json",
     ] {
@@ -60,6 +62,7 @@ pub fn new_game(root: &Path, name: &str, json: bool) -> Result<()> {
         println!("  wiimaker build {name}");
         println!("  wiimaker run {name}");
         println!("  wiimaker edit {name}");
+        println!("  wiimaker editor play-status {name} --json");
     }
     Ok(())
 }
@@ -112,7 +115,13 @@ pub fn edit_game(root: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn cook(root: &Path, name: &str, input: Option<std::path::PathBuf>, output: Option<std::path::PathBuf>, json: bool) -> Result<()> {
+pub fn cook(
+    root: &Path,
+    name: &str,
+    input: Option<std::path::PathBuf>,
+    output: Option<std::path::PathBuf>,
+    json: bool,
+) -> Result<()> {
     let out = pipeline::prepare_assets(root, name, input, output)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&out)?);

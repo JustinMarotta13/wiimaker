@@ -4,12 +4,13 @@ use wiimaker_core::draw::DrawList;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
-    constrain_translate, fitted_blit_rect, pick_entity_at_with_catalog_and_layers, pointer_to_scene,
-    render_world_ex, scene_blit_rect, set_entity_rotation_z, set_entity_scale, set_entity_world_xy,
-    tilemap_set_cell, GameViewAspect, GameViewPreset, MoveHandleLayout, Scene, TranslateHandle,
+    constrain_translate, fitted_blit_rect, pick_entity_at_with_catalog_and_layers,
+    pointer_to_scene, render_world_ex, scene_blit_rect, set_entity_rotation_z, set_entity_scale,
+    set_entity_world_xy, tilemap_set_cell, GameViewAspect, GameViewPreset, MoveHandleLayout, Scene,
+    TranslateHandle,
 };
 
-use crate::app::{CenterTab, EditTool, EditorApp, PlayMode, TilePaintDrag, ViewportDrag};
+use crate::app::{CenterTab, EditTool, EditorApp, PlayKind, PlayMode, TilePaintDrag, ViewportDrag};
 use crate::theme;
 
 pub(crate) const VIEW_W: usize = 640;
@@ -220,7 +221,10 @@ impl EditorApp {
                 );
                 if self.play_mode != PlayMode::Edit {
                     let label = match self.play_mode {
-                        PlayMode::Playing => "PLAYING",
+                        PlayMode::Playing => match self.play_kind() {
+                            Some(PlayKind::Plugin) => "PLAYING · App",
+                            _ => "PLAYING",
+                        },
                         PlayMode::Paused => "PAUSED",
                         PlayMode::Edit => "",
                     };
@@ -240,7 +244,13 @@ impl EditorApp {
         let ctx = ui.ctx().clone();
         let mut draw = DrawList::new();
         // Scene tab stays world-space (camera rect gizmo). Game tab applies the active camera.
-        render_world_ex(&self.world, &mut draw, self.scene.clear_rgba(), !is_scene);
+        // Plugin Play owns a live World; fallback mutates the editor World.
+        let clear = self.scene.clear_rgba();
+        if let Some(world) = self.play_session.as_ref().and_then(|s| s.world()) {
+            render_world_ex(world, &mut draw, clear, !is_scene);
+        } else {
+            render_world_ex(&self.world, &mut draw, clear, !is_scene);
+        }
         flush_with_atlas(&draw, &mut self.fb, Some(&self.atlas));
 
         let rgb = fb_to_rgb(&self.fb);
@@ -322,7 +332,7 @@ impl EditorApp {
             ui.painter().text(
                 image_rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Play to simulate  ·  WASD moves Player",
+                "Play to run the game App  ·  Esc stops",
                 egui::FontId::proportional(13.0),
                 theme::TEXT_DIM,
             );

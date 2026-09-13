@@ -3,7 +3,7 @@
   "clear_color": [16, 22, 40, 255],
   "entities": [
     {
-      "name": "Orb",
+      "name": "Player",
       "transform": {
         "translation": [320.0, 240.0, 0.0],
         "rotation": [0.0, 0.0, 0.0, 1.0],
