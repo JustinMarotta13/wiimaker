@@ -22,6 +22,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
 - `scene set-game-view <game> [--width --height] [--aspect free|fixed] [--preset free|640x480|16:9|4:3|custom] [--scale]` writes `.wiimaker/prefs.toml` (same as Game tab).
 - `editor prefs <game>` dumps Scene/Game chrome; `editor set-scene-view` sets zoom/pan/grid/gizmos/snap (`--json`). Move-tool axis handles are editor-only (CLI n/a).
+- `editor play-status <game> [--build] [--json]` reports whether in-editor Play will load the game `App` cdylib or the WASD fallback. No new prefs — CLI `run` remains the external host twin.
 - `entity list` prints an indented tree (non-json); JSON still dumps flat entity array with `parent` fields.
 - Sprite sheets: `asset slice <game> <stem> --cols N --rows M`, `asset set-pivot <game> <cell> --x --y`, `asset list-sprites`.
 

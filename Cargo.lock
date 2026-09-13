@@ -1606,6 +1606,7 @@ dependencies = [
  "wiimaker-assets",
  "wiimaker-core",
  "wiimaker-host",
+ "wiimaker-play",
  "wiimaker-scene",
 ]
 
@@ -3942,6 +3943,7 @@ dependencies = [
  "serde",
  "serde_json",
  "wiimaker-assets",
+ "wiimaker-play",
  "wiimaker-scene",
 ]
 
@@ -3965,6 +3967,7 @@ dependencies = [
  "wiimaker-assets",
  "wiimaker-core",
  "wiimaker-host",
+ "wiimaker-play",
  "wiimaker-scene",
 ]
 
@@ -3974,6 +3977,19 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "minifb",
+ "wiimaker-assets",
+ "wiimaker-core",
+ "wiimaker-play",
+ "wiimaker-scene",
+]
+
+[[package]]
+name = "wiimaker-play"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libloading",
+ "serde_json",
  "wiimaker-assets",
  "wiimaker-core",
  "wiimaker-scene",

@@ -5,6 +5,7 @@ members = [
     "crates/wiimaker-host",
     "crates/wiimaker-assets",
     "crates/wiimaker-scene",
+    "crates/wiimaker-play",
     "crates/wiimaker-cli",
     "crates/wiimaker-editor",
     "games/hello-orb",
@@ -22,7 +23,9 @@ wiimaker-core = { path = "crates/wiimaker-core" }
 wiimaker-host = { path = "crates/wiimaker-host" }
 wiimaker-assets = { path = "crates/wiimaker-assets" }
 wiimaker-scene = { path = "crates/wiimaker-scene" }
+wiimaker-play = { path = "crates/wiimaker-play" }
 wiimaker-editor = { path = "crates/wiimaker-editor" }
+libloading = "0.8"
 glam = { version = "0.29", default-features = false, features = ["libm"] }
 minifb = "0.27"
 clap = { version = "4", features = ["derive"] }

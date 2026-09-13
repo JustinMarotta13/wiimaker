@@ -139,6 +139,13 @@ pub enum SceneCmd {
 pub enum EditorCmd {
     /// Print `.wiimaker/prefs.toml` (defaults if missing)
     Prefs { game: String },
+    /// Whether in-editor Play can load the game `App` cdylib (no new prefs)
+    PlayStatus {
+        game: String,
+        /// `cargo build -p <game> --lib` first
+        #[arg(long)]
+        build: bool,
+    },
     /// Scene view zoom / pan / grid / gizmos / snap
     SetSceneView {
         game: String,

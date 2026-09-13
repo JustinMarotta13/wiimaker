@@ -9,5 +9,6 @@ description = "Desktop backend for wiimaker — fast iteration without Dolphin"
 wiimaker-core = { workspace = true }
 wiimaker-assets = { workspace = true }
 wiimaker-scene = { workspace = true }
+wiimaker-play = { workspace = true }
 minifb = { workspace = true }
 anyhow = { workspace = true }

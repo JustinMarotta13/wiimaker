@@ -43,7 +43,7 @@ self.rehydrate();
 
 `EditorApp` holds: `GameProject`, `Scene`, `scene_path`, `dirty`, `selected`, `World`, `TextureAtlas`, viewport `Framebuffer`. After asset cook/reload, rebuild atlas and rehydrate.
 
-Play shells `wiimaker run` / `cargo run -p <game>` — do not fold egui into the fast play path.
+In-editor Play ticks the open game’s `App` via `wiimaker-play` (cdylib plugin). File → Run external still shells `wiimaker run` / `cargo run -p <game>`. Do not fold egui into the fast host path.
 
 ## Out of scope (v0)
 

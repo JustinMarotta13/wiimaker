@@ -22,6 +22,7 @@ Ship original Wii games with a modern authoring loop:
 │  games/*          App + scenes (.scene.json) + gameplay │
 ├─────────────────────────────────────────────────────────┤
 │  wiimaker-scene   Project / Scene / Prefab + mutate API │
+│  wiimaker-play    Host/editor App tick + optional cdylib│
 │  wiimaker-editor  egui Hierarchy · Inspector · Viewport │
 │  wiimaker-cli     Agent twin of every editor mutation   │
 ├─────────────────────────────────────────────────────────┤

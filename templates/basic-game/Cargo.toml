@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
 [[bin]]
 name = "{{name}}"
 path = "src/main.rs"
@@ -13,3 +17,4 @@ wiimaker-core = { workspace = true }
 wiimaker-host = { workspace = true }
 wiimaker-scene = { workspace = true }
 wiimaker-assets = { workspace = true }
+wiimaker-play = { workspace = true }

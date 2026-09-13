@@ -94,4 +94,22 @@ impl Input {
     pub fn released(&self, button: Button) -> bool {
         self.released & Self::mask(button) != 0
     }
+
+    /// Restore edge bits after reconstructing [`Input`] from a held-button snapshot.
+    pub fn set_edge_bits(&mut self, pressed: u32, released: u32) {
+        self.pressed = pressed;
+        self.released = released;
+    }
+
+    pub fn down_bits(&self) -> u32 {
+        self.down
+    }
+
+    pub fn pressed_bits(&self) -> u32 {
+        self.pressed
+    }
+
+    pub fn released_bits(&self) -> u32 {
+        self.released
+    }
 }

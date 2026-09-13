@@ -6,8 +6,9 @@ use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
 use wiimaker_core::app::{App, FrameCtx};
 use wiimaker_core::draw::DrawList;
-use wiimaker_core::input::{Button, Input};
+use wiimaker_core::input::Input;
 use wiimaker_core::time::Clock;
+use wiimaker_play::{apply_pad_keys, step_app, PadKeys};
 
 use crate::atlas::TextureAtlas;
 use crate::raster::{self, Framebuffer};
@@ -57,7 +58,13 @@ pub fn run_with_atlas<A: App>(
             framebuffer_h: DEFAULT_H as u32,
         };
         for _ in 0..steps {
-            app.update(&ctx);
+            step_app(
+                &mut app,
+                ctx.input,
+                ctx.clock,
+                ctx.framebuffer_w,
+                ctx.framebuffer_h,
+            );
         }
 
         draw.clear_buffer();
@@ -72,27 +79,18 @@ pub fn run_with_atlas<A: App>(
 
 fn poll_input(window: &Window, input: &mut Input) {
     input.begin_frame();
-
-    let left = key(window, Key::Left) || key(window, Key::A);
-    let right = key(window, Key::Right) || key(window, Key::D);
-    let up = key(window, Key::Up) || key(window, Key::W);
-    let down = key(window, Key::Down) || key(window, Key::S);
-
-    input.main.x = (right as i8 - left as i8) as f32;
-    input.main.y = (up as i8 - down as i8) as f32;
-    let mag = (input.main.x * input.main.x + input.main.y * input.main.y).sqrt();
-    if mag > 1.0 {
-        input.main.x /= mag;
-        input.main.y /= mag;
-    }
-
-    input.set_down(Button::A, key(window, Key::Z) || key(window, Key::Space));
-    input.set_down(Button::B, key(window, Key::X));
-    input.set_down(Button::Start, key(window, Key::Enter));
-    input.set_down(Button::DPadUp, up);
-    input.set_down(Button::DPadDown, down);
-    input.set_down(Button::DPadLeft, left);
-    input.set_down(Button::DPadRight, right);
+    apply_pad_keys(
+        input,
+        PadKeys {
+            left: key(window, Key::Left) || key(window, Key::A),
+            right: key(window, Key::Right) || key(window, Key::D),
+            up: key(window, Key::Up) || key(window, Key::W),
+            down: key(window, Key::Down) || key(window, Key::S),
+            a: key(window, Key::Z) || key(window, Key::Space),
+            b: key(window, Key::X),
+            start: key(window, Key::Enter),
+        },
+    );
 }
 
 fn key(window: &Window, k: Key) -> bool {
