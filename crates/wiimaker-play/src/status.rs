@@ -89,7 +89,8 @@ pub fn inspect_play_plugin(workspace: &Path, package: &str, game_dir: &Path) -> 
 
 /// `cargo build -p <package> --lib` in the workspace (debug cdylib).
 pub fn build_play_plugin(workspace: &Path, package: &str) -> Result<String> {
-    let status = Command::new("cargo")
+    let cargo = option_env!("CARGO").unwrap_or("cargo");
+    let status = Command::new(cargo)
         .args(["build", "-p", package, "--lib"])
         .current_dir(workspace)
         .status()
