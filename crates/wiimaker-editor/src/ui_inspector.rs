@@ -470,7 +470,8 @@ impl EditorApp {
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::DragValue::new(&mut pal.id)
-                                    .range(1..=32)
+                                    // `u16` like CLI `--id`; 0 is empty. 1..=32 clamped 99 → 32.
+                                    .range(1..=u16::MAX)
                                     .prefix("id "),
                             );
                             let mut col = egui::Color32::from_rgba_unmultiplied(
