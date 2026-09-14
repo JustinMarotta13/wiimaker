@@ -465,11 +465,13 @@ impl EditorApp {
                     ui.add_space(4.0);
                     ui.label(RichText::new("Palette").size(12.0).color(theme::TEXT_MUTED));
                     let catalog_names = &catalog_names;
-                    for pal in tm.palette.iter_mut() {
+                    let clip_names: Vec<String> = self.anim_catalog.names().to_vec();
+                    for (pi, pal) in tm.palette.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::DragValue::new(&mut pal.id)
-                                    .range(1..=32)
+                                    // `u16` like CLI `--id`; 0 is empty. 1..=32 clamped 99 → 32.
+                                    .range(1..=u16::MAX)
                                     .prefix("id "),
                             );
                             let mut col = egui::Color32::from_rgba_unmultiplied(
@@ -482,6 +484,7 @@ impl EditorApp {
                                 pal.color = [col.r(), col.g(), col.b(), col.a()];
                                 dirty = true;
                             }
+                            paint_autotile_badge(ui, pal.auto_tile.is_some());
                             if ui.small_button("Brush").clicked() {
                                 use_brush = Some((pal.id, true));
                             }
@@ -489,7 +492,7 @@ impl EditorApp {
                         let mut sprite = pal.sprite.clone().unwrap_or_default();
                         let combo_w = (ui.available_width() - 8.0).clamp(80.0, 200.0);
                         let mut tex_changed = false;
-                        egui::ComboBox::from_id_salt(format!("tm_pal_{}", pal.id))
+                        egui::ComboBox::from_id_salt(format!("tm_pal_{pi}_{}", pal.id))
                             .selected_text(if sprite.is_empty() {
                                 "(color quad)"
                             } else {
@@ -519,14 +522,141 @@ impl EditorApp {
                             };
                             dirty = true;
                         }
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Anim").size(11.0).color(theme::TEXT_MUTED));
+                            let mut anim = pal.anim.clone().unwrap_or_default();
+                            let mut anim_changed = false;
+                            egui::ComboBox::from_id_salt(format!("tm_pal_anim_{pi}"))
+                                .selected_text(if anim.is_empty() {
+                                    "(none)"
+                                } else {
+                                    anim.as_str()
+                                })
+                                .width(combo_w)
+                                .show_ui(ui, |ui| {
+                                    if ui.selectable_label(anim.is_empty(), "(none)").clicked()
+                                    {
+                                        anim.clear();
+                                        anim_changed = true;
+                                    }
+                                    for name in &clip_names {
+                                        if ui.selectable_label(anim == *name, name).clicked() {
+                                            anim = name.clone();
+                                            anim_changed = true;
+                                        }
+                                    }
+                                });
+                            if anim_changed {
+                                pal.anim = if anim.is_empty() { None } else { Some(anim) };
+                                dirty = true;
+                            }
+                        });
+                        if pal.anim_clip().is_some() {
+                            let mut use_override = pal.anim_fps.is_some();
+                            if ui.checkbox(&mut use_override, "Override FPS").changed() {
+                                if use_override {
+                                    let default_fps = pal
+                                        .anim
+                                        .as_ref()
+                                        .and_then(|c| self.anim_catalog.lookup(c))
+                                        .map(|m| m.fps)
+                                        .unwrap_or(10.0);
+                                    pal.anim_fps = Some(default_fps);
+                                } else {
+                                    pal.anim_fps = None;
+                                }
+                                dirty = true;
+                            }
+                            if let Some(fps) = pal.anim_fps.as_mut() {
+                                dirty |= theme::labeled_drag(ui, "Fps", fps, 0.25);
+                            }
+                        }
+
+                        let rule_label = match pal.auto_tile {
+                            None => "Off",
+                            Some(wiimaker_scene::SceneAutoTile::Id) => "Same id",
+                            Some(wiimaker_scene::SceneAutoTile::Solid) => "Solid",
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("Auto Tile")
+                                    .size(11.0)
+                                    .color(theme::TEXT_MUTED),
+                            );
+                            egui::ComboBox::from_id_salt(format!("tm_pal_auto_{pi}"))
+                                .selected_text(rule_label)
+                                .width(100.0)
+                                .show_ui(ui, |ui| {
+                                    if ui
+                                        .selectable_label(pal.auto_tile.is_none(), "Off")
+                                        .clicked()
+                                    {
+                                        pal.auto_tile = None;
+                                        dirty = true;
+                                    }
+                                    if ui
+                                        .selectable_label(
+                                            pal.auto_tile
+                                                == Some(wiimaker_scene::SceneAutoTile::Id),
+                                            "Same id",
+                                        )
+                                        .clicked()
+                                    {
+                                        pal.auto_tile = Some(wiimaker_scene::SceneAutoTile::Id);
+                                        dirty = true;
+                                    }
+                                    if ui
+                                        .selectable_label(
+                                            pal.auto_tile
+                                                == Some(wiimaker_scene::SceneAutoTile::Solid),
+                                            "Solid",
+                                        )
+                                        .clicked()
+                                    {
+                                        pal.auto_tile =
+                                            Some(wiimaker_scene::SceneAutoTile::Solid);
+                                        dirty = true;
+                                    }
+                                });
+                        });
+                        if pal.auto_tile.is_some() {
+                            ui.label(
+                                RichText::new("NESW bitmask · N=1 E=2 S=4 W=8")
+                                    .size(10.0)
+                                    .color(theme::TEXT_DIM),
+                            );
+                            let mut variants = pal.auto_sprites.join(",");
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("Variants")
+                                        .size(11.0)
+                                        .color(theme::TEXT_MUTED),
+                                );
+                                if ui
+                                    .add(
+                                        egui::TextEdit::singleline(&mut variants)
+                                            .desired_width(combo_w)
+                                            .hint_text("{sprite}_{mask}"),
+                                    )
+                                    .changed()
+                                {
+                                    pal.auto_sprites = if variants.trim().is_empty() {
+                                        Vec::new()
+                                    } else {
+                                        variants
+                                            .split(',')
+                                            .map(|s| s.trim().to_string())
+                                            .collect()
+                                    };
+                                    dirty = true;
+                                }
+                            });
+                        }
                     }
                     if ui.small_button("+ palette id").clicked() {
                         let next = tm.palette.iter().map(|p| p.id).max().unwrap_or(0) + 1;
-                        tm.palette.push(wiimaker_scene::SceneTilePalette {
-                            id: next,
-                            sprite: None,
-                            color: [48, 88, 176, 255],
-                        });
+                        tm.palette.push(wiimaker_scene::SceneTilePalette::new(next));
                         dirty = true;
                     }
                 });
@@ -1652,4 +1782,30 @@ fn sorting_layer_fields(
     });
     dirty |= theme::labeled_drag_ov(ui, "Order in Layer", z, 0.05, ov_order);
     dirty
+}
+
+/// Painted 4-neighbor badge (center + NESW). Lit when auto-tile is on.
+fn paint_autotile_badge(ui: &mut egui::Ui, on: bool) {
+    let size = egui::vec2(14.0, 14.0);
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let painter = ui.painter();
+    let cell = 3.4;
+    let gap = 0.8;
+    let origin = rect.center() - egui::vec2((cell + gap) * 1.5, (cell + gap) * 1.5);
+    let lit = theme::ACCENT;
+    let dim = egui::Color32::from_rgb(70, 74, 80);
+    let fill = |filled: bool| if filled { lit } else { dim };
+    let draw = |cx: i32, cy: i32, filled: bool| {
+        let min = origin + egui::vec2(cx as f32 * (cell + gap), cy as f32 * (cell + gap));
+        painter.rect_filled(
+            egui::Rect::from_min_size(min, egui::vec2(cell, cell)),
+            0.0,
+            fill(filled),
+        );
+    };
+    draw(1, 0, on); // N
+    draw(0, 1, on); // W
+    draw(1, 1, true); // center
+    draw(2, 1, on); // E
+    draw(1, 2, on); // S
 }

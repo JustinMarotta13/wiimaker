@@ -2,7 +2,7 @@
 
 use anyhow::{bail, Result};
 
-use crate::scene::{Scene, SceneTilemap};
+use crate::scene::{Scene, SceneAutoTile, SceneTilePalette, SceneTilemap};
 
 fn find_mut<'a>(scene: &'a mut Scene, name: &str) -> Result<&'a mut crate::scene::EntityData> {
     scene
@@ -207,11 +207,108 @@ pub fn tilemap_resize(scene: &mut Scene, name: &str, width: u32, height: u32) ->
     Ok(())
 }
 
+/// Optional fields for [`tilemap_set_palette`]. `None` leaves the current value.
+#[derive(Clone, Debug, Default)]
+pub struct TilePaletteOpts {
+    pub sprite: Option<String>,
+    pub color: Option<[u8; 4]>,
+    pub anim: Option<String>,
+    pub anim_fps: Option<f32>,
+    pub auto_tile: Option<String>,
+    pub auto_sprites: Option<Vec<String>>,
+}
+
+/// Create or update a palette entry on the named tilemap.
+pub fn tilemap_set_palette(
+    scene: &mut Scene,
+    name: &str,
+    id: u16,
+    opts: &TilePaletteOpts,
+) -> Result<SceneTilePalette> {
+    if id == 0 {
+        bail!("palette id 0 is reserved (empty cell)");
+    }
+    let tm = ensure_tilemap(scene, name)?;
+    let pal = if let Some(existing) = tm.palette.iter_mut().find(|p| p.id == id) {
+        existing
+    } else {
+        tm.palette.push(SceneTilePalette::new(id));
+        tm.palette.last_mut().unwrap()
+    };
+    if let Some(sprite) = &opts.sprite {
+        pal.sprite = if sprite.trim().is_empty() {
+            None
+        } else {
+            Some(sprite.trim().to_string())
+        };
+    }
+    if let Some(color) = opts.color {
+        pal.color = color;
+    }
+    if let Some(anim) = &opts.anim {
+        pal.anim = if anim.trim().is_empty() {
+            None
+        } else {
+            Some(anim.trim().to_string())
+        };
+    }
+    if let Some(fps) = opts.anim_fps {
+        pal.anim_fps = if fps > 0.0 { Some(fps) } else { None };
+    }
+    if let Some(mode) = &opts.auto_tile {
+        let trimmed = mode.trim();
+        if trimmed.is_empty()
+            || trimmed.eq_ignore_ascii_case("off")
+            || trimmed.eq_ignore_ascii_case("none")
+            || trimmed.eq_ignore_ascii_case("false")
+        {
+            pal.auto_tile = None;
+        } else {
+            pal.auto_tile = Some(SceneAutoTile::parse(trimmed).ok_or_else(|| {
+                anyhow::anyhow!("auto-tile '{trimmed}' (expected id, solid, or off)")
+            })?);
+        }
+    }
+    if let Some(sprites) = &opts.auto_sprites {
+        pal.auto_sprites = sprites.clone();
+    }
+    Ok(pal.clone())
+}
+
+/// NESW bitmask (N=1 E=2 S=4 W=8) plus the palette rule used for cell `(x, y)`.
+pub fn tilemap_autotile_mask(
+    scene: &Scene,
+    name: &str,
+    x: i32,
+    y: i32,
+) -> Result<(u16, bool, u8, Option<SceneAutoTile>)> {
+    let (id, solid) = tilemap_get_cell(scene, name, x, y)?;
+    let ent = scene
+        .find_entity(name)
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
+    let tm = ent
+        .components
+        .tilemap
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Tilemap"))?;
+    let rule = tm
+        .palette
+        .iter()
+        .find(|p| p.id == id)
+        .and_then(|p| p.auto_tile);
+    let mask = if let Some(mode) = rule {
+        tm.autotile_mask_mode(x, y, mode)
+    } else {
+        tm.autotile_mask_mode(x, y, SceneAutoTile::Id)
+    };
+    Ok((id, solid, mask, rule))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mutate::{add_entity, MutateOpts};
-    use crate::scene::Scene;
+    use crate::scene::{Scene, SceneAutoTile};
 
     fn scene_with_maze() -> Scene {
         let mut scene = Scene::new("t");
@@ -287,5 +384,73 @@ mod tests {
             .unwrap();
         assert_eq!((tm.width, tm.height), (8, 4));
         assert_eq!(tm.cells.len(), 32);
+    }
+
+    #[test]
+    fn palette_anim_and_autotile_roundtrip() {
+        let mut scene = scene_with_maze();
+        tilemap_set_palette(
+            &mut scene,
+            "Maze",
+            2,
+            &TilePaletteOpts {
+                sprite: Some("water".into()),
+                anim: Some("water".into()),
+                anim_fps: Some(8.0),
+                auto_tile: Some("id".into()),
+                auto_sprites: Some(vec!["water_0".into(), "water_1".into()]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        tilemap_set_cell(&mut scene, "Maze", 1, 1, 2, false).unwrap();
+        tilemap_set_cell(&mut scene, "Maze", 2, 1, 2, false).unwrap();
+        let text = serde_json::to_string_pretty(&scene).unwrap();
+        let loaded: Scene = serde_json::from_str(&text).unwrap();
+        let pal = loaded
+            .find_entity("Maze")
+            .unwrap()
+            .components
+            .tilemap
+            .as_ref()
+            .unwrap()
+            .palette
+            .iter()
+            .find(|p| p.id == 2)
+            .unwrap();
+        assert_eq!(pal.anim.as_deref(), Some("water"));
+        assert_eq!(pal.anim_fps, Some(8.0));
+        assert_eq!(pal.auto_tile, Some(SceneAutoTile::Id));
+        assert_eq!(pal.auto_sprites, vec!["water_0", "water_1"]);
+        let (id, solid, mask, rule) = tilemap_autotile_mask(&loaded, "Maze", 1, 1).unwrap();
+        assert_eq!(id, 2);
+        assert!(!solid);
+        assert_eq!(rule, Some(SceneAutoTile::Id));
+        // East neighbor is also id 2; N/S/W are not.
+        assert_eq!(mask, wiimaker_core::tilemap::AUTOTILE_E);
+    }
+
+    #[test]
+    fn autotile_solid_treats_oob_as_wall() {
+        let mut scene = scene_with_maze();
+        tilemap_set_palette(
+            &mut scene,
+            "Maze",
+            1,
+            &TilePaletteOpts {
+                auto_tile: Some("solid".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        tilemap_fill(&mut scene, "Maze", 0, 0, 5, 3, 1, true).unwrap();
+        tilemap_set_cell(&mut scene, "Maze", 1, 1, 0, false).unwrap();
+        // Corner (0,0): N and W are OOB (solid), E and S are solid walls → mask 15.
+        let mask = tilemap_autotile_mask(&scene, "Maze", 0, 0).unwrap().2;
+        assert_eq!(mask, 15);
+        // Cell east of the hole: W is open.
+        let mask = tilemap_autotile_mask(&scene, "Maze", 2, 1).unwrap().2;
+        assert_eq!(mask & wiimaker_core::tilemap::AUTOTILE_W, 0);
+        assert_ne!(mask & wiimaker_core::tilemap::AUTOTILE_E, 0);
     }
 }

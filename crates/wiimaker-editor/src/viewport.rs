@@ -6,8 +6,8 @@ use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
     constrain_translate, fitted_blit_rect, pick_entity_at_with_catalog_and_layers,
     pointer_to_scene, render_world_ex, scene_blit_rect, set_entity_rotation_z, set_entity_scale,
-    set_entity_world_xy, tilemap_set_cell, GameViewAspect, GameViewPreset, MoveHandleLayout, Scene,
-    TranslateHandle,
+    set_entity_world_xy, tilemap_autotile_mask, tilemap_set_cell, GameViewAspect, GameViewPreset,
+    MoveHandleLayout, Scene, TranslateHandle,
 };
 
 use crate::app::{CenterTab, EditTool, EditorApp, PlayKind, PlayMode, TilePaintDrag, ViewportDrag};
@@ -776,6 +776,30 @@ impl EditorApp {
                 self.sync_baseline();
             }
             self.tile_paint = None;
+        }
+
+        if self.edit_tool.is_tile_tool() {
+            if let Some(pos) = response.hover_pos().and_then(&to_scene) {
+                if let Some(name) = target_at(self, pos) {
+                    if let Some(ent) = self.scene.find_entity(&name) {
+                        if let Some(tm) = &ent.components.tilemap {
+                            let world = self
+                                .scene
+                                .world_transform(&name)
+                                .unwrap_or_else(|| ent.transform.clone());
+                            let (cx, cy) = tm.world_to_cell(&world, pos[0], pos[1]);
+                            if tm.in_bounds(cx, cy) {
+                                let (id, solid) = tm.get(cx, cy);
+                                let mask = tilemap_autotile_mask(&self.scene, &name, cx, cy)
+                                    .map(|t| t.2)
+                                    .unwrap_or(0);
+                                self.status =
+                                    format!("{name} ({cx},{cy}) id={id} solid={solid} mask={mask}");
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -57,7 +57,7 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: AssetCmd,
     },
-    /// Tilemap paint / query (solid cells)
+    /// Tilemap paint / query (solid cells, palette anim / auto-tile)
     Tilemap {
         #[command(subcommand)]
         cmd: TilemapCmd,
@@ -665,6 +665,45 @@ pub enum TilemapCmd {
         x: Option<i32>,
         #[arg(long)]
         y: Option<i32>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Create / update a palette entry (anim clip + auto-tile rule)
+    SetPalette {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        id: u16,
+        /// Sprite catalog name (empty string clears)
+        #[arg(long)]
+        sprite: Option<String>,
+        #[arg(long, value_parser = parse_rgba)]
+        color: Option<[u8; 4]>,
+        /// `assets/<clip>.anim.json` stem (empty string clears)
+        #[arg(long)]
+        anim: Option<String>,
+        /// Clip fps override (`0` clears)
+        #[arg(long)]
+        fps: Option<f32>,
+        /// Auto-tile: `id`, `solid`, or `off`
+        #[arg(long)]
+        auto_tile: Option<String>,
+        /// Comma-separated NESW variant sprites (index = bitmask)
+        #[arg(long)]
+        auto_sprites: Option<String>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// NESW auto-tile bitmask for one cell (N=1 E=2 S=4 W=8)
+    Mask {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        x: i32,
+        #[arg(long)]
+        y: i32,
         #[arg(long)]
         scene: Option<String>,
     },

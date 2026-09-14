@@ -12,7 +12,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 |---|---|
 | Project window | `game.toml` + `assets/` + `scenes/` + editor **Project** explorer |
 | Hierarchy | editor Hierarchy (parent/unparent DnD, multi-select, duplicate) |
-| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource, enable checkbox, catalog combo, tile palette, **Sorting Layer** + **Order in Layer** |
+| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer** |
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, **Move axis handles** (red X / green Y), Snap + nudge |
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
@@ -20,26 +20,26 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host cpal). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host cpal). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** nested prefabs / prefab variants, Wii GX draw of tilemaps (payload skipped), Wii GX text, Wii ASND.
+**Not present:** nested prefabs / prefab variants, Wii GX draw of tilemaps (payload skipped — animated / auto-tile host-only), Wii GX text, Wii ASND.
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-09-14):** Animated tiles / auto-tile — after tilemap.
+**Recommended next morning (2026-09-14):** Tilemap CLI stamp from ASCII — `tilemap from-ascii maze.txt`.
 
 ---
 
 ## Later
 
-- **Animated tiles / auto-tile** (GUI+CLI) — after tilemap.
 - **Tilemap CLI stamp from ASCII** (CLI, tiny GUI import) — `tilemap from-ascii maze.txt`.
 - **Component-level pivot override** — durable engine follow-up.
 - **Clear-color editor UI with undo** — editor follow-up; CLI `scene set-clear` exists.
 - **Wii audio / Wiimote** — after host oneshots.
 - **Wii GX text** — host DrawText exists; C player still KIND_NONE.
+- **Wii GX tilemaps** — host animated / auto-tile exists; C still skips the Tilemap payload.
 
 ---
 
@@ -87,6 +87,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Text / HUD** (2026-09-14) — `DrawCmd::DrawText` + scene `Text` (string, size, color, align, sorting layer / order-in-layer). Host raster samples a built-in 8×8 ASCII atlas (`wiimaker-assets` bits + `fixtures/hud_font.png`); **not** cooked into `.wpack`. `render_world` emits DrawText (camera offset + layer sort like Sprite/Disc). Inspector Text foldout + Add Component. CLI `entity add-component … Text --text --size --color --align` · `entity set --text --size --color --align` (`--json`). Missing glyphs → `?`. Wii GX skip; WSCN unchanged (text-only → KIND_NONE).
 
+- **Animated tiles / auto-tile** (2026-09-14) — palette `anim` / `anim_fps` (reuses `*.anim.json`) + `auto_tile` `id`|`solid` NESW bitmask (N=1 E=2 S=4 W=8). Variants: `auto_sprites[mask]` or catalog `{sprite}_{mask}`. Runtime `TileVisual` frames tick in `animate_world` / `World::tick_tilemaps`; `render_world` picks auto-tile textures per cell. Inspector palette Anim + Auto Tile + painted NESW badge; Scene Edit ticks tile anims; Paint hover shows mask. CLI `tilemap set-palette` · `tilemap mask`; `tilemap get --json` includes `mask`. Mutate: `tilemap_set_palette` / `tilemap_autotile_mask`. Host-first; WSCN0003 still bakes static cell ids (C skips payload).
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -111,7 +113,7 @@ Global: `--json`
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
 | `entity create-prefab` · `entity instantiate-prefab` · `entity apply-prefab` · `entity revert-prefab` · `entity unpack-prefab` · `entity prefab-status` | apply writes asset; revert restores; status lists overrides |
 | `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` · `asset anim` · `asset list-anims` · `asset list-wavs` · `asset play --name` | `asset import` copies `.png` or `.wav`; `asset play` host oneshot (`--json` `skipped` if no device) |
-| `tilemap set` · `tilemap fill` · `tilemap stamp` · `tilemap get` | `--name --x --y --id` · `--ascii` / `--cells --width` · `--json` |
+| `tilemap set` · `tilemap fill` · `tilemap stamp` · `tilemap get` · `tilemap set-palette` · `tilemap mask` | `--name --x --y --id` · `--ascii` / `--cells --width` · palette `--anim --fps --auto-tile id|solid|off --auto-sprites` · mask NESW · `--json` |
 | `sorting-layer list` · `sorting-layer add --name [--index]` · `sorting-layer rename --from --to` · `sorting-layer move --name --index` · `sorting-layer remove --name` | project Tags & Layers analogue on `game.toml`; rename/remove remap scenes + prefabs |
 
 ### Editor chrome (exact control names)
@@ -125,12 +127,12 @@ Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
 Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename)
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename)
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship Animated tiles / auto-tile (Later).** After tilemap.
+**Ship Tilemap CLI stamp from ASCII (Later).** `tilemap from-ascii maze.txt`.
 

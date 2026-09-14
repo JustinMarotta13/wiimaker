@@ -16,13 +16,98 @@ use alloc::vec;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
+/// 4-neighbor auto-tile match (Unity RuleTile analogue).
+///
+/// Bitmask is NESW: North=`1`, East=`2`, South=`4`, West=`8` (cell `(0,0)` is top-left, +Y south).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoTileMatch {
+    /// Neighbor matches when it has the same non-zero palette id (water blobs, same wall family).
+    Id,
+    /// Neighbor matches when it is solid. Out-of-bounds is solid (maze walls).
+    Solid,
+}
+
+pub const AUTOTILE_N: u8 = 1;
+pub const AUTOTILE_E: u8 = 2;
+pub const AUTOTILE_S: u8 = 4;
+pub const AUTOTILE_W: u8 = 8;
+
+/// Pack NESW occupancy into a 0..=15 bitmask.
+pub fn autotile_bits(north: bool, east: bool, south: bool, west: bool) -> u8 {
+    (if north { AUTOTILE_N } else { 0 })
+        | (if east { AUTOTILE_E } else { 0 })
+        | (if south { AUTOTILE_S } else { 0 })
+        | (if west { AUTOTILE_W } else { 0 })
+}
+
 /// One palette entry resolved at hydrate time.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct TileVisual {
     pub id: u16,
     /// Packed texture + UV when the palette names a sprite; otherwise a colored quad.
+    /// Animated tiles overwrite this with the current frame.
     pub texture: Option<(TextureId, Rect)>,
     pub color: Rgba8,
+    /// Resolved clip frames (Unity AnimatedTile). Length ≤ 1 means static.
+    pub frames: Vec<(TextureId, Rect)>,
+    pub fps: f32,
+    pub time: f32,
+    pub loop_: bool,
+    pub frame: usize,
+    /// When set, render picks `auto_frames[mask]` using NESW occupancy.
+    pub auto_tile: Option<AutoTileMatch>,
+    /// 16 variant textures indexed by [`autotile_bits`]. Missing → `texture`.
+    pub auto_frames: [Option<(TextureId, Rect)>; 16],
+}
+
+impl TileVisual {
+    pub fn color_only(id: u16, color: Rgba8) -> Self {
+        Self {
+            id,
+            texture: None,
+            color,
+            frames: Vec::new(),
+            fps: 0.0,
+            time: 0.0,
+            loop_: true,
+            frame: 0,
+            auto_tile: None,
+            auto_frames: [None; 16],
+        }
+    }
+
+    /// Advance clip time and set [`Self::texture`] to the current frame.
+    /// Returns `true` when this entry is actually animated.
+    pub fn tick(&mut self, dt: f32) -> bool {
+        if self.frames.len() <= 1 || self.fps <= 0.0 {
+            return false;
+        }
+        self.time += dt;
+        let n = self.frames.len();
+        let frame_dur = 1.0 / self.fps;
+        let mut idx = (self.time / frame_dur) as usize;
+        if self.loop_ {
+            idx %= n;
+            let cycle = frame_dur * n as f32;
+            if cycle > 0.0 && self.time >= cycle {
+                self.time %= cycle;
+            }
+        } else if idx >= n {
+            idx = n - 1;
+            self.time = frame_dur * n as f32;
+        }
+        self.frame = idx;
+        self.texture = Some(self.frames[idx]);
+        true
+    }
+
+    pub fn texture_for_mask(&self, mask: u8) -> Option<(TextureId, Rect)> {
+        self.auto_frames
+            .get(mask as usize)
+            .copied()
+            .flatten()
+            .or(self.texture)
+    }
 }
 
 /// Grid of cell ids + packed solid bits, in the entity's local space.
@@ -60,6 +145,67 @@ impl Tilemap {
             sorting_layer: default_sorting_layer_index(),
             palette: Vec::new(),
         }
+    }
+
+    /// Tick every animated palette entry. Returns `true` if any entry advanced.
+    pub fn tick_anims(&mut self, dt: f32) -> bool {
+        let mut any = false;
+        for vis in &mut self.palette {
+            if vis.tick(dt) {
+                any = true;
+            }
+        }
+        any
+    }
+
+    /// NESW bitmask for cell `(x, y)` using that cell's palette auto-tile mode
+    /// (defaults to [`AutoTileMatch::Id`] when the palette has no rule).
+    pub fn autotile_mask(&self, x: i32, y: i32) -> u8 {
+        let id = self.get(x, y);
+        let mode = self
+            .visual_for(id)
+            .and_then(|v| v.auto_tile)
+            .unwrap_or(AutoTileMatch::Id);
+        self.autotile_mask_mode(x, y, mode)
+    }
+
+    pub fn autotile_mask_mode(&self, x: i32, y: i32, mode: AutoTileMatch) -> u8 {
+        let id = self.get(x, y);
+        autotile_bits(
+            self.neighbor_match(x, y - 1, id, mode),
+            self.neighbor_match(x + 1, y, id, mode),
+            self.neighbor_match(x, y + 1, id, mode),
+            self.neighbor_match(x - 1, y, id, mode),
+        )
+    }
+
+    fn neighbor_match(&self, nx: i32, ny: i32, id: u16, mode: AutoTileMatch) -> bool {
+        match mode {
+            AutoTileMatch::Id => self.in_bounds(nx, ny) && id != 0 && self.get(nx, ny) == id,
+            AutoTileMatch::Solid => {
+                if self.in_bounds(nx, ny) {
+                    self.solid_at(nx, ny)
+                } else {
+                    true
+                }
+            }
+        }
+    }
+
+    /// Texture used when drawing cell `(x, y)` (auto-tile variant or current anim frame).
+    pub fn cell_texture(&self, x: i32, y: i32) -> Option<(TextureId, Rect)> {
+        let id = self.get(x, y);
+        let vis = self.visual_for(id)?;
+        if vis.auto_tile.is_some() {
+            vis.texture_for_mask(self.autotile_mask(x, y))
+        } else {
+            vis.texture
+        }
+    }
+
+    pub fn cell_color(&self, x: i32, y: i32) -> Option<Rgba8> {
+        let id = self.get(x, y);
+        self.visual_for(id).map(|v| v.color)
     }
 
     pub fn len(&self) -> usize {
@@ -228,6 +374,8 @@ pub fn tile_get(world: &World, x: i32, y: i32) -> u16 {
 #[cfg(all(feature = "std", test))]
 mod tests {
     use super::*;
+    use crate::color::Rgba8;
+    use crate::draw::{Rect, TextureId};
     use crate::world::Transform;
 
     fn maze() -> (World, EntityId) {
@@ -324,5 +472,59 @@ mod tests {
         assert_eq!(world_to_cell(&world, 130.0, 50.0), Some((1, 0)));
         assert!(tile_solid(&world, 1, 0));
         assert!(!tile_solid(&world, 0, 0));
+    }
+
+    #[test]
+    fn autotile_id_nesw_bitmask() {
+        let mut tm = Tilemap::new(3, 3, 16.0);
+        for x in 0..3 {
+            for y in 0..3 {
+                tm.set(x, y, 1, true);
+            }
+        }
+        tm.palette.push(TileVisual {
+            auto_tile: Some(AutoTileMatch::Id),
+            ..TileVisual::color_only(1, Rgba8::rgb(48, 88, 176))
+        });
+        // Center has all four neighbors.
+        assert_eq!(tm.autotile_mask(1, 1), 15);
+        // Top-middle: N missing, E/S/W present → 2|4|8 = 14
+        assert_eq!(tm.autotile_mask(1, 0), AUTOTILE_E | AUTOTILE_S | AUTOTILE_W);
+        tm.set(2, 1, 0, false);
+        // Center without east neighbor.
+        assert_eq!(tm.autotile_mask(1, 1), AUTOTILE_N | AUTOTILE_S | AUTOTILE_W);
+    }
+
+    #[test]
+    fn autotile_solid_oob_is_solid() {
+        let mut tm = Tilemap::new(2, 1, 16.0);
+        tm.set(0, 0, 1, true);
+        tm.set(1, 0, 0, false);
+        tm.palette.push(TileVisual {
+            auto_tile: Some(AutoTileMatch::Solid),
+            ..TileVisual::color_only(1, Rgba8::rgb(48, 88, 176))
+        });
+        // (0,0): N/S/W OOB solid, E is empty → N|S|W = 1|4|8 = 13
+        assert_eq!(
+            tm.autotile_mask_mode(0, 0, AutoTileMatch::Solid),
+            AUTOTILE_N | AUTOTILE_S | AUTOTILE_W
+        );
+    }
+
+    #[test]
+    fn tick_anims_advances_looping_frames() {
+        let mut vis = TileVisual::color_only(2, Rgba8::rgb(20, 80, 200));
+        vis.frames = vec![(TextureId(1), Rect::unit()), (TextureId(2), Rect::unit())];
+        vis.fps = 10.0;
+        vis.texture = Some(vis.frames[0]);
+        let mut tm = Tilemap::new(1, 1, 16.0);
+        tm.set(0, 0, 2, false);
+        tm.palette.push(vis);
+        assert_eq!(tm.palette[0].frame, 0);
+        assert!(tm.tick_anims(0.11));
+        assert_eq!(tm.palette[0].frame, 1);
+        assert_eq!(tm.palette[0].texture.unwrap().0, TextureId(2));
+        assert!(tm.tick_anims(0.11));
+        assert_eq!(tm.palette[0].frame, 0);
     }
 }

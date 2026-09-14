@@ -503,6 +503,21 @@ impl World {
         })
     }
 
+    /// Advance animated tile palette clocks. Returns `true` if any cell would change.
+    pub fn tick_tilemaps(&mut self, dt: f32) -> bool {
+        let mut any = false;
+        for slot in &mut self.slots {
+            if slot.live {
+                if let Some(tm) = slot.tilemap.as_mut() {
+                    if tm.tick_anims(dt) {
+                        any = true;
+                    }
+                }
+            }
+        }
+        any
+    }
+
     pub fn collider(&self, id: EntityId) -> Option<&Collider> {
         self.slot(id).and_then(|s| s.collider.as_ref())
     }

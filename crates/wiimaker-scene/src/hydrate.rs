@@ -178,7 +178,9 @@ fn spawn_entity(
             let layer = world.sorting_layer_index(&tm.sorting_layer);
             world.set_tilemap(
                 id,
-                Some(scene_tilemap_to_runtime(tm, textures, catalog, layer)),
+                Some(scene_tilemap_to_runtime(
+                    tm, textures, catalog, anims, layer,
+                )),
             );
         }
     }
@@ -341,7 +343,9 @@ pub fn hydrate_lenient_with_sorting_layers(
                 let layer = world.sorting_layer_index(&tm.sorting_layer);
                 world.set_tilemap(
                     id,
-                    Some(scene_tilemap_to_runtime(tm, textures, catalog, layer)),
+                    Some(scene_tilemap_to_runtime(
+                        tm, textures, catalog, anims, layer,
+                    )),
                 );
             }
         }
@@ -403,6 +407,7 @@ fn scene_tilemap_to_runtime(
     tm: &crate::scene::SceneTilemap,
     textures: &TextureMap,
     catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
     sorting_layer: u16,
 ) -> Tilemap {
     let mut out = Tilemap::new(tm.width.max(1), tm.height.max(1), tm.cell);
@@ -427,26 +432,72 @@ fn scene_tilemap_to_runtime(
     out.palette = tm
         .palette
         .iter()
-        .map(|p| {
-            let texture = p.sprite.as_ref().and_then(|name| {
-                let (tex_name, uv) = resolve_palette_sprite(name, catalog);
-                textures.get(&tex_name).map(|tex| (tex, uv))
-            });
-            TileVisual {
-                id: p.id,
-                texture,
-                color: p.color_rgba(),
-            }
-        })
+        .map(|p| scene_palette_to_runtime(p, textures, catalog, anims))
         .collect();
     if out.palette.is_empty() {
-        out.palette.push(TileVisual {
-            id: 1,
-            texture: None,
-            color: Rgba8::rgb(48, 88, 176),
-        });
+        out.palette
+            .push(TileVisual::color_only(1, Rgba8::rgb(48, 88, 176)));
     }
     out
+}
+
+fn scene_palette_to_runtime(
+    p: &crate::scene::SceneTilePalette,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+) -> TileVisual {
+    let mut vis = TileVisual::color_only(p.id, p.color_rgba());
+    vis.texture = p.sprite.as_ref().and_then(|name| {
+        let (tex_name, uv) = resolve_palette_sprite(name, catalog);
+        textures.get(&tex_name).map(|tex| (tex, uv))
+    });
+
+    if let Some(clip) = p.anim_clip() {
+        let meta = anims.and_then(|c| c.lookup(clip));
+        vis.fps = p
+            .anim_fps
+            .filter(|f| *f > 0.0)
+            .or_else(|| meta.map(|m| m.fps))
+            .unwrap_or(10.0);
+        vis.loop_ = true;
+        if let Some(meta) = meta {
+            for cell in &meta.cells {
+                let (tex_name, uv) = resolve_palette_sprite(cell, catalog);
+                if let Some(tex) = textures.get(&tex_name) {
+                    vis.frames.push((tex, uv));
+                }
+            }
+        }
+        if vis.frames.is_empty() {
+            if let Some(tex) = vis.texture {
+                vis.frames.push(tex);
+            }
+        } else {
+            vis.texture = Some(vis.frames[0]);
+        }
+    }
+
+    if let Some(mode) = p.auto_tile {
+        vis.auto_tile = Some(mode.to_runtime());
+        let stem = p.sprite.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        for mask in 0..16 {
+            let named = p
+                .auto_sprites
+                .get(mask)
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .or_else(|| stem.map(|s| format!("{s}_{mask}")));
+            // Leave unresolved masks None so `texture_for_mask` falls back to the
+            // ticking `vis.texture`. Filling with frame 0 froze combined anim + auto-tile.
+            vis.auto_frames[mask] = named.and_then(|name| {
+                let (tex_name, uv) = resolve_palette_sprite(&name, catalog);
+                textures.get(&tex_name).map(|tex| (tex, uv))
+            });
+        }
+    }
+    vis
 }
 
 fn resolve_palette_sprite(name: &str, catalog: Option<&SpriteCatalog>) -> (String, Rect) {

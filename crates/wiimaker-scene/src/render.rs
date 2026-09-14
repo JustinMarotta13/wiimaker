@@ -177,14 +177,12 @@ fn emit_tilemap(draw: &mut DrawList, xf: &Transform, tm: &Tilemap, z: f32, offse
                 cell_w,
                 cell_h,
             );
-            if let Some(vis) = tm.visual_for(id) {
-                match vis.texture {
-                    Some((tex, uv)) => draw.sprite_ex(tex, dest, uv, vis.color, z),
-                    None => draw.sprite_ex(QUAD_TEX, dest, Rect::unit(), vis.color, z),
-                }
-            } else {
-                let color = Rgba8::rgb(48, 88, 176);
-                draw.sprite_ex(QUAD_TEX, dest, Rect::unit(), color, z);
+            let color = tm
+                .cell_color(x, y)
+                .unwrap_or_else(|| Rgba8::rgb(48, 88, 176));
+            match tm.cell_texture(x, y) {
+                Some((tex, uv)) => draw.sprite_ex(tex, dest, uv, color, z),
+                None => draw.sprite_ex(QUAD_TEX, dest, Rect::unit(), color, z),
             }
         }
     }
