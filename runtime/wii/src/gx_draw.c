@@ -1,6 +1,7 @@
 /*
  * Minimal GX helpers shared with the game via FFI.
  * Disc = untextured fan; Sprite = textured screen-space quad.
+ * DrawText / HUD glyphs are host-first (wiimaker-host raster); GX skips them.
  */
 
 #include <gccore.h>

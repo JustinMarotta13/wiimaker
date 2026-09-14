@@ -14,17 +14,22 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
 
 mod anim;
+mod font;
 mod sprites;
 mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
+pub use font::{
+    atlas_image, atlas_rgba8, glyph_bits, glyph_uv, map_char, write_hud_font_png, FIRST_CHAR,
+    FONT_ATLAS_H, FONT_ATLAS_W, FONT_CELL_PX, FONT_COLS, LAST_CHAR, MISSING_CHAR,
+};
+pub use sprites::{
+    grid_by_cell_count, set_sprite_pivot, slice_sheet, Pivot, PixelRect, ResolvedSprite,
+    SpriteCatalog, SpriteCell, SpriteSheetMeta,
+};
 pub use wav::{
     inspect_wav, list_wav_clips, load_pcm16_wav, resolve_wav, spawn_wav_player, write_beep_wav,
     write_pcm16_wav, WavInfo,
-};
-pub use sprites::{
-    grid_by_cell_count, set_sprite_pivot, slice_sheet, ResolvedSprite, SpriteCatalog, SpriteCell,
-    SpriteSheetMeta, PixelRect, Pivot,
 };
 
 pub const MAGIC: &[u8; 8] = b"WPACK001";
@@ -86,7 +91,11 @@ impl WPack {
     }
 
     /// Cook a PNG. Non-power-of-two images are padded up (original top-left).
-    pub fn add_png(&mut self, name: impl Into<String>, path: impl AsRef<Path>) -> Result<Option<CookWarning>> {
+    pub fn add_png(
+        &mut self,
+        name: impl Into<String>,
+        path: impl AsRef<Path>,
+    ) -> Result<Option<CookWarning>> {
         let name = name.into();
         let path = path.as_ref();
         let img = image::open(path).with_context(|| format!("open {path:?}"))?;
