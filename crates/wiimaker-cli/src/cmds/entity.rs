@@ -5,17 +5,18 @@ use serde::Serialize;
 use wiimaker_scene::{
     add_component_animation, add_component_audio_source, add_component_camera,
     add_component_collider, add_component_disc, add_component_follow, add_component_grid_mover,
-    add_component_sprite, add_component_tilemap, add_entity, apply_prefab, attach_prefab_instance,
-    duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered,
-    instantiate_prefab, load_prefab, load_prefab_for_instance, normalize_prefab_source,
-    prefab_overrides, remove_component_animation, remove_component_audio_source,
-    remove_component_camera, remove_component_collider, remove_component_disc,
-    remove_component_follow, remove_component_grid_mover, remove_component_sprite,
-    remove_component_tilemap, remove_entity, rename_entity, resolve_prefab_asset,
-    revert_prefab_instance, save_prefab, save_scene, set_component_enabled, set_entity_anim,
-    set_entity_audio_source, set_entity_follow, set_entity_grid_mover, set_entity_parent,
-    set_entity_rotation_z, set_entity_scale, set_entity_sorting, set_entity_transform,
-    unpack_prefab_instance, MutateOpts, Scene, SceneColliderKind, SceneDir,
+    add_component_sprite, add_component_text, add_component_tilemap, add_entity, apply_prefab,
+    attach_prefab_instance, duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab,
+    entity_triggers_entered, instantiate_prefab, load_prefab, load_prefab_for_instance,
+    normalize_prefab_source, prefab_overrides, remove_component_animation,
+    remove_component_audio_source, remove_component_camera, remove_component_collider,
+    remove_component_disc, remove_component_follow, remove_component_grid_mover,
+    remove_component_sprite, remove_component_text, remove_component_tilemap, remove_entity,
+    rename_entity, resolve_prefab_asset, revert_prefab_instance, save_prefab, save_scene,
+    set_component_enabled, set_entity_anim, set_entity_audio_source, set_entity_follow,
+    set_entity_grid_mover, set_entity_parent, set_entity_rotation_z, set_entity_scale,
+    set_entity_sorting, set_entity_text, set_entity_transform, unpack_prefab_instance, MutateOpts,
+    Scene, SceneColliderKind, SceneDir, SceneTextAlign,
 };
 
 use crate::args::EntityCmd;
@@ -83,6 +84,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             audio_clip,
             volume,
             play_on_awake,
+            text,
+            size,
+            color,
+            align,
             sorting_layer,
             order_in_layer,
             scene,
@@ -102,10 +107,14 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 && audio_clip.is_none()
                 && volume.is_none()
                 && play_on_awake.is_none()
+                && text.is_none()
+                && size.is_none()
+                && color.is_none()
+                && align.is_none()
                 && sorting_layer.is_none()
                 && order_in_layer.is_none()
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --sorting-layer --order-in-layer");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -151,16 +160,20 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     play_on_awake,
                 )?;
             }
+            if text.is_some() || size.is_some() || color.is_some() || align.is_some() {
+                let align = match align.as_deref() {
+                    None => None,
+                    Some(s) => Some(SceneTextAlign::parse(s).ok_or_else(|| {
+                        anyhow::anyhow!("unknown --align '{s}' (Left|Center|Right)")
+                    })?),
+                };
+                set_entity_text(&mut sc, &name, text.as_deref(), size, color, align)?;
+            }
             if sorting_layer.is_some() || order_in_layer.is_some() {
                 if let Some(layer) = sorting_layer.as_deref() {
                     wiimaker_scene::require_sorting_layer(&project, layer)?;
                 }
-                set_entity_sorting(
-                    &mut sc,
-                    &name,
-                    sorting_layer.as_deref(),
-                    order_in_layer,
-                )?;
+                set_entity_sorting(&mut sc, &name, sorting_layer.as_deref(), order_in_layer)?;
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("updated entity {name}"))
@@ -189,6 +202,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             queued_dir,
             volume,
             play_on_awake,
+            text,
+            size,
+            color,
+            align,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -253,8 +270,19 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     let clip = clip.unwrap_or_default();
                     add_component_audio_source(&mut sc, &name, &clip, volume, play_on_awake)?;
                 }
+                "text" | "label" | "hud" => {
+                    let body = text.unwrap_or_else(|| "Text".into());
+                    let color = color.unwrap_or([255, 255, 255, 255]);
+                    let align = match align.as_deref() {
+                        None => SceneTextAlign::Left,
+                        Some(s) => SceneTextAlign::parse(s).ok_or_else(|| {
+                            anyhow::anyhow!("unknown --align '{s}' (Left|Center|Right)")
+                        })?,
+                    };
+                    add_component_text(&mut sc, &name, &body, size, color, align)?;
+                }
                 other => {
-                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Camera|Follow|GridMover|AudioSource)")
+                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Camera|Follow|GridMover|AudioSource|Text)")
                 }
             }
             save_scene(&path, &sc)?;
@@ -375,7 +403,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "audiosource" | "audio_source" | "audio-source" | "audio" => {
                     remove_component_audio_source(&mut sc, &name)?
                 }
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|Follow|GridMover|AudioSource)"),
+                "text" | "label" | "hud" => remove_component_text(&mut sc, &name)?,
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|Follow|GridMover|AudioSource|Text)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed {kind} from {name}"))
@@ -630,11 +659,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("unpacked {name}"))
         }
-        EntityCmd::PrefabStatus {
-            game,
-            name,
-            scene,
-        } => {
+        EntityCmd::PrefabStatus { game, name, scene } => {
             let (gd, _p, _path, sc) = open_scene(root, &game, scene.as_deref())?;
             let ent = sc
                 .find_entity(&name)

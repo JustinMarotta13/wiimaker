@@ -23,7 +23,13 @@ pub fn emit_ok(json: bool, msg: &str) -> Result<()> {
             ok: bool,
             message: &'a str,
         }
-        println!("{}", serde_json::to_string(&Out { ok: true, message: msg })?);
+        println!(
+            "{}",
+            serde_json::to_string(&Out {
+                ok: true,
+                message: msg
+            })?
+        );
     } else {
         println!("{msg}");
     }
@@ -37,6 +43,21 @@ pub fn parse_rgb(s: &str) -> Result<[u8; 3], String> {
     }
     let parse = |p: &str| p.trim().parse::<u8>().map_err(|e| e.to_string());
     Ok([parse(parts[0])?, parse(parts[1])?, parse(parts[2])?])
+}
+
+/// `R,G,B` or `R,G,B,A` (alpha defaults to 255).
+pub fn parse_rgba(s: &str) -> Result<[u8; 4], String> {
+    let parts: Vec<_> = s.split(',').collect();
+    if parts.len() != 3 && parts.len() != 4 {
+        return Err("expected R,G,B or R,G,B,A".into());
+    }
+    let parse = |p: &str| p.trim().parse::<u8>().map_err(|e| e.to_string());
+    let a = if parts.len() == 4 {
+        parse(parts[3])?
+    } else {
+        255
+    };
+    Ok([parse(parts[0])?, parse(parts[1])?, parse(parts[2])?, a])
 }
 
 pub fn copy_dir(from: &Path, to: &Path) -> Result<()> {
