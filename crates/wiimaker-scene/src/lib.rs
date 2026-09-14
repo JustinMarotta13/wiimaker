@@ -64,9 +64,9 @@ pub use project::{
 pub use render::{render_world, render_world_ex};
 pub use scene::{
     display_sorting_layer, load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab,
-    Scene, SceneAnimation, SceneAudioSource, SceneCamera, SceneCollider, SceneColliderKind,
-    SceneComponents, SceneDir, SceneDisc, SceneGridMover, SceneSprite, SceneText, SceneTextAlign,
-    SceneTilePalette, SceneTilemap, SceneTransform,
+    Scene, SceneAnimation, SceneAudioSource, SceneAutoTile, SceneCamera, SceneCollider,
+    SceneColliderKind, SceneComponents, SceneDir, SceneDisc, SceneGridMover, SceneSprite,
+    SceneText, SceneTextAlign, SceneTilePalette, SceneTilemap, SceneTransform,
 };
 pub use sorting::{
     add_sorting_layer, entity_max_sorting_key, list_sorting_layers, move_sorting_layer,
@@ -74,8 +74,9 @@ pub use sorting::{
     set_entity_sorting, validate_sorting_layer_name,
 };
 pub use tilemap::{
-    add_component_tilemap, ensure_tilemap, remove_component_tilemap, tilemap_fill,
-    tilemap_get_cell, tilemap_resize, tilemap_set_cell, tilemap_stamp, tilemap_stamp_ascii,
+    add_component_tilemap, ensure_tilemap, remove_component_tilemap, tilemap_autotile_mask,
+    tilemap_fill, tilemap_get_cell, tilemap_resize, tilemap_set_cell, tilemap_set_palette,
+    tilemap_stamp, tilemap_stamp_ascii, TilePaletteOpts,
 };
 pub use undo::UndoStack;
 pub use wiimaker_core::{DEFAULT_SORTING_LAYER, DEFAULT_SORTING_LAYERS};

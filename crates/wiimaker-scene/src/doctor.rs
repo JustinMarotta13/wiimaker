@@ -321,6 +321,32 @@ fn check_scene_refs(
                         });
                     }
                 }
+                if let Some(clip) = pal.anim_clip() {
+                    if !anims.iter().any(|n| n == clip) {
+                        issues.push(Issue {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "entity '{}': tile palette id {} anim '{}' missing (expected assets/{}.anim.json)",
+                                ent.name, pal.id, clip, clip
+                            ),
+                        });
+                    }
+                }
+                for (i, name) in pal.auto_sprites.iter().enumerate() {
+                    let name = name.trim();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    if !sprites.iter().any(|t| t == name) {
+                        issues.push(Issue {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "entity '{}': tile palette id {} auto-tile sprite[{i}] '{}' missing from assets/",
+                                ent.name, pal.id, name
+                            ),
+                        });
+                    }
+                }
             }
         }
         if let Some(c) = &ent.components.collider {

@@ -7,17 +7,13 @@ use wiimaker_core::world::World;
 
 use crate::hydrate::TextureMap;
 
-/// Tick every entity with [`Animation`]: advance frame time and apply the
-/// current cell onto the sibling [`wiimaker_core::world::Sprite`] (UV / texture /
-/// pivot / size). Color and z are preserved.
+/// Tick sprite Animation clips and animated tile palettes.
 ///
-/// Call from host `App::update` and editor Play (or every editor frame).
-pub fn animate_world(
-    world: &mut World,
-    catalog: &SpriteCatalog,
-    textures: &TextureMap,
-    dt: f32,
-) {
+/// Sprite clips push UV/texture onto the sibling [`wiimaker_core::world::Sprite`].
+/// Tile palettes with `anim` clips advance [`wiimaker_core::tilemap::TileVisual`] frames.
+/// Call from host `App::update` and editor Play (tile palettes also tick in Edit mode).
+pub fn animate_world(world: &mut World, catalog: &SpriteCatalog, textures: &TextureMap, dt: f32) {
+    world.tick_tilemaps(dt);
     let ids: Vec<_> = world.iter_entities().collect();
     for id in ids {
         // Split borrow: pull animation fields, then mutate sprite.
@@ -142,7 +138,12 @@ mod tests {
         let id = world.spawn(Transform::default());
         world.set_animation(
             id,
-            Some(Animation::new("once", vec!["a".into(), "b".into()], 10.0, false)),
+            Some(Animation::new(
+                "once",
+                vec!["a".into(), "b".into()],
+                10.0,
+                false,
+            )),
         );
         let cat = SpriteCatalog::empty();
         let tex = TextureMap::new();

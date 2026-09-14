@@ -436,11 +436,7 @@ impl SceneTilemap {
             height,
             cells: vec![0; n],
             solid: vec![0; n],
-            palette: vec![SceneTilePalette {
-                id: 1,
-                sprite: None,
-                color: wall_color(),
-            }],
+            palette: vec![SceneTilePalette::new(1)],
             z: -1.0,
             sorting_layer: String::new(),
             enabled: true,
@@ -520,6 +516,41 @@ impl SceneTilemap {
         ([left, top], [w, h])
     }
 
+    /// NESW bitmask for cell `(x, y)`. Uses the cell's palette `auto_tile` (default `id`).
+    pub fn autotile_mask(&self, x: i32, y: i32) -> u8 {
+        let (id, _) = self.get(x, y);
+        let mode = self
+            .palette
+            .iter()
+            .find(|p| p.id == id)
+            .and_then(|p| p.auto_tile)
+            .unwrap_or(SceneAutoTile::Id);
+        self.autotile_mask_mode(x, y, mode)
+    }
+
+    pub fn autotile_mask_mode(&self, x: i32, y: i32, mode: SceneAutoTile) -> u8 {
+        let (id, _) = self.get(x, y);
+        wiimaker_core::tilemap::autotile_bits(
+            self.neighbor_match(x, y - 1, id, mode),
+            self.neighbor_match(x + 1, y, id, mode),
+            self.neighbor_match(x, y + 1, id, mode),
+            self.neighbor_match(x - 1, y, id, mode),
+        )
+    }
+
+    fn neighbor_match(&self, nx: i32, ny: i32, id: u16, mode: SceneAutoTile) -> bool {
+        match mode {
+            SceneAutoTile::Id => self.in_bounds(nx, ny) && id != 0 && self.get(nx, ny).0 == id,
+            SceneAutoTile::Solid => {
+                if self.in_bounds(nx, ny) {
+                    self.get(nx, ny).1
+                } else {
+                    true
+                }
+            }
+        }
+    }
+
     /// Resize preserving the overlapping top-left region.
     pub fn resize(&mut self, width: u32, height: u32) {
         let old_w = self.width;
@@ -548,6 +579,44 @@ impl SceneTilemap {
     }
 }
 
+/// 4-neighbor auto-tile rule stored on a palette entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SceneAutoTile {
+    /// Same non-zero palette id (water / lava blobs).
+    Id,
+    /// Neighbor solid bits; out-of-bounds counts as solid (maze walls).
+    Solid,
+}
+
+impl SceneAutoTile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SceneAutoTile::Id => "id",
+            SceneAutoTile::Solid => "solid",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "id" | "same" | "same-id" | "same_id" => Some(SceneAutoTile::Id),
+            "solid" | "wall" => Some(SceneAutoTile::Solid),
+            _ => None,
+        }
+    }
+
+    pub fn to_runtime(self) -> wiimaker_core::tilemap::AutoTileMatch {
+        match self {
+            SceneAutoTile::Id => wiimaker_core::tilemap::AutoTileMatch::Id,
+            SceneAutoTile::Solid => wiimaker_core::tilemap::AutoTileMatch::Solid,
+        }
+    }
+}
+
+fn skip_empty_opt(v: &Option<String>) -> bool {
+    v.as_ref().map(|s| s.is_empty()).unwrap_or(true)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SceneTilePalette {
     pub id: u16,
@@ -555,11 +624,49 @@ pub struct SceneTilePalette {
     pub sprite: Option<String>,
     #[serde(default = "wall_color")]
     pub color: [u8; 4],
+    /// Optional `assets/<clip>.anim.json` stem (Unity AnimatedTile).
+    #[serde(default, skip_serializing_if = "skip_empty_opt")]
+    pub anim: Option<String>,
+    /// When set, overrides the clip file's fps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anim_fps: Option<f32>,
+    /// 4-neighbor auto-tile (Unity RuleTile analogue). Omitted = off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_tile: Option<SceneAutoTile>,
+    /// Up to 16 sprite names indexed by NESW bitmask (N=1 E=2 S=4 W=8).
+    /// Empty slots (and a short list) fall back to `{sprite}_{mask}` then `sprite`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub auto_sprites: Vec<String>,
+}
+
+impl Default for SceneTilePalette {
+    fn default() -> Self {
+        Self::new(1)
+    }
 }
 
 impl SceneTilePalette {
+    pub fn new(id: u16) -> Self {
+        Self {
+            id,
+            sprite: None,
+            color: wall_color(),
+            anim: None,
+            anim_fps: None,
+            auto_tile: None,
+            auto_sprites: Vec::new(),
+        }
+    }
+
     pub fn color_rgba(&self) -> Rgba8 {
         Rgba8::new(self.color[0], self.color[1], self.color[2], self.color[3])
+    }
+
+    pub fn anim_clip(&self) -> Option<&str> {
+        self.anim
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     }
 }
 

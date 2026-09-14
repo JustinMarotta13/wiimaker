@@ -255,10 +255,15 @@ fn push_tilemap(out: &mut Vec<String>, a: &SceneTilemap, b: &SceneTilemap) {
         out.push("Tilemap.solid".into());
     }
     if a.palette.len() != b.palette.len()
-        || a.palette
-            .iter()
-            .zip(b.palette.iter())
-            .any(|(x, y)| x.id != y.id || x.sprite != y.sprite || x.color != y.color)
+        || a.palette.iter().zip(b.palette.iter()).any(|(x, y)| {
+            x.id != y.id
+                || x.sprite != y.sprite
+                || x.color != y.color
+                || x.anim != y.anim
+                || x.anim_fps != y.anim_fps
+                || x.auto_tile != y.auto_tile
+                || x.auto_sprites != y.auto_sprites
+        })
     {
         out.push("Tilemap.palette".into());
     }

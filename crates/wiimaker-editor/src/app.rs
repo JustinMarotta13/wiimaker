@@ -1384,6 +1384,11 @@ impl eframe::App for EditorApp {
         self.tick_play_mode(ctx);
         if self.play_mode == PlayMode::Playing {
             ctx.request_repaint();
+        } else if self.play_mode == PlayMode::Edit {
+            let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
+            if self.world.tick_tilemaps(dt) {
+                ctx.request_repaint();
+            }
         }
 
         let dropped: Vec<PathBuf> = ctx.input(|i| {

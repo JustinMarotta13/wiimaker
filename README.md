@@ -28,6 +28,7 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | Transform | `transform.translation / rotation / scale` |
 | SpriteRenderer | `Sprite` component |
 | Tilemap / TilemapCollider2D | `Tilemap` component (cell ids + solid bits) |
+| AnimatedTile / RuleTile | Tilemap palette `anim` + `auto_tile` (`id` / `solid`, NESW bitmask) |
 | BoxCollider2D / CircleCollider2D | `Collider` (`Aabb` / `Circle`, `solid`) |
 | AudioSource | `AudioSource` (`clip`, `volume`, `play_on_awake`) + host oneshots |
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
@@ -77,6 +78,8 @@ wiimaker entity add-component my-game --name Maze Tilemap --cols 28 --rows 31 --
 wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'
 wiimaker tilemap set my-game --name Maze --x 1 --y 1 --id 0
 wiimaker tilemap get my-game --name Maze --x 1 --y 1 --json
+wiimaker tilemap set-palette my-game --name Maze --id 2 --sprite water --anim water --fps 8 --auto-tile id
+wiimaker tilemap mask my-game --name Maze --x 1 --y 1 --json
 wiimaker entity add-component my-game --name Wall Collider --w 32 --h 16
 wiimaker entity add-component my-game --name MainCamera Camera
 wiimaker entity add-component my-game --name MainCamera Follow --target Player --lerp 0.15

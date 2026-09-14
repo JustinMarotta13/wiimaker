@@ -36,7 +36,8 @@ pub use sorting::{
 };
 pub use text::{default_text_size, line_origin_x, text_aabb, Text, TextAlign, FONT_CELL_PX};
 pub use tilemap::{
-    tile_get, tile_solid, tile_solid_world, world_to_cell, world_to_cell_on, TileVisual, Tilemap,
+    autotile_bits, tile_get, tile_solid, tile_solid_world, world_to_cell, world_to_cell_on,
+    AutoTileMatch, TileVisual, Tilemap, AUTOTILE_E, AUTOTILE_N, AUTOTILE_S, AUTOTILE_W,
 };
 pub use time::Clock;
 pub use world::{
