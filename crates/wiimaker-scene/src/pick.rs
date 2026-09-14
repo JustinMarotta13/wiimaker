@@ -61,13 +61,11 @@ pub fn pick_entity_at_with_catalog_and_layers(
         if let Some((layer, z)) = entity_hit_key(scene, ent, sx, sy, catalog, layers) {
             let better = match &best {
                 None => true,
-                Some((bi, bl, bz, _)) => {
-                    match cmp_sorting(layer, z, *bl, *bz) {
-                        std::cmp::Ordering::Greater => true,
-                        std::cmp::Ordering::Equal => idx > *bi,
-                        std::cmp::Ordering::Less => false,
-                    }
-                }
+                Some((bi, bl, bz, _)) => match cmp_sorting(layer, z, *bl, *bz) {
+                    std::cmp::Ordering::Greater => true,
+                    std::cmp::Ordering::Equal => idx > *bi,
+                    std::cmp::Ordering::Less => false,
+                },
             };
             if better {
                 best = Some((idx, layer, z, ent.name.clone()));
@@ -128,6 +126,11 @@ fn entity_hit_key(
             }
         }
     }
+    if let Some(t) = &ent.components.text {
+        if t.enabled && point_in_text(&world, t, sx, sy) {
+            bump(&mut hit, t.sorting_layer_name(), t.z);
+        }
+    }
     hit
 }
 
@@ -169,11 +172,28 @@ fn point_in_disc(world: &crate::scene::SceneTransform, radius: f32, sx: f32, sy:
     dx * dx + dy * dy <= r * r
 }
 
+fn point_in_text(
+    world: &crate::scene::SceneTransform,
+    t: &crate::scene::SceneText,
+    sx: f32,
+    sy: f32,
+) -> bool {
+    let size = t.size * world.scale[0].abs().max(world.scale[1].abs());
+    let r = wiimaker_core::text_aabb(
+        &t.text,
+        wiimaker_core::math::Vec2::new(world.translation[0], world.translation[1]),
+        size,
+        wiimaker_core::math::Vec2::ONE,
+        t.align_runtime(),
+    );
+    sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scene::{
-        EntityData, Scene, SceneComponents, SceneDisc, SceneSprite, SceneTransform,
+        EntityData, Scene, SceneComponents, SceneDisc, SceneSprite, SceneText, SceneTransform,
     };
 
     fn sprite_ent(name: &str, x: f32, y: f32, w: f32, h: f32, z: f32) -> EntityData {
@@ -355,6 +375,27 @@ mod tests {
         front.components.sprite.as_mut().unwrap().sorting_layer = "Foreground".into();
         scene.entities.push(back);
         scene.entities.push(front);
-        assert_eq!(pick_entity_at(&scene, 100.0, 100.0).as_deref(), Some("front"));
+        assert_eq!(
+            pick_entity_at(&scene, 100.0, 100.0).as_deref(),
+            Some("front")
+        );
+    }
+
+    #[test]
+    fn text_hit_uses_aabb() {
+        let mut scene = Scene::new("t");
+        scene.entities.push(EntityData {
+            name: "Hud".into(),
+            parent: None,
+            transform: SceneTransform::from_xy(10.0, 20.0),
+            components: SceneComponents {
+                text: Some(SceneText::new("Hi", 8.0, [255, 255, 255, 255])),
+                ..Default::default()
+            },
+            tag: 0,
+            prefab: None,
+        });
+        assert_eq!(pick_entity_at(&scene, 11.0, 21.0).as_deref(), Some("Hud"));
+        assert_eq!(pick_entity_at(&scene, 9.0, 20.0), None);
     }
 }

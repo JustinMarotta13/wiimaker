@@ -1192,6 +1192,23 @@ fn paint_one_outline(
             painter.rect_stroke(r, 0.0, stroke);
         }
     }
+    if let Some(t) = &ent.components.text {
+        if t.enabled {
+            let size = t.size * world.scale[0].abs().max(world.scale[1].abs());
+            let aabb = wiimaker_core::text_aabb(
+                &t.text,
+                wiimaker_core::math::Vec2::new(world.translation[0], world.translation[1]),
+                size,
+                wiimaker_core::math::Vec2::ONE,
+                t.align_runtime(),
+            );
+            let r = egui::Rect::from_min_max(
+                to_screen(aabb.x, aabb.y),
+                to_screen(aabb.x + aabb.w.max(4.0), aabb.y + aabb.h.max(4.0)),
+            );
+            painter.rect_stroke(r, 0.0, stroke);
+        }
+    }
 }
 
 fn fb_to_rgb(fb: &Framebuffer) -> Vec<u8> {

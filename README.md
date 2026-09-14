@@ -83,6 +83,8 @@ wiimaker entity add-component my-game --name MainCamera Follow --target Player -
 # or: wiimaker entity set my-game --name MainCamera --follow Player --lerp 0.15
 wiimaker entity add-component my-game --name Player GridMover --cell 20 --speed 6
 # or: wiimaker entity set my-game --name Player --cell 20 --speed 6
+wiimaker entity add-component my-game --name Hud Text --text "Score: 0" --size 16 --color 255,255,255 --align left
+# or: wiimaker entity set my-game --name Hud --text "Score: 1" --size 16 --align center
 wiimaker entity overlaps my-game --name Player --other Wall
 wiimaker cook my-game          # advanced / agents
 wiimaker doctor my-game
@@ -100,6 +102,8 @@ Editor Scene/Game chrome (zoom, grid, gizmos, Game aspect) lives in `<game>/.wii
 Sprite sheets keep one PNG; cells live in `assets/<stem>.sprites.json` (Grid By Cell Count + normalized pivot). Scenes reference cell names like `hero_2`.
 
 A tiny PCM16 beep lives at `crates/wiimaker-assets/fixtures/beep.wav` (also copied into `templates/basic-game/assets/` for new games). Host-only; not packed into `.wpack` yet.
+
+HUD text uses a built-in 8×8 bitmap font on the host (`DrawCmd::DrawText`). The visual fixture is `crates/wiimaker-assets/fixtures/hud_font.png`; it is **not** cooked into `.wpack`. Wii GX skips glyphs for now.
 
 ## Quick start (Wii)
 

@@ -265,7 +265,13 @@ fn check_scene_refs(
             }
         }
         if let Some(sp) = &ent.components.sprite {
-            warn_unknown_sorting_layer(ent, "Sprite", sp.sorting_layer_name(), sorting_layers, issues);
+            warn_unknown_sorting_layer(
+                ent,
+                "Sprite",
+                sp.sorting_layer_name(),
+                sorting_layers,
+                issues,
+            );
         }
         if let Some(d) = &ent.components.disc {
             warn_unknown_sorting_layer(ent, "Disc", d.sorting_layer_name(), sorting_layers, issues);
@@ -278,6 +284,15 @@ fn check_scene_refs(
                 sorting_layers,
                 issues,
             );
+        }
+        if let Some(t) = &ent.components.text {
+            warn_unknown_sorting_layer(ent, "Text", t.sorting_layer_name(), sorting_layers, issues);
+            if t.size <= 0.0 {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!("entity '{}': Text size must be > 0", ent.name),
+                });
+            }
         }
         if let Some(tm) = &ent.components.tilemap {
             let n = (tm.width as usize).saturating_mul(tm.height as usize);

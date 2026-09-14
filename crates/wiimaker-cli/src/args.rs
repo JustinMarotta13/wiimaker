@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use crate::util::parse_rgb;
+use crate::util::{parse_rgb, parse_rgba};
 
 #[derive(Parser, Debug)]
 #[command(name = "wiimaker", about = "Build Wii games with a host-first loop")]
@@ -272,7 +272,19 @@ pub enum EntityCmd {
         /// AudioSource play-on-awake
         #[arg(long, action = clap::ArgAction::Set)]
         play_on_awake: Option<bool>,
-        /// Sorting Layer name (Sprite/Disc/Tilemap). Empty string = Default.
+        /// HUD Text string (creates Text if missing)
+        #[arg(long)]
+        text: Option<String>,
+        /// HUD Text glyph size in world pixels
+        #[arg(long)]
+        size: Option<f32>,
+        /// HUD Text color `R,G,B` or `R,G,B,A`
+        #[arg(long, value_parser = parse_rgba)]
+        color: Option<[u8; 4]>,
+        /// HUD Text align: Left, Center, Right
+        #[arg(long)]
+        align: Option<String>,
+        /// Sorting Layer name (Sprite/Disc/Tilemap/Text). Empty string = Default.
         #[arg(long)]
         sorting_layer: Option<String>,
         /// Order in Layer (component `z` within the sorting layer)
@@ -285,7 +297,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Camera, Follow, GridMover, or AudioSource
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Camera, Follow, GridMover, AudioSource, or Text
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -345,6 +357,18 @@ pub enum EntityCmd {
         /// AudioSource play-on-awake
         #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
         play_on_awake: bool,
+        /// HUD Text string (default "Text")
+        #[arg(long)]
+        text: Option<String>,
+        /// HUD Text glyph size in world pixels (default 16)
+        #[arg(long, default_value_t = 16.0)]
+        size: f32,
+        /// HUD Text color `R,G,B` or `R,G,B,A` (default 255,255,255,255)
+        #[arg(long, value_parser = parse_rgba)]
+        color: Option<[u8; 4]>,
+        /// HUD Text align: Left, Center, Right (default Left)
+        #[arg(long)]
+        align: Option<String>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -386,7 +410,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, Follow, GridMover, or AudioSource (Follow removal clears fields; use entity set --follow "" to clear)
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, Follow, GridMover, AudioSource, or Text (Follow removal clears fields; use entity set --follow "" to clear)
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -396,7 +420,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, GridMover, or AudioSource
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, GridMover, AudioSource, or Text
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,

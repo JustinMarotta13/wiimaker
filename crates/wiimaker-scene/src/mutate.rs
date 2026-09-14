@@ -444,9 +444,17 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no AudioSource"))?;
             a.enabled = enabled;
         }
+        "text" | "label" | "hud" => {
+            let t = ent
+                .components
+                .text
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Text"))?;
+            t.enabled = enabled;
+        }
         other => {
             bail!(
-                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|GridMover|AudioSource)"
+                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|GridMover|AudioSource|Text)"
             )
         }
     }
@@ -706,6 +714,65 @@ pub fn set_entity_audio_source(
     Ok(())
 }
 
+pub fn add_component_text(
+    scene: &mut Scene,
+    name: &str,
+    text: &str,
+    size: f32,
+    color: [u8; 4],
+    align: crate::scene::SceneTextAlign,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let mut t = crate::scene::SceneText::new(text, size, color);
+    t.align = align;
+    if let Some(prev) = ent.components.text.as_ref() {
+        t.enabled = prev.enabled;
+        t.z = prev.z;
+        t.sorting_layer = prev.sorting_layer.clone();
+    }
+    ent.components.text = Some(t);
+    Ok(())
+}
+
+pub fn remove_component_text(scene: &mut Scene, name: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    if ent.components.text.is_none() {
+        bail!("entity '{name}' has no Text");
+    }
+    ent.components.text = None;
+    Ok(())
+}
+
+/// Create or update Text. `None` fields leave the existing value (or defaults).
+pub fn set_entity_text(
+    scene: &mut Scene,
+    name: &str,
+    text: Option<&str>,
+    size: Option<f32>,
+    color: Option<[u8; 4]>,
+    align: Option<crate::scene::SceneTextAlign>,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let t = ent
+        .components
+        .text
+        .get_or_insert_with(crate::scene::SceneText::default);
+    if let Some(s) = text {
+        t.text = s.to_string();
+    }
+    if let Some(sz) = size {
+        t.size = if sz <= 0.0 { 16.0 } else { sz };
+    }
+    if let Some(c) = color {
+        t.color = c;
+    }
+    if let Some(a) = align {
+        t.align = a;
+    }
+    t.enabled = true;
+    Ok(())
+}
+
 fn find_mut<'a>(scene: &'a mut Scene, name: &str) -> Result<&'a mut EntityData> {
     scene
         .entities
@@ -908,7 +975,15 @@ mod tests {
         add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
         add_entity(&mut scene, "Main Camera", &MutateOpts::default()).unwrap();
         add_component_camera(&mut scene, "Main Camera", true).unwrap();
-        assert!(scene.find_entity("Main Camera").unwrap().components.camera.as_ref().unwrap().follow.is_none());
+        assert!(scene
+            .find_entity("Main Camera")
+            .unwrap()
+            .components
+            .camera
+            .as_ref()
+            .unwrap()
+            .follow
+            .is_none());
         set_entity_follow(&mut scene, "Main Camera", Some("Player"), Some(0.2)).unwrap();
         let cam = scene
             .find_entity("Main Camera")
@@ -1014,6 +1089,51 @@ mod tests {
     }
 
     #[test]
+    fn text_add_set_remove() {
+        let mut scene = empty_scene();
+        add_entity(&mut scene, "Hud", &MutateOpts::default()).unwrap();
+        add_component_text(
+            &mut scene,
+            "Hud",
+            "Score: 0",
+            16.0,
+            [255, 255, 0, 255],
+            crate::scene::SceneTextAlign::Left,
+        )
+        .unwrap();
+        let t = scene
+            .find_entity("Hud")
+            .unwrap()
+            .components
+            .text
+            .as_ref()
+            .unwrap();
+        assert_eq!(t.text, "Score: 0");
+        assert!((t.size - 16.0).abs() < 1e-6);
+        set_entity_text(
+            &mut scene,
+            "Hud",
+            Some("Score: 1"),
+            Some(24.0),
+            Some([255, 255, 255, 255]),
+            Some(crate::scene::SceneTextAlign::Center),
+        )
+        .unwrap();
+        let t = scene
+            .find_entity("Hud")
+            .unwrap()
+            .components
+            .text
+            .as_ref()
+            .unwrap();
+        assert_eq!(t.text, "Score: 1");
+        assert!((t.size - 24.0).abs() < 1e-6);
+        assert_eq!(t.align, crate::scene::SceneTextAlign::Center);
+        remove_component_text(&mut scene, "Hud").unwrap();
+        assert!(scene.find_entity("Hud").unwrap().components.text.is_none());
+    }
+
+    #[test]
     fn instantiate_records_prefab_link_and_unpack_clears() {
         let mut scene = empty_scene();
         add_entity(
@@ -1064,7 +1184,12 @@ mod tests {
         let mut prefab = entity_to_prefab(&scene, "Dot").unwrap();
         let name = instantiate_prefab(&mut scene, &prefab, "dot", None, None);
         set_entity_transform(&mut scene, &name, Some(99.0), Some(88.0)).unwrap();
-        scene.entities.iter_mut().find(|e| e.name == name).unwrap().tag = 7;
+        scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == name)
+            .unwrap()
+            .tag = 7;
 
         apply_prefab(&mut scene, &name, &mut prefab, "dot").unwrap();
         assert_eq!(prefab.entity.transform.translation[0], 99.0);

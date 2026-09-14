@@ -5,6 +5,15 @@
 
 use crate::color::Rgba8;
 use crate::math::{Mat4, Vec2};
+use crate::text::TextAlign;
+
+#[cfg(feature = "std")]
+use std::string::String;
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
 
 /// Handle into a packed mesh inside a `.wpack` (or host cache).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -65,6 +74,17 @@ pub enum DrawCmd {
         color: Rgba8,
         z: f32,
     },
+    /// Bitmap HUD string. Host samples the built-in 8×8 atlas (one quad per glyph).
+    /// Wii GX v1 skips this command. `pos` is the alignment anchor (top of first line).
+    DrawText {
+        pos: Vec2,
+        text: String,
+        color: Rgba8,
+        /// World-space glyph cell size (width = height; native atlas cell is 8px).
+        size: f32,
+        align: TextAlign,
+        z: f32,
+    },
 }
 
 #[cfg(feature = "std")]
@@ -111,18 +131,34 @@ impl DrawList {
         });
     }
 
+    pub fn text(&mut self, pos: Vec2, text: impl Into<String>, color: Rgba8, size: f32) {
+        self.text_ex(pos, text, color, size, TextAlign::Left, 0.0);
+    }
+
+    pub fn text_ex(
+        &mut self,
+        pos: Vec2,
+        text: impl Into<String>,
+        color: Rgba8,
+        size: f32,
+        align: TextAlign,
+        z: f32,
+    ) {
+        self.push(DrawCmd::DrawText {
+            pos,
+            text: text.into(),
+            color,
+            size,
+            align,
+            z,
+        });
+    }
+
     pub fn sprite(&mut self, texture: TextureId, dest: Rect, color: Rgba8) {
         self.sprite_ex(texture, dest, Rect::unit(), color, 0.0);
     }
 
-    pub fn sprite_ex(
-        &mut self,
-        texture: TextureId,
-        dest: Rect,
-        uv: Rect,
-        color: Rgba8,
-        z: f32,
-    ) {
+    pub fn sprite_ex(&mut self, texture: TextureId, dest: Rect, uv: Rect, color: Rgba8, z: f32) {
         self.push(DrawCmd::DrawSprite {
             texture,
             dest,
@@ -154,5 +190,36 @@ mod tests {
         let mut dl = DrawList::new();
         dl.clear(Rgba8::BLACK);
         assert_eq!(dl.cmds().len(), 1);
+    }
+
+    #[test]
+    fn push_text() {
+        let mut dl = DrawList::new();
+        dl.text_ex(
+            Vec2::new(8.0, 16.0),
+            "Score: 0",
+            Rgba8::WHITE,
+            16.0,
+            TextAlign::Left,
+            1.0,
+        );
+        match &dl.cmds()[0] {
+            DrawCmd::DrawText {
+                pos,
+                text,
+                size,
+                align,
+                z,
+                ..
+            } => {
+                assert_eq!(text, "Score: 0");
+                assert!((pos.x - 8.0).abs() < 1e-4);
+                assert!((pos.y - 16.0).abs() < 1e-4);
+                assert!((*size - 16.0).abs() < 1e-4);
+                assert_eq!(*align, TextAlign::Left);
+                assert!((*z - 1.0).abs() < 1e-4);
+            }
+            other => panic!("expected DrawText, got {other:?}"),
+        }
     }
 }

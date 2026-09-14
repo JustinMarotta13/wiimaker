@@ -1,11 +1,12 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
     add_component_animation, add_component_audio_source, add_component_camera, add_component_collider,
-    add_component_disc, add_component_grid_mover, add_component_sprite, add_component_tilemap,
-    display_sorting_layer, remove_component_animation, remove_component_audio_source,
-    remove_component_camera, remove_component_collider, remove_component_disc,
-    remove_component_grid_mover, remove_component_sprite, remove_component_tilemap, save_project,
-    set_component_enabled, tilemap_resize, SceneColliderKind, SceneDir,
+    add_component_disc, add_component_grid_mover, add_component_sprite, add_component_text,
+    add_component_tilemap, display_sorting_layer, remove_component_animation,
+    remove_component_audio_source, remove_component_camera, remove_component_collider,
+    remove_component_disc, remove_component_grid_mover, remove_component_sprite,
+    remove_component_text, remove_component_tilemap, save_project, set_component_enabled,
+    tilemap_resize, SceneColliderKind, SceneDir, SceneTextAlign,
     DEFAULT_SORTING_LAYER,
 };
 
@@ -58,6 +59,7 @@ impl EditorApp {
         let mut add_camera = false;
         let mut add_grid_mover = false;
         let mut add_audio_source = false;
+        let mut add_text = false;
         let mut remove_sprite = false;
         let mut remove_disc = false;
         let mut remove_tilemap = false;
@@ -66,6 +68,7 @@ impl EditorApp {
         let mut remove_camera = false;
         let mut remove_grid_mover = false;
         let mut remove_audio_source = false;
+        let mut remove_text = false;
         let mut toggle_sprite: Option<bool> = None;
         let mut toggle_disc: Option<bool> = None;
         let mut toggle_tilemap: Option<bool> = None;
@@ -74,6 +77,7 @@ impl EditorApp {
         let mut toggle_camera: Option<bool> = None;
         let mut toggle_grid_mover: Option<bool> = None;
         let mut toggle_audio_source: Option<bool> = None;
+        let mut toggle_text: Option<bool> = None;
         let mut preview_audio = false;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
@@ -839,6 +843,120 @@ impl EditorApp {
                 ui.add_space(4.0);
             }
 
+            if let Some(t) = ent.components.text.as_mut() {
+                let hdr = theme::component_card_header_ov(
+                    ui,
+                    "text",
+                    "Text",
+                    Some(t.enabled),
+                    true,
+                    prefab_ov.component("Text"),
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_text = Some(en);
+                }
+                if hdr.remove {
+                    remove_text = true;
+                }
+                if hdr.open {
+                    theme::inspector_props().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            theme::inspector_label_ov(
+                                ui,
+                                "Text",
+                                prefab_ov.contains("Text.text"),
+                            );
+                            let edit_w = (ui.available_width() - 8.0).clamp(80.0, 220.0);
+                            if ui
+                                .add(
+                                    egui::TextEdit::multiline(&mut t.text)
+                                        .desired_rows(2)
+                                        .desired_width(edit_w),
+                                )
+                                .changed()
+                            {
+                                dirty = true;
+                            }
+                        });
+                        dirty |= theme::labeled_drag_ov(
+                            ui,
+                            "Size",
+                            &mut t.size,
+                            0.5,
+                            prefab_ov.contains("Text.size"),
+                        );
+                        if t.size < 1.0 {
+                            t.size = 1.0;
+                        }
+                        ui.horizontal(|ui| {
+                            theme::inspector_label_ov(
+                                ui,
+                                "Color",
+                                prefab_ov.contains("Text.color"),
+                            );
+                            let mut col = egui::Color32::from_rgba_unmultiplied(
+                                t.color[0],
+                                t.color[1],
+                                t.color[2],
+                                t.color[3],
+                            );
+                            if ui.color_edit_button_srgba(&mut col).changed() {
+                                t.color = [col.r(), col.g(), col.b(), col.a()];
+                                dirty = true;
+                            }
+                        });
+                        let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                        let current = t.align;
+                        let mut picked = current;
+                        ui.horizontal(|ui| {
+                            theme::inspector_label_ov(
+                                ui,
+                                "Align",
+                                prefab_ov.contains("Text.align"),
+                            );
+                            egui::ComboBox::from_id_salt("text_align")
+                                .selected_text(current.to_runtime().as_str())
+                                .width(combo_w)
+                                .show_ui(ui, |ui| {
+                                    for a in [
+                                        SceneTextAlign::Left,
+                                        SceneTextAlign::Center,
+                                        SceneTextAlign::Right,
+                                    ] {
+                                        if ui
+                                            .selectable_label(
+                                                current == a,
+                                                a.to_runtime().as_str(),
+                                            )
+                                            .clicked()
+                                        {
+                                            picked = a;
+                                        }
+                                    }
+                                });
+                        });
+                        if picked != current {
+                            t.align = picked;
+                            dirty = true;
+                        }
+                        dirty |= sorting_layer_fields(
+                            ui,
+                            "text_sort",
+                            &layer_names,
+                            &mut t.sorting_layer,
+                            &mut t.z,
+                            prefab_ov.contains("Text.sorting_layer"),
+                            prefab_ov.contains("Text.z"),
+                        );
+                        ui.label(
+                            RichText::new("Host bitmap HUD · Wii GX skip")
+                                .size(11.0)
+                                .color(theme::TEXT_DIM),
+                        );
+                    });
+                }
+                ui.add_space(4.0);
+            }
 
             let missing_sprite = ent.components.sprite.is_none();
             let missing_disc = ent.components.disc.is_none();
@@ -848,6 +966,7 @@ impl EditorApp {
             let missing_camera = ent.components.camera.is_none();
             let missing_grid_mover = ent.components.grid_mover.is_none();
             let missing_audio_source = ent.components.audio_source.is_none();
+            let missing_text = ent.components.text.is_none();
             ui.add_space(12.0);
             let add_w = ui.available_width();
             ui.allocate_ui_with_layout(
@@ -890,6 +1009,10 @@ impl EditorApp {
                         add_audio_source = true;
                         ui.close_menu();
                     }
+                    if missing_text && ui.button("Text").clicked() {
+                        add_text = true;
+                        ui.close_menu();
+                    }
                     if !missing_sprite
                         && !missing_disc
                         && !missing_tilemap
@@ -898,6 +1021,7 @@ impl EditorApp {
                         && !missing_camera
                         && !missing_grid_mover
                         && !missing_audio_source
+                        && !missing_text
                     {
                         ui.label(
                             RichText::new("All components present")
@@ -1149,6 +1273,37 @@ impl EditorApp {
         if let Some(en) = toggle_audio_source {
             self.push_undo();
             if set_component_enabled(&mut self.scene, &sel, "audiosource", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if add_text {
+            self.push_undo();
+            let _ = add_component_text(
+                &mut self.scene,
+                &sel,
+                "Text",
+                16.0,
+                [255, 255, 255, 255],
+                SceneTextAlign::Left,
+            );
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_text {
+            self.push_undo();
+            if remove_component_text(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_text {
+            self.push_undo();
+            if set_component_enabled(&mut self.scene, &sel, "text", en).is_ok() {
                 self.sync_baseline();
                 self.mark_dirty();
             } else {

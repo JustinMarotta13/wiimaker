@@ -106,6 +106,8 @@ pub fn bake_scene_wscn_with_catalog(
                 buf.write_u8(KIND_TILEMAP)?;
                 write_tilemap_payload(&mut buf, tm)?;
             }
+            // Text / Animation / AudioSource / GridMover / Camera-only: host-first.
+            // WSCN0003 has no glyph kind; C player skips KIND_NONE.
             _ => {
                 buf.write_u8(KIND_NONE)?;
             }

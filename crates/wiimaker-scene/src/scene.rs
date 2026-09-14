@@ -252,8 +252,14 @@ pub struct SceneComponents {
     pub animation: Option<SceneAnimation>,
     #[serde(default, rename = "GridMover", skip_serializing_if = "Option::is_none")]
     pub grid_mover: Option<SceneGridMover>,
-    #[serde(default, rename = "AudioSource", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "AudioSource",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub audio_source: Option<SceneAudioSource>,
+    #[serde(default, rename = "Text", skip_serializing_if = "Option::is_none")]
+    pub text: Option<SceneText>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -266,10 +272,7 @@ pub struct SceneSprite {
     #[serde(default)]
     pub z: f32,
     /// Unity Sorting Layer name. Empty / omitted / `"Default"` → Default.
-    #[serde(
-        default,
-        skip_serializing_if = "is_default_sorting_layer_name"
-    )]
+    #[serde(default, skip_serializing_if = "is_default_sorting_layer_name")]
     pub sorting_layer: String,
     /// When false, skipped by hydrate / pick / bake (Unity component checkbox).
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
@@ -316,10 +319,7 @@ pub struct SceneDisc {
     #[serde(default)]
     pub z: f32,
     /// Unity Sorting Layer name. Empty / omitted / `"Default"` → Default.
-    #[serde(
-        default,
-        skip_serializing_if = "is_default_sorting_layer_name"
-    )]
+    #[serde(default, skip_serializing_if = "is_default_sorting_layer_name")]
     pub sorting_layer: String,
     /// When false, skipped by hydrate / pick / bake (Unity component checkbox).
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
@@ -414,10 +414,7 @@ pub struct SceneTilemap {
     #[serde(default)]
     pub z: f32,
     /// Unity Sorting Layer name. Empty / omitted / `"Default"` → Default.
-    #[serde(
-        default,
-        skip_serializing_if = "is_default_sorting_layer_name"
-    )]
+    #[serde(default, skip_serializing_if = "is_default_sorting_layer_name")]
     pub sorting_layer: String,
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled: bool,
@@ -638,7 +635,11 @@ impl Default for SceneGridMover {
 impl SceneGridMover {
     pub fn new(cell: f32, speed: f32) -> Self {
         Self {
-            cell: if cell <= 0.0 { default_grid_cell() } else { cell },
+            cell: if cell <= 0.0 {
+                default_grid_cell()
+            } else {
+                cell
+            },
             speed: speed.max(0.0),
             queued_dir: None,
             enabled: true,
@@ -690,6 +691,116 @@ impl SceneAudioSource {
             play_on_awake,
             enabled: true,
         }
+    }
+}
+
+fn default_text_size() -> f32 {
+    16.0
+}
+
+fn is_default_text_size(v: &f32) -> bool {
+    (*v - default_text_size()).abs() < 1e-6
+}
+
+fn is_default_text_align(v: &SceneTextAlign) -> bool {
+    *v == SceneTextAlign::Left
+}
+
+/// Host-first HUD string (Unity Text analogue). Not in WSCN.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SceneText {
+    #[serde(default)]
+    pub text: String,
+    #[serde(
+        default = "default_text_size",
+        skip_serializing_if = "is_default_text_size"
+    )]
+    pub size: f32,
+    #[serde(default = "white4")]
+    pub color: [u8; 4],
+    #[serde(default, skip_serializing_if = "is_default_text_align")]
+    pub align: SceneTextAlign,
+    #[serde(default)]
+    pub z: f32,
+    /// Unity Sorting Layer name. Empty / omitted / `"Default"` → Default.
+    #[serde(default, skip_serializing_if = "is_default_sorting_layer_name")]
+    pub sorting_layer: String,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+}
+
+impl Default for SceneText {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            size: default_text_size(),
+            color: white4(),
+            align: SceneTextAlign::Left,
+            z: 0.0,
+            sorting_layer: String::new(),
+            enabled: true,
+        }
+    }
+}
+
+impl SceneText {
+    pub fn new(text: impl Into<String>, size: f32, color: [u8; 4]) -> Self {
+        Self {
+            text: text.into(),
+            size: if size <= 0.0 {
+                default_text_size()
+            } else {
+                size
+            },
+            color,
+            align: SceneTextAlign::Left,
+            z: 0.0,
+            sorting_layer: String::new(),
+            enabled: true,
+        }
+    }
+
+    pub fn color_rgba(&self) -> Rgba8 {
+        Rgba8::new(self.color[0], self.color[1], self.color[2], self.color[3])
+    }
+
+    pub fn sorting_layer_name(&self) -> &str {
+        display_sorting_layer(&self.sorting_layer)
+    }
+
+    pub fn align_runtime(&self) -> wiimaker_core::TextAlign {
+        self.align.to_runtime()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "PascalCase")]
+pub enum SceneTextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl SceneTextAlign {
+    pub fn to_runtime(self) -> wiimaker_core::TextAlign {
+        match self {
+            SceneTextAlign::Left => wiimaker_core::TextAlign::Left,
+            SceneTextAlign::Center => wiimaker_core::TextAlign::Center,
+            SceneTextAlign::Right => wiimaker_core::TextAlign::Right,
+        }
+    }
+
+    pub fn from_runtime(a: wiimaker_core::TextAlign) -> Self {
+        match a {
+            wiimaker_core::TextAlign::Left => SceneTextAlign::Left,
+            wiimaker_core::TextAlign::Center => SceneTextAlign::Center,
+            wiimaker_core::TextAlign::Right => SceneTextAlign::Right,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        wiimaker_core::TextAlign::parse(s).map(Self::from_runtime)
     }
 }
 

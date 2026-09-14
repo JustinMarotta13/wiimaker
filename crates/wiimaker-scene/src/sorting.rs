@@ -4,9 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
-use wiimaker_core::{
-    default_sorting_layers, is_default_sorting_layer_name, DEFAULT_SORTING_LAYER,
-};
+use wiimaker_core::{default_sorting_layers, is_default_sorting_layer_name, DEFAULT_SORTING_LAYER};
 
 use crate::project::{list_scenes, load_project, save_project, GameProject};
 use crate::scene::{
@@ -164,6 +162,12 @@ fn remap_entity_sorting_layer(ent: &mut EntityData, from: &str, to: &str) -> usi
             n += 1;
         }
     }
+    if let Some(t) = ent.components.text.as_mut() {
+        if display_sorting_layer(&t.sorting_layer) == from {
+            t.sorting_layer = normalize_stored_layer(to);
+            n += 1;
+        }
+    }
     n
 }
 
@@ -263,8 +267,17 @@ pub fn set_entity_sorting(
             tm.z = z;
         }
     }
+    if let Some(t) = ent.components.text.as_mut() {
+        any = true;
+        if let Some(layer) = sorting_layer {
+            t.sorting_layer = normalize_stored_layer(layer);
+        }
+        if let Some(z) = order_in_layer {
+            t.z = z;
+        }
+    }
     if !any {
-        bail!("entity '{name}' has no Sprite, Disc, or Tilemap");
+        bail!("entity '{name}' has no Sprite, Disc, Tilemap, or Text");
     }
     Ok(())
 }
@@ -282,10 +295,7 @@ pub fn require_sorting_layer(project: &GameProject, name: &str) -> Result<()> {
 
 /// Drawable sort key for picking: (layer index, z).
 fn hit_sort_key(layers: &[String], layer_name: &str, z: f32) -> (u16, f32) {
-    (
-        wiimaker_core::sorting_layer_index(layers, layer_name),
-        z,
-    )
+    (wiimaker_core::sorting_layer_index(layers, layer_name), z)
 }
 
 /// Highest (layer, z) among enabled drawables on this entity.
@@ -316,6 +326,11 @@ pub fn entity_max_sorting_key(ent: &EntityData, layers: &[String]) -> Option<(u1
             consider(&mut best, tm.sorting_layer_name(), tm.z);
         }
     }
+    if let Some(t) = &ent.components.text {
+        if t.enabled {
+            consider(&mut best, t.sorting_layer_name(), t.z);
+        }
+    }
     best
 }
 
@@ -331,11 +346,23 @@ mod tests {
         add_entity(&mut scene, "orb", &MutateOpts::default()).unwrap();
         add_component_sprite(&mut scene, "orb", "tex", [16.0, 16.0]).unwrap();
         set_entity_sorting(&mut scene, "orb", Some("Foreground"), Some(7.0)).unwrap();
-        let sp = scene.find_entity("orb").unwrap().components.sprite.as_ref().unwrap();
+        let sp = scene
+            .find_entity("orb")
+            .unwrap()
+            .components
+            .sprite
+            .as_ref()
+            .unwrap();
         assert_eq!(sp.sorting_layer, "Foreground");
         assert!((sp.z - 7.0).abs() < 1e-4);
         set_entity_sorting(&mut scene, "orb", Some("Default"), None).unwrap();
-        let sp = scene.find_entity("orb").unwrap().components.sprite.as_ref().unwrap();
+        let sp = scene
+            .find_entity("orb")
+            .unwrap()
+            .components
+            .sprite
+            .as_ref()
+            .unwrap();
         assert!(sp.sorting_layer.is_empty());
     }
 }
