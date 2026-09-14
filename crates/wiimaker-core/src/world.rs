@@ -1,4 +1,4 @@
-//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/AudioSource).
+//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/AudioSource/Text).
 
 use crate::audio::{AudioSource, Oneshot};
 use crate::collider::Collider;
@@ -7,6 +7,7 @@ use crate::draw::{Rect, TextureId};
 use crate::grid_mover::GridMover;
 use crate::math::{Quat, Vec2, Vec3};
 use crate::sorting::{default_sorting_layer_index, default_sorting_layers};
+use crate::text::Text;
 use crate::tilemap::Tilemap;
 
 /// Host / scene framebuffer size (Wii VI analogue for v0 ortho).
@@ -190,6 +191,7 @@ struct Slot {
     animation: Option<Animation>,
     grid_mover: Option<GridMover>,
     audio_source: Option<AudioSource>,
+    text: Option<Text>,
 }
 
 /// Tiny entity world — Unity GameObject feel without a full ECS.
@@ -236,6 +238,7 @@ impl World {
             slot.animation = None;
             slot.grid_mover = None;
             slot.audio_source = None;
+            slot.text = None;
             return EntityId(idx as u32);
         }
         let id = EntityId(self.slots.len() as u32);
@@ -253,6 +256,7 @@ impl World {
             animation: None,
             grid_mover: None,
             audio_source: None,
+            text: None,
         });
         id
     }
@@ -575,6 +579,32 @@ impl World {
         if let Some(slot) = self.slot_mut(id) {
             slot.audio_source = audio;
         }
+    }
+
+    pub fn text(&self, id: EntityId) -> Option<&Text> {
+        self.slot(id).and_then(|s| s.text.as_ref())
+    }
+
+    pub fn text_mut(&mut self, id: EntityId) -> Option<&mut Text> {
+        self.slot_mut(id).and_then(|s| s.text.as_mut())
+    }
+
+    pub fn set_text(&mut self, id: EntityId, text: Option<Text>) {
+        if let Some(slot) = self.slot_mut(id) {
+            slot.text = text;
+        }
+    }
+
+    pub fn iter_texts(&self) -> impl Iterator<Item = (EntityId, &Transform, &Text)> {
+        self.slots.iter().enumerate().filter_map(|(i, s)| {
+            if s.live {
+                s.text
+                    .as_ref()
+                    .map(|t| (EntityId(i as u32), &s.transform, t))
+            } else {
+                None
+            }
+        })
     }
 
     /// Queue a host oneshot (`assets/<clip>.wav`). Backends drain via [`Self::drain_oneshots`].
