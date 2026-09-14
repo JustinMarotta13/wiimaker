@@ -39,7 +39,7 @@ Scenes are JSON on disk (`scenes/*.scene.json`). The egui editor and CLI share
 mutation helpers in `wiimaker-scene` so agents and humans never diverge.
 
 Unity mapping: Project → `game.toml`, Scene → `.scene.json`, GameObject → named
-entity with `Transform` + `Sprite` / `Disc` / `Camera` (+ optional follow) / `Tilemap` / `Collider` / `GridMover`, Prefab → `.prefab.json` (instance `prefab` link + property overrides).
+entity with `Transform` + `Sprite` / `Disc` / `Camera` (+ optional follow) / `Tilemap` / `Collider` / `GridMover` / `Text`, Prefab → `.prefab.json` (instance `prefab` link + property overrides).
 
 ### `wiimaker-core`
 
@@ -48,8 +48,8 @@ Platform-agnostic. Uses `glam` for math. Games never call GX or OpenGL directly.
 Key types:
 
 - `App` — implement `update` / `render`
-- `World` — named entities with Transform + Sprite/Disc/Camera/Follow/Tilemap/Collider/GridMover (`tile_solid` / `overlaps` / `move_and_collide` / `follow_cameras` / `step_grid_movers`)
-- `DrawList` — ordered `DrawCmd` (Clear, SetCamera, DrawMesh, DrawSprite)
+- `World` — named entities with Transform + Sprite/Disc/Camera/Follow/Tilemap/Collider/GridMover/Text (`tile_solid` / `overlaps` / `move_and_collide` / `follow_cameras` / `step_grid_movers`)
+- `DrawList` — ordered `DrawCmd` (Clear, SetCamera, DrawMesh, DrawSprite, DrawDisc, DrawText)
 - `Input` — normalized buttons + sticks (GCN layout as the lingua franca)
 - `Time` — fixed 60 Hz tick with accumulator (Wii VI is king)
 
@@ -64,11 +64,14 @@ enum DrawCmd {
     SetTexture { id: TextureId },
     DrawMesh { mesh: MeshId, transform: Mat4, color: [u8; 4] },
     DrawSprite { texture: TextureId, dest: Rect, uv: Rect, color: [u8; 4] },
+    DrawDisc { center: Vec2, radius: f32, color: [u8; 4], z: f32 },
+    DrawText { pos: Vec2, text: String, color: [u8; 4], size: f32, align, z: f32 },
 }
 ```
 
 Host interprets this with a software rasterizer (v0) or GL (v1).
 Wii maps each command onto GX immediate / display-list calls.
+`DrawText` is host-first (built-in 8×8 atlas in `wiimaker-host`); GX skips it.
 
 ### Wii runtime (C)
 
