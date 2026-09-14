@@ -1,9 +1,10 @@
 //! Default World → DrawList renderer (scene player).
 
-use wiimaker_core::color::Rgba8;
 use wiimaker_core::cmp_sorting;
+use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::{DrawList, Rect, TextureId};
 use wiimaker_core::math::Vec2;
+use wiimaker_core::text::Text;
 use wiimaker_core::tilemap::Tilemap;
 use wiimaker_core::world::{Disc, Sprite, Transform, World};
 
@@ -29,6 +30,12 @@ enum DrawItem<'a> {
         xf: &'a Transform,
         d: &'a Disc,
     },
+    Text {
+        layer: u16,
+        z: f32,
+        xf: &'a Transform,
+        t: &'a Text,
+    },
 }
 
 impl DrawItem<'_> {
@@ -36,15 +43,17 @@ impl DrawItem<'_> {
         match self {
             DrawItem::Tilemap { layer, .. }
             | DrawItem::Sprite { layer, .. }
-            | DrawItem::Disc { layer, .. } => *layer,
+            | DrawItem::Disc { layer, .. }
+            | DrawItem::Text { layer, .. } => *layer,
         }
     }
 
     fn z(&self) -> f32 {
         match self {
-            DrawItem::Tilemap { z, .. } | DrawItem::Sprite { z, .. } | DrawItem::Disc { z, .. } => {
-                *z
-            }
+            DrawItem::Tilemap { z, .. }
+            | DrawItem::Sprite { z, .. }
+            | DrawItem::Disc { z, .. }
+            | DrawItem::Text { z, .. } => *z,
         }
     }
 }
@@ -58,7 +67,7 @@ impl DrawItem<'_> {
 /// [`DrawCmd::SetCamera`] because host backends apply the offset in these dests.
 ///
 /// Draw order is Unity Sorting Layer then Order in Layer (`z`) across Sprite,
-/// Disc, and Tilemap. Missing layers hydrate to Default.
+/// Disc, Tilemap, and Text. Missing layers hydrate to Default.
 pub fn render_world(world: &World, draw: &mut DrawList, clear: Rgba8) {
     render_world_ex(world, draw, clear, true);
 }
@@ -101,6 +110,14 @@ pub fn render_world_ex(world: &World, draw: &mut DrawList, clear: Rgba8, apply_c
             d,
         });
     }
+    for (_id, xf, t) in world.iter_texts() {
+        items.push(DrawItem::Text {
+            layer: t.sorting_layer,
+            z: t.z,
+            xf,
+            t,
+        });
+    }
     items.sort_by(|a, b| cmp_sorting(a.layer(), a.z(), b.layer(), b.z()));
 
     for item in items {
@@ -122,6 +139,17 @@ pub fn render_world_ex(world: &World, draw: &mut DrawList, clear: Rgba8, apply_c
                     Vec2::new(xf.translation.x - offset.x, xf.translation.y - offset.y),
                     d.radius * xf.scale.x.max(xf.scale.y),
                     d.color,
+                    z,
+                );
+            }
+            DrawItem::Text { xf, t, z, .. } => {
+                let size = t.size * xf.scale.x.abs().max(xf.scale.y.abs());
+                draw.text_ex(
+                    Vec2::new(xf.translation.x - offset.x, xf.translation.y - offset.y),
+                    t.string.clone(),
+                    t.color,
+                    size,
+                    t.align,
                     z,
                 );
             }
@@ -255,6 +283,7 @@ mod tests {
             .filter_map(|c| match c {
                 DrawCmd::DrawSprite { .. } => Some("sprite"),
                 DrawCmd::DrawDisc { .. } => Some("disc"),
+                DrawCmd::DrawText { .. } => Some("text"),
                 _ => None,
             })
             .collect()
@@ -313,5 +342,55 @@ mod tests {
             world.sprite(id).unwrap().sorting_layer,
             world.sorting_layer_index("Default")
         );
+    }
+
+    #[test]
+    fn text_emits_draw_text_and_camera_offset() {
+        use wiimaker_core::text::{Text, TextAlign};
+        let mut world = World::new();
+        let id = world.spawn_named("hud", Transform::from_xy(40.0, 12.0));
+        let mut t = Text::new("Hi", 8.0, Rgba8::WHITE);
+        t.align = TextAlign::Left;
+        t.z = 2.0;
+        t.sorting_layer = world.sorting_layer_index("Foreground");
+        world.set_text(id, Some(t));
+        let cam = world.spawn_named("Cam", Transform::from_xy(420.0, 240.0));
+        world.set_camera(cam, Some(Camera { active: true }));
+        let mut draw = DrawList::new();
+        render_world(&world, &mut draw, Rgba8::BLACK);
+        let texts: Vec<_> = draw
+            .cmds()
+            .iter()
+            .filter_map(|c| match c {
+                DrawCmd::DrawText {
+                    pos, text, size, z, ..
+                } => Some((pos.x, pos.y, text.clone(), *size, *z)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts.len(), 1);
+        // offset x = 420 - 320 = 100
+        assert!((texts[0].0 - (40.0 - 100.0)).abs() < 1e-4);
+        assert!((texts[0].1 - 12.0).abs() < 1e-4);
+        assert_eq!(texts[0].2, "Hi");
+        assert!((texts[0].3 - 8.0).abs() < 1e-4);
+        assert!((texts[0].4 - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn text_sorts_with_sprites() {
+        use wiimaker_core::text::Text;
+        let mut world = World::new();
+        let disc_id = world.spawn_named("back", Transform::from_xy(10.0, 10.0));
+        let mut disc = Disc::new(4.0, Rgba8::WHITE);
+        disc.sorting_layer = world.sorting_layer_index("Background");
+        world.set_disc(disc_id, Some(disc));
+        let hud = world.spawn_named("hud", Transform::from_xy(20.0, 20.0));
+        let mut t = Text::new("GO", 8.0, Rgba8::WHITE);
+        t.sorting_layer = world.sorting_layer_index("Foreground");
+        world.set_text(hud, Some(t));
+        let mut draw = DrawList::new();
+        render_world(&world, &mut draw, Rgba8::BLACK);
+        assert_eq!(draw_kinds(draw.cmds()), vec!["disc", "text"]);
     }
 }

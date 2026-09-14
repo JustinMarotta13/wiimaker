@@ -7,7 +7,8 @@ use serde::Serialize;
 
 use crate::scene::{
     display_sorting_layer, EntityData, Prefab, SceneAudioSource, SceneCamera, SceneCollider,
-    SceneComponents, SceneDisc, SceneGridMover, SceneSprite, SceneTilemap, SceneTransform,
+    SceneComponents, SceneDisc, SceneGridMover, SceneSprite, SceneText, SceneTilemap,
+    SceneTransform,
 };
 
 const EPS: f32 = 1e-4;
@@ -179,6 +180,11 @@ fn push_components(out: &mut Vec<String>, a: &SceneComponents, b: &SceneComponen
         (Some(_), None) | (None, Some(_)) => out.push("AudioSource".into()),
         (None, None) => {}
     }
+    match (&a.text, &b.text) {
+        (Some(i), Some(p)) => push_text(out, i, p),
+        (Some(_), None) | (None, Some(_)) => out.push("Text".into()),
+        (None, None) => {}
+    }
 }
 
 fn push_sprite(out: &mut Vec<String>, a: &SceneSprite, b: &SceneSprite) {
@@ -321,6 +327,30 @@ fn push_audio(out: &mut Vec<String>, a: &SceneAudioSource, b: &SceneAudioSource)
     }
     if a.enabled != b.enabled {
         out.push("AudioSource.enabled".into());
+    }
+}
+
+fn push_text(out: &mut Vec<String>, a: &SceneText, b: &SceneText) {
+    if a.text != b.text {
+        out.push("Text.text".into());
+    }
+    if !near(a.size, b.size) {
+        out.push("Text.size".into());
+    }
+    if a.color != b.color {
+        out.push("Text.color".into());
+    }
+    if a.align != b.align {
+        out.push("Text.align".into());
+    }
+    if !near(a.z, b.z) {
+        out.push("Text.z".into());
+    }
+    if display_sorting_layer(&a.sorting_layer) != display_sorting_layer(&b.sorting_layer) {
+        out.push("Text.sorting_layer".into());
+    }
+    if a.enabled != b.enabled {
+        out.push("Text.enabled".into());
     }
 }
 

@@ -13,6 +13,7 @@ use wiimaker_core::tilemap::{TileVisual, Tilemap};
 use wiimaker_core::world::{Animation, Camera, Disc, Follow, Sprite, World};
 use wiimaker_core::AudioSource;
 use wiimaker_core::GridMover;
+use wiimaker_core::Text;
 
 use crate::scene::{EntityData, Scene};
 
@@ -239,6 +240,13 @@ fn spawn_entity(
         }
     }
 
+    if let Some(t) = &ent.components.text {
+        if t.enabled {
+            let text = scene_text_to_runtime(world, t);
+            world.set_text(id, Some(text));
+        }
+    }
+
     Ok(())
 }
 
@@ -381,6 +389,12 @@ pub fn hydrate_lenient_with_sorting_layers(
                 world.set_audio_source(id, Some(scene_audio_source_to_runtime(a)));
             }
         }
+        if let Some(t) = &ent.components.text {
+            if t.enabled {
+                let text = scene_text_to_runtime(&world, t);
+                world.set_text(id, Some(text));
+            }
+        }
     }
     world
 }
@@ -501,4 +515,12 @@ fn scene_grid_mover_to_runtime(g: &crate::scene::SceneGridMover) -> GridMover {
 
 fn scene_audio_source_to_runtime(a: &crate::scene::SceneAudioSource) -> AudioSource {
     AudioSource::new(a.clip.clone(), a.volume, a.play_on_awake)
+}
+
+fn scene_text_to_runtime(world: &World, t: &crate::scene::SceneText) -> Text {
+    let mut text = Text::new(t.text.clone(), t.size, t.color_rgba());
+    text.align = t.align_runtime();
+    text.z = t.z;
+    text.sorting_layer = world.sorting_layer_index(&t.sorting_layer);
+    text
 }
