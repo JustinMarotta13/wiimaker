@@ -489,12 +489,12 @@ fn scene_palette_to_runtime(
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .or_else(|| stem.map(|s| format!("{s}_{mask}")));
-            vis.auto_frames[mask] = named
-                .and_then(|name| {
-                    let (tex_name, uv) = resolve_palette_sprite(&name, catalog);
-                    textures.get(&tex_name).map(|tex| (tex, uv))
-                })
-                .or(vis.texture);
+            // Leave unresolved masks None so `texture_for_mask` falls back to the
+            // ticking `vis.texture`. Filling with frame 0 froze combined anim + auto-tile.
+            vis.auto_frames[mask] = named.and_then(|name| {
+                let (tex_name, uv) = resolve_palette_sprite(&name, catalog);
+                textures.get(&tex_name).map(|tex| (tex, uv))
+            });
         }
     }
     vis
