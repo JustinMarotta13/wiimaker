@@ -939,10 +939,7 @@ impl EditorApp {
             Ok(r) => {
                 self.sync_baseline();
                 self.mark_dirty();
-                let file = abs
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("map");
+                let file = abs.file_name().and_then(|s| s.to_str()).unwrap_or("map");
                 self.status = format!(
                     "imported {file} → {entity} {}×{} ({} cells{})",
                     r.width,

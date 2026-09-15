@@ -9,9 +9,9 @@ use wiimaker_scene::{
     Scene,
 };
 
-fn tmp_game() -> PathBuf {
+fn tmp_game(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "wiimaker-cli-from-ascii-{}",
+        "wiimaker-cli-from-ascii-{}-{tag}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
@@ -23,11 +23,7 @@ fn tmp_game() -> PathBuf {
     let mut scene = Scene::new("main");
     add_entity(&mut scene, "Maze", &MutateOpts::default()).unwrap();
     save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
-    fs::write(
-        dir.join("assets/maze.txt"),
-        "#####\n#...#\n#####\n",
-    )
-    .unwrap();
+    fs::write(dir.join("assets/maze.txt"), "#####\n#...#\n#####\n").unwrap();
     dir
 }
 
@@ -37,7 +33,7 @@ fn wiimaker() -> Command {
 
 #[test]
 fn from_ascii_file_json_and_scene_roundtrip() {
-    let dir = tmp_game();
+    let dir = tmp_game("default");
     let out = wiimaker()
         .args([
             "tilemap",
@@ -52,15 +48,19 @@ fn from_ascii_file_json_and_scene_roundtrip() {
         .expect("run wiimaker");
     assert!(
         out.status.success(),
-        "from-ascii failed: {}",
-        String::from_utf8_lossy(&out.stderr)
+        "from-ascii failed: {}\n{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("\"ok\":true") || stdout.contains("\"ok\": true"),
         "{stdout}"
     );
-    assert!(stdout.contains("\"width\":5") || stdout.contains("\"width\": 5"), "{stdout}");
+    assert!(
+        stdout.contains("\"width\":5") || stdout.contains("\"width\": 5"),
+        "{stdout}"
+    );
     assert!(
         stdout.contains("\"height\":3") || stdout.contains("\"height\": 3"),
         "{stdout}"
@@ -70,7 +70,8 @@ fn from_ascii_file_json_and_scene_roundtrip() {
         "{stdout}"
     );
 
-    let scene = load_scene(&dir.join("scenes/main.scene.json")).unwrap();
+    let scene =
+        load_scene(&dir.join("scenes/main.scene.json")).expect("load scene after from-ascii");
     let tm = scene
         .find_entity("Maze")
         .unwrap()
@@ -86,7 +87,7 @@ fn from_ascii_file_json_and_scene_roundtrip() {
 
 #[test]
 fn from_ascii_custom_map_json() {
-    let dir = tmp_game();
+    let dir = tmp_game("map");
     fs::write(dir.join("assets/dots.txt"), "###\n#P#\n###\n").unwrap();
     let out = wiimaker()
         .args([
@@ -104,10 +105,11 @@ fn from_ascii_custom_map_json() {
         .expect("run wiimaker map");
     assert!(
         out.status.success(),
-        "from-ascii --map failed: {}",
-        String::from_utf8_lossy(&out.stderr)
+        "from-ascii --map failed: {}\n{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
     );
-    let scene = load_scene(&dir.join("scenes/main.scene.json")).unwrap();
+    let scene = load_scene(&dir.join("scenes/main.scene.json")).expect("load mapped scene");
     assert_eq!(tilemap_get_cell(&scene, "Maze", 1, 1).unwrap(), (2, false));
     assert_eq!(tilemap_get_cell(&scene, "Maze", 0, 0).unwrap(), (1, true));
 }

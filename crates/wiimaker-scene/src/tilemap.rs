@@ -241,10 +241,7 @@ pub fn parse_ascii_tilemap(ascii: &str) -> Result<AsciiTileMap> {
     parse_ascii_tilemap_with(ascii, None)
 }
 
-pub fn parse_ascii_tilemap_with(
-    ascii: &str,
-    map: Option<&AsciiCharMap>,
-) -> Result<AsciiTileMap> {
+pub fn parse_ascii_tilemap_with(ascii: &str, map: Option<&AsciiCharMap>) -> Result<AsciiTileMap> {
     let ascii = ascii.strip_prefix('\u{feff}').unwrap_or(ascii);
     let mut rows: Vec<Vec<(u16, bool)>> = Vec::new();
     let mut row: Vec<(u16, bool)> = Vec::new();
@@ -640,6 +637,7 @@ mod tests {
         assert_eq!(parsed.cells[6], 0); // (1,1)
         assert_eq!(parsed.solid[6], 0);
         assert_eq!(parsed.cells[8], 0); // (3,1)
+
         // digits + unknown glyph
         let mixed = parse_ascii_tilemap("#2.\nX 0").unwrap();
         assert_eq!(mixed.width, 3);
@@ -673,16 +671,8 @@ mod tests {
             },
         )
         .unwrap();
-        let out = tilemap_from_ascii(
-            &mut scene,
-            "Maze",
-            "#####\n#...#\n#####",
-            0,
-            0,
-            true,
-            None,
-        )
-        .unwrap();
+        let out = tilemap_from_ascii(&mut scene, "Maze", "#####\n#...#\n#####", 0, 0, true, None)
+            .unwrap();
         assert!(out.resized);
         assert_eq!((out.width, out.height, out.stamped), (5, 3, 15));
         let tm = scene
