@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use wiimaker_core::{tile_solid, tile_solid_world, world_to_cell};
 use wiimaker_scene::{
-    hydrate, load_scene, save_scene, tilemap_fill, tilemap_get_cell, tilemap_set_cell,
-    tilemap_stamp_ascii, TextureMap,
+    hydrate, load_scene, save_scene, tilemap_fill, tilemap_from_ascii_path, tilemap_get_cell,
+    tilemap_set_cell, tilemap_stamp_ascii, AsciiCharMap, TextureMap,
 };
 
 fn fixture() -> PathBuf {
@@ -58,4 +58,61 @@ fn walker_blocked_by_solid_cells() {
     for (x, y) in blocked {
         assert!(tile_solid(&world, x, y), "expected solid {x},{y}");
     }
+}
+
+fn maze_txt() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/maze.txt")
+}
+
+#[test]
+fn from_ascii_file_roundtrip_into_scene_tilemap() {
+    let src = load_scene(&fixture()).expect("load fixture");
+    let dir = std::env::temp_dir().join("wiimaker-tilemap-from-ascii");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("maze.scene.json");
+    save_scene(&path, &src).unwrap();
+
+    let mut scene = load_scene(&path).unwrap();
+    let out = tilemap_from_ascii_path(&mut scene, "Maze", &maze_txt(), 0, 0, true, None).unwrap();
+    assert_eq!((out.width, out.height, out.stamped), (5, 3, 15));
+    save_scene(&path, &scene).unwrap();
+
+    let loaded = load_scene(&path).unwrap();
+    let tm = loaded
+        .find_entity("Maze")
+        .unwrap()
+        .components
+        .tilemap
+        .as_ref()
+        .unwrap();
+    assert_eq!((tm.width, tm.height), (5, 3));
+    assert_eq!(tilemap_get_cell(&loaded, "Maze", 0, 0).unwrap(), (1, true));
+    assert_eq!(tilemap_get_cell(&loaded, "Maze", 1, 1).unwrap(), (0, false));
+    assert_eq!(tilemap_get_cell(&loaded, "Maze", 4, 1).unwrap(), (1, true));
+
+    let world = hydrate(&loaded, &TextureMap::new()).unwrap();
+    assert!(tile_solid(&world, 0, 0));
+    assert!(!tile_solid(&world, 1, 1));
+    assert!(tile_solid(&world, 4, 2));
+}
+
+#[test]
+fn from_ascii_custom_map_roundtrip() {
+    let mut scene = load_scene(&fixture()).unwrap();
+    let map = AsciiCharMap::parse("#=1,.=0,P=2:0").unwrap();
+    let ascii = "#####\n#P.P#\n#####";
+    let out = wiimaker_scene::tilemap_from_ascii(&mut scene, "Maze", ascii, 0, 0, true, Some(&map))
+        .unwrap();
+    assert_eq!(out.stamped, 15);
+    assert_eq!(tilemap_get_cell(&scene, "Maze", 1, 1).unwrap(), (2, false));
+    assert_eq!(tilemap_get_cell(&scene, "Maze", 2, 1).unwrap(), (0, false));
+    assert_eq!(tilemap_get_cell(&scene, "Maze", 3, 1).unwrap(), (2, false));
+    assert_eq!(tilemap_get_cell(&scene, "Maze", 0, 1).unwrap(), (1, true));
+
+    let dir = std::env::temp_dir().join("wiimaker-tilemap-from-ascii-map");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("maze.scene.json");
+    save_scene(&path, &scene).unwrap();
+    let loaded = load_scene(&path).unwrap();
+    assert_eq!(tilemap_get_cell(&loaded, "Maze", 1, 1).unwrap(), (2, false));
 }

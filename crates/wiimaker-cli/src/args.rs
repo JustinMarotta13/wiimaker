@@ -656,6 +656,26 @@ pub enum TilemapCmd {
         #[arg(long)]
         scene: Option<String>,
     },
+    /// Load an ASCII maze file into a Tilemap (`#` wall, `.` empty; resizes to fit)
+    FromAscii {
+        game: String,
+        /// UTF-8 maze file (cwd, game dir, or `assets/`)
+        file: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value_t = 0)]
+        x: i32,
+        #[arg(long, default_value_t = 0)]
+        y: i32,
+        /// Grow/shrink the grid so the stamp fits (default true)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        resize: bool,
+        /// Glyph map, e.g. `#=1,.=0,P=2:0` (`id:solid`; solid defaults to id != 0)
+        #[arg(long)]
+        map: Option<String>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
     /// Read one cell or dump the whole tilemap
     Get {
         game: String,

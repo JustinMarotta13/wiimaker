@@ -19,7 +19,7 @@ clap binary in `crates/wiimaker-cli`. Agents build games as: `new` → `asset im
 | Editor prefs | `editor prefs` · `editor set-scene-view` · `editor play-status` |
 | Entity | `entity list\|add\|set\|add-component\|remove\|duplicate\|rename\|set-parent` · prefab `create-prefab\|instantiate-prefab\|apply-prefab\|revert-prefab\|unpack-prefab\|prefab-status` |
 | Asset | `asset list\|import\|slice\|set-pivot\|list-sprites\|anim\|list-anims\|list-wavs\|play` |
-| Tilemap | `tilemap set\|fill\|stamp\|get\|set-palette\|mask` |
+| Tilemap | `tilemap set\|fill\|stamp\|from-ascii\|get\|set-palette\|mask` |
 | Sorting | `sorting-layer list\|add\|rename\|move\|remove` |
 
 Global `--json` must work on mutating and query commands for machine output.
