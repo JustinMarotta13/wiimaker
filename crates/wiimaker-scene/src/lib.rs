@@ -74,9 +74,11 @@ pub use sorting::{
     set_entity_sorting, validate_sorting_layer_name,
 };
 pub use tilemap::{
-    add_component_tilemap, ensure_tilemap, remove_component_tilemap, tilemap_autotile_mask,
-    tilemap_fill, tilemap_get_cell, tilemap_resize, tilemap_set_cell, tilemap_set_palette,
-    tilemap_stamp, tilemap_stamp_ascii, TilePaletteOpts,
+    add_component_tilemap, default_ascii_cell, ensure_tilemap, parse_ascii_tilemap,
+    parse_ascii_tilemap_with, remove_component_tilemap, tilemap_autotile_mask, tilemap_fill,
+    tilemap_from_ascii, tilemap_from_ascii_path, tilemap_get_cell, tilemap_resize,
+    tilemap_set_cell, tilemap_set_palette, tilemap_stamp, tilemap_stamp_ascii, AsciiCharMap,
+    AsciiTileMap, TilePaletteOpts, TilemapFromAscii,
 };
 pub use undo::UndoStack;
 pub use wiimaker_core::{DEFAULT_SORTING_LAYER, DEFAULT_SORTING_LAYERS};

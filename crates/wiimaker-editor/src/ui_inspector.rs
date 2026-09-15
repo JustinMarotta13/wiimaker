@@ -81,6 +81,19 @@ impl EditorApp {
         let mut preview_audio = false;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
+        let mut pending_ascii_import: Option<std::path::PathBuf> = None;
+        let ascii_files: Vec<std::path::PathBuf> = self
+            .project_entries
+            .iter()
+            .filter(|e| {
+                !e.is_dir
+                    && e.rel
+                        .extension()
+                        .and_then(|x| x.to_str())
+                        .is_some_and(|x| x.eq_ignore_ascii_case("txt"))
+            })
+            .map(|e| e.rel.clone())
+            .collect();
         let mut rename_committed = false;
         let mut prefab_apply = false;
         let mut prefab_revert = false;
@@ -658,6 +671,30 @@ impl EditorApp {
                         let next = tm.palette.iter().map(|p| p.id).max().unwrap_or(0) + 1;
                         tm.palette.push(wiimaker_scene::SceneTilePalette::new(next));
                         dirty = true;
+                    }
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new("Import ASCII")
+                            .size(12.0)
+                            .color(theme::TEXT_MUTED),
+                    );
+                    if ascii_files.is_empty() {
+                        theme::muted(ui, "Drop a .txt maze into Project, then Import");
+                    } else {
+                        theme::muted(ui, "# wall · . empty · 1-9 id · resizes grid");
+                        for rel in &ascii_files {
+                            let label = rel
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("map.txt");
+                            if ui
+                                .button(format!("Import {label}"))
+                                .on_hover_text("tilemap from-ascii — same helper as the CLI")
+                                .clicked()
+                            {
+                                pending_ascii_import = Some(rel.clone());
+                            }
+                        }
                     }
                 });
                 }
@@ -1464,6 +1501,10 @@ impl EditorApp {
             self.edit_tool = crate::app::EditTool::Paint;
             self.status = format!("brush {id}");
         }
+        if let Some(rel) = pending_ascii_import {
+            let abs = self.game_dir.join(&rel);
+            self.import_ascii_tilemap(&sel, &abs);
+        }
 
         ui.add_space(8.0);
         if is_prefab_instance {
@@ -1643,6 +1684,41 @@ impl EditorApp {
                     }
                 }
                 theme::muted(ui, "PCM16 mono/stereo oneshot · not packed into .wpack yet");
+            } else if ext == "txt" {
+                theme::muted(ui, "# wall · . / space / 0 empty · 1-9 palette id");
+                ui.add_space(4.0);
+                let tilemaps: Vec<String> = self
+                    .scene
+                    .entities
+                    .iter()
+                    .filter(|e| e.components.tilemap.is_some())
+                    .map(|e| e.name.clone())
+                    .collect();
+                if tilemaps.is_empty() {
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("Import into new Maze").strong())
+                                .fill(theme::ACCENT_DIM),
+                        )
+                        .on_hover_text("Creates Maze + Tilemap from this file")
+                        .clicked()
+                    {
+                        self.import_ascii_tilemap("Maze", &abs);
+                    }
+                    theme::muted(ui, "Same mutate helper as `wiimaker tilemap from-ascii`");
+                } else {
+                    ui.label(
+                        RichText::new("Stamp into Tilemap")
+                            .size(12.0)
+                            .color(theme::TEXT_MUTED),
+                    );
+                    for name in tilemaps {
+                        if ui.button(format!("Import into {name}")).clicked() {
+                            self.import_ascii_tilemap(&name, &abs);
+                        }
+                    }
+                    theme::muted(ui, "Resizes the grid to the ASCII map");
+                }
             } else if abs.is_dir() {
                 theme::muted(ui, "Folder — select a file for actions");
             } else {

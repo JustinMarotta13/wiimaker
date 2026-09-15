@@ -28,13 +28,12 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-14):** Tilemap CLI stamp from ASCII — `tilemap from-ascii maze.txt`.
+**Recommended next morning (2026-09-15):** Component-level pivot override.
 
 ---
 
 ## Later
 
-- **Tilemap CLI stamp from ASCII** (CLI, tiny GUI import) — `tilemap from-ascii maze.txt`.
 - **Component-level pivot override** — durable engine follow-up.
 - **Clear-color editor UI with undo** — editor follow-up; CLI `scene set-clear` exists.
 - **Wii audio / Wiimote** — after host oneshots.
@@ -63,7 +62,7 @@ Shipped. Keep here so we do not rebuild them.
 - Agent CLI twin of mutations (`--json`): see command list below
 - Doctor (project/scene/assets)
 - Parent local transforms (translate×scale; full rotation compose still open)
-- Tilemap + solid cells (scene `Tilemap`, viewport Paint/Erase/Pick, Inspector grid+palette, CLI `tilemap set|fill|stamp|get`, `tile_solid` / `world_to_cell`, WSCN0003 bake)
+- Tilemap + solid cells (scene `Tilemap`, viewport Paint/Erase/Pick, Inspector grid+palette + **Import ASCII**, CLI `tilemap set|fill|stamp|from-ascii|get`, `tile_solid` / `world_to_cell`, WSCN0003 bake)
 - AABB/Circle collider + overlap (scene `Collider`, Inspector kind/size/solid, viewport seafoam outline gizmo, CLI `entity add-component … Collider --w --h`, `entity overlaps`, `overlaps` / `move_and_collide`; host-first, WSCN0003 unchanged)
 - Unity 6 editor chrome (dark Pro docks: Hierarchy left, Scene/Game center, Inspector right, Project/Console bottom; Play/Pause/Stop centered; component foldout cards). CLI `scene new` · `scene set-default`
 - Trigger / collectible (GUI Is Trigger + Filter Tag; CLI Trigger/--trigger/--filter, entity triggers, entity despawn; `triggers_entered`; triggers skip `move_and_collide`)
@@ -89,6 +88,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Animated tiles / auto-tile** (2026-09-14) — palette `anim` / `anim_fps` (reuses `*.anim.json`) + `auto_tile` `id`|`solid` NESW bitmask (N=1 E=2 S=4 W=8). Variants: `auto_sprites[mask]` or catalog `{sprite}_{mask}`. Runtime `TileVisual` frames tick in `animate_world` / `World::tick_tilemaps`; `render_world` picks auto-tile textures per cell. Inspector palette Anim + Auto Tile + painted NESW badge; Scene Edit ticks tile anims; Paint hover shows mask. CLI `tilemap set-palette` · `tilemap mask`; `tilemap get --json` includes `mask`. Mutate: `tilemap_set_palette` / `tilemap_autotile_mask`. Host-first; WSCN0003 still bakes static cell ids (C skips payload).
 
+- **Tilemap CLI stamp from ASCII** (2026-09-15) — `tilemap from-ascii maze.txt --name Maze` reads UTF-8 (`#` wall, `.`/` `/`0` empty, `1`–`9` id; optional `--map '#=1,P=2:0'`). Default **resizes** the grid to the file (unlike inline `stamp --ascii`, which clips). Mutate: `parse_ascii_tilemap` / `tilemap_from_ascii` / `tilemap_from_ascii_path` in `wiimaker-scene`. Editor: Inspector Tilemap **Import ASCII**, Project `.txt` **Stamp into Tilemap**, drop TXT → `assets/`. `--json`. Host-first.
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -113,7 +114,7 @@ Global: `--json`
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
 | `entity create-prefab` · `entity instantiate-prefab` · `entity apply-prefab` · `entity revert-prefab` · `entity unpack-prefab` · `entity prefab-status` | apply writes asset; revert restores; status lists overrides |
 | `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` · `asset anim` · `asset list-anims` · `asset list-wavs` · `asset play --name` | `asset import` copies `.png` or `.wav`; `asset play` host oneshot (`--json` `skipped` if no device) |
-| `tilemap set` · `tilemap fill` · `tilemap stamp` · `tilemap get` · `tilemap set-palette` · `tilemap mask` | `--name --x --y --id` · `--ascii` / `--cells --width` · palette `--anim --fps --auto-tile id|solid|off --auto-sprites` · mask NESW · `--json` |
+| `tilemap set` · `tilemap fill` · `tilemap stamp` · `tilemap from-ascii` · `tilemap get` · `tilemap set-palette` · `tilemap mask` | `--name --x --y --id` · `--ascii` / `--cells --width` · `from-ascii FILE` (`--map` `--resize`) · palette `--anim --fps --auto-tile id|solid|off --auto-sprites` · mask NESW · `--json` |
 | `sorting-layer list` · `sorting-layer add --name [--index]` · `sorting-layer rename --from --to` · `sorting-layer move --name --index` · `sorting-layer remove --name` | project Tags & Layers analogue on `game.toml`; rename/remove remap scenes + prefabs |
 
 ### Editor chrome (exact control names)
@@ -127,12 +128,12 @@ Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
 Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename)
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship Tilemap CLI stamp from ASCII (Later).** `tilemap from-ascii maze.txt`.
+**Ship Component-level pivot override (Later).** Durable engine follow-up.
 

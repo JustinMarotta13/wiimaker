@@ -29,7 +29,7 @@ impl EditorApp {
                         }
                     });
                 });
-                theme::muted(ui, "Drop PNG or WAV files anywhere to import");
+                theme::muted(ui, "Drop PNG, WAV, or TXT maze files anywhere to import");
                 // Prefab quick actions stay above the scroll list so Instantiate is always visible.
                 let prefabs: Vec<_> = self
                     .project_entries
@@ -553,6 +553,7 @@ pub(crate) fn file_kind_label(rel: &Path, is_dir: bool) -> &'static str {
         match rel.extension().and_then(|e| e.to_str()) {
             Some("png") => "PNG texture",
             Some("wav") => "WAV oneshot",
+            Some("txt") => "ASCII tilemap",
             Some("json") => "JSON",
             Some("toml") => "TOML",
             Some("wpack") => "Asset pack",

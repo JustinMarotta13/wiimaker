@@ -1,10 +1,10 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use serde::Serialize;
 use wiimaker_scene::{
-    save_scene, tilemap_autotile_mask, tilemap_fill, tilemap_set_cell, tilemap_set_palette,
-    tilemap_stamp, tilemap_stamp_ascii, TilePaletteOpts,
+    save_scene, tilemap_autotile_mask, tilemap_fill, tilemap_from_ascii_path, tilemap_set_cell,
+    tilemap_set_palette, tilemap_stamp, tilemap_stamp_ascii, AsciiCharMap, TilePaletteOpts,
 };
 
 use crate::args::TilemapCmd;
@@ -137,6 +137,72 @@ pub fn tilemap_cmd(root: &Path, cmd: TilemapCmd, json: bool) -> Result<()> {
                 Ok(())
             } else {
                 println!("stamped {n} cells on {name}");
+                Ok(())
+            }
+        }
+        TilemapCmd::FromAscii {
+            game,
+            file,
+            name,
+            x,
+            y,
+            resize,
+            map,
+            scene,
+        } => {
+            let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            let ascii_path = resolve_ascii_path(&gd, &file)?;
+            let char_map = match map.as_deref() {
+                Some(spec) if !spec.trim().is_empty() => Some(AsciiCharMap::parse(spec)?),
+                _ => None,
+            };
+            let out = tilemap_from_ascii_path(
+                &mut sc,
+                &name,
+                &ascii_path,
+                x,
+                y,
+                resize,
+                char_map.as_ref(),
+            )?;
+            save_scene(&path, &sc)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out<'a> {
+                    ok: bool,
+                    name: &'a str,
+                    file: String,
+                    stamped: u32,
+                    width: u32,
+                    height: u32,
+                    x: i32,
+                    y: i32,
+                    resized: bool,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&Out {
+                        ok: true,
+                        name: &name,
+                        file: ascii_path.display().to_string(),
+                        stamped: out.stamped,
+                        width: out.width,
+                        height: out.height,
+                        x,
+                        y,
+                        resized: out.resized,
+                    })?
+                );
+                Ok(())
+            } else {
+                println!(
+                    "from-ascii {} → {name} {}×{} ({} cells{})",
+                    ascii_path.display(),
+                    out.width,
+                    out.height,
+                    out.stamped,
+                    if out.resized { ", resized" } else { "" }
+                );
                 Ok(())
             }
         }
@@ -304,4 +370,31 @@ pub fn tilemap_cmd(root: &Path, cmd: TilemapCmd, json: bool) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn resolve_ascii_path(game_dir: &Path, file: &Path) -> Result<PathBuf> {
+    if file.is_file() {
+        return Ok(file.to_path_buf());
+    }
+    let under_game = game_dir.join(file);
+    if under_game.is_file() {
+        return Ok(under_game);
+    }
+    let under_assets = game_dir.join("assets").join(file);
+    if under_assets.is_file() {
+        return Ok(under_assets);
+    }
+    let name = file
+        .file_name()
+        .map(|n| game_dir.join("assets").join(n))
+        .filter(|p| p.is_file());
+    if let Some(p) = name {
+        return Ok(p);
+    }
+    bail!(
+        "ASCII map not found: {} (tried cwd, {}, {})",
+        file.display(),
+        under_game.display(),
+        under_assets.display()
+    );
 }

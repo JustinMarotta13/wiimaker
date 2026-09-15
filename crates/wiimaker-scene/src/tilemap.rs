@@ -1,6 +1,8 @@
 //! Tilemap scene mutations shared by CLI and editor.
 
-use anyhow::{bail, Result};
+use std::path::Path;
+
+use anyhow::{bail, Context, Result};
 
 use crate::scene::{Scene, SceneAutoTile, SceneTilePalette, SceneTilemap};
 
@@ -139,38 +141,113 @@ pub fn tilemap_stamp(
     Ok(n)
 }
 
-/// Stamp ASCII: `#` = id 1 solid, `.` / space / `0` = empty, `1`-`9` = that id (solid).
-pub fn tilemap_stamp_ascii(
-    scene: &mut Scene,
-    name: &str,
-    x: i32,
-    y: i32,
-    ascii: &str,
-) -> Result<u32> {
-    let mut width = 0u32;
-    let mut row_w = 0u32;
-    for ch in ascii.chars() {
-        if ch == '\n' {
-            if row_w > width {
-                width = row_w;
+/// Parsed ASCII maze: row-major `cells` + matching `solid` flags.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AsciiTileMap {
+    pub width: u32,
+    pub height: u32,
+    pub cells: Vec<u16>,
+    pub solid: Vec<u8>,
+}
+
+/// Optional `CHAR=id` / `CHAR=id:solid` overrides for [`parse_ascii_tilemap_with`].
+///
+/// Default (no map): `#` → id 1 solid; `.` / space / `0` → empty; `1`–`9` → that id
+/// solid; any other glyph → id 1 solid.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AsciiCharMap {
+    entries: Vec<(char, u16, bool)>,
+}
+
+impl AsciiCharMap {
+    /// Parse `#,=1,.=0,P=2:0` (comma-separated). Solid defaults to `id != 0`.
+    pub fn parse(spec: &str) -> Result<Self> {
+        let mut entries = Vec::new();
+        for part in spec.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
             }
-            row_w = 0;
-            continue;
+            let Some((ch_s, rest)) = part.split_once('=') else {
+                bail!("ascii map '{part}' (expected CHAR=id or CHAR=id:solid)");
+            };
+            let ch_s = ch_s.trim();
+            let mut chars = ch_s.chars();
+            let Some(ch) = chars.next() else {
+                bail!("ascii map '{part}' has empty character");
+            };
+            if chars.next().is_some() {
+                bail!("ascii map '{part}' character must be a single char");
+            }
+            let rest = rest.trim();
+            let (id_s, solid_s) = match rest.split_once(':') {
+                Some((id_s, sol_s)) => (id_s.trim(), Some(sol_s.trim())),
+                None => (rest, None),
+            };
+            let id: u16 = id_s
+                .parse()
+                .map_err(|_| anyhow::anyhow!("ascii map id '{id_s}'"))?;
+            let solid = match solid_s {
+                None => id != 0,
+                Some("1") | Some("true") | Some("yes") | Some("solid") => true,
+                Some("0") | Some("false") | Some("no") | Some("empty") => false,
+                Some(s) => bail!("ascii map solid '{s}' (expected 0/1 or true/false)"),
+            };
+            if let Some(slot) = entries.iter_mut().find(|(c, _, _)| *c == ch) {
+                *slot = (ch, id, solid);
+            } else {
+                entries.push((ch, id, solid));
+            }
         }
-        if ch == '\r' {
-            continue;
+        Ok(Self { entries })
+    }
+
+    pub fn get(&self, ch: char) -> Option<(u16, bool)> {
+        self.entries
+            .iter()
+            .find(|(c, _, _)| *c == ch)
+            .map(|(_, id, solid)| (*id, *solid))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// Default ASCII → (palette id, solid) used by stamp / from-ascii.
+pub fn default_ascii_cell(ch: char) -> (u16, bool) {
+    match ch {
+        '#' => (1, true),
+        '.' | ' ' | '0' => (0, false),
+        '1'..='9' => {
+            let id = (ch as u8 - b'0') as u16;
+            (id, true)
         }
-        row_w += 1;
+        _ => (1, true),
     }
-    if row_w > width {
-        width = row_w;
+}
+
+fn ascii_cell(ch: char, map: Option<&AsciiCharMap>) -> (u16, bool) {
+    if let Some(m) = map {
+        if let Some(v) = m.get(ch) {
+            return v;
+        }
     }
-    if width == 0 {
-        bail!("stamp ascii is empty");
-    }
-    // rebuild as a rectangular buffer, padding short rows with 0
-    let mut rows: Vec<Vec<u16>> = Vec::new();
-    let mut row: Vec<u16> = Vec::new();
+    default_ascii_cell(ch)
+}
+
+/// Parse an ASCII maze into a rectangular cell buffer (short rows pad with empty).
+pub fn parse_ascii_tilemap(ascii: &str) -> Result<AsciiTileMap> {
+    parse_ascii_tilemap_with(ascii, None)
+}
+
+pub fn parse_ascii_tilemap_with(
+    ascii: &str,
+    map: Option<&AsciiCharMap>,
+) -> Result<AsciiTileMap> {
+    let ascii = ascii.strip_prefix('\u{feff}').unwrap_or(ascii);
+    let mut rows: Vec<Vec<(u16, bool)>> = Vec::new();
+    let mut row: Vec<(u16, bool)> = Vec::new();
     for ch in ascii.chars() {
         if ch == '\r' {
             continue;
@@ -180,25 +257,123 @@ pub fn tilemap_stamp_ascii(
             row = Vec::new();
             continue;
         }
-        let id = match ch {
-            '#' => 1,
-            '.' | ' ' | '0' => 0,
-            '1'..='9' => (ch as u8 - b'0') as u16,
-            _ => 1,
-        };
-        row.push(id);
+        row.push(ascii_cell(ch, map));
     }
-    if !row.is_empty() || ascii.ends_with('\n') {
-        if !row.is_empty() {
-            rows.push(row);
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    let width = rows.iter().map(|r| r.len()).max().unwrap_or(0) as u32;
+    if width == 0 {
+        bail!("stamp ascii is empty");
+    }
+    let height = rows.len() as u32;
+    let mut cells = Vec::with_capacity(width as usize * height as usize);
+    let mut solid = Vec::with_capacity(cells.capacity());
+    for mut r in rows {
+        r.resize(width as usize, (0, false));
+        for (id, is_solid) in r {
+            cells.push(id);
+            solid.push(if is_solid { 1 } else { 0 });
         }
     }
-    let mut flat = Vec::new();
-    for r in &mut rows {
-        r.resize(width as usize, 0);
-        flat.extend_from_slice(r);
+    Ok(AsciiTileMap {
+        width,
+        height,
+        cells,
+        solid,
+    })
+}
+
+/// Stamp ASCII at `(x,y)` without resizing (clips out of bounds). Same glyphs as
+/// [`parse_ascii_tilemap`].
+pub fn tilemap_stamp_ascii(
+    scene: &mut Scene,
+    name: &str,
+    x: i32,
+    y: i32,
+    ascii: &str,
+) -> Result<u32> {
+    Ok(tilemap_from_ascii(scene, name, ascii, x, y, false, None)?.stamped)
+}
+
+/// Result of [`tilemap_from_ascii`]: stamp size plus whether the grid was resized.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TilemapFromAscii {
+    pub stamped: u32,
+    pub width: u32,
+    pub height: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub resized: bool,
+}
+
+/// Load ASCII into a Tilemap. When `resize` is true (CLI `from-ascii` default), the
+/// grid grows/shrinks so the stamp at `(x,y)` fits. `map` overrides glyph → id/solid.
+pub fn tilemap_from_ascii(
+    scene: &mut Scene,
+    name: &str,
+    ascii: &str,
+    x: i32,
+    y: i32,
+    resize: bool,
+    map: Option<&AsciiCharMap>,
+) -> Result<TilemapFromAscii> {
+    let parsed = parse_ascii_tilemap_with(ascii, map)?;
+    let mut resized = false;
+    if resize {
+        let need_w = if x <= 0 {
+            parsed.width
+        } else {
+            (x as u32).saturating_add(parsed.width)
+        };
+        let need_h = if y <= 0 {
+            parsed.height
+        } else {
+            (y as u32).saturating_add(parsed.height)
+        };
+        let w = need_w.max(1);
+        let h = need_h.max(1);
+        let (cur_w, cur_h) = {
+            let tm = ensure_tilemap(scene, name)?;
+            (tm.width, tm.height)
+        };
+        if cur_w != w || cur_h != h {
+            tilemap_resize(scene, name, w, h)?;
+            resized = true;
+        }
     }
-    tilemap_stamp(scene, name, x, y, width, &flat, None)
+    let stamped = tilemap_stamp(
+        scene,
+        name,
+        x,
+        y,
+        parsed.width,
+        &parsed.cells,
+        Some(&parsed.solid),
+    )?;
+    Ok(TilemapFromAscii {
+        stamped,
+        width: parsed.width,
+        height: parsed.height,
+        origin_x: x,
+        origin_y: y,
+        resized,
+    })
+}
+
+/// Read `path` as UTF-8 and [`tilemap_from_ascii`].
+pub fn tilemap_from_ascii_path(
+    scene: &mut Scene,
+    name: &str,
+    path: &Path,
+    x: i32,
+    y: i32,
+    resize: bool,
+    map: Option<&AsciiCharMap>,
+) -> Result<TilemapFromAscii> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("read ASCII map {}", path.display()))?;
+    tilemap_from_ascii(scene, name, &text, x, y, resize, map)
 }
 
 pub fn tilemap_resize(scene: &mut Scene, name: &str, width: u32, height: u32) -> Result<()> {
@@ -452,5 +627,74 @@ mod tests {
         let mask = tilemap_autotile_mask(&scene, "Maze", 2, 1).unwrap().2;
         assert_eq!(mask & wiimaker_core::tilemap::AUTOTILE_W, 0);
         assert_ne!(mask & wiimaker_core::tilemap::AUTOTILE_E, 0);
+    }
+
+    #[test]
+    fn parse_ascii_default_glyphs() {
+        let parsed = parse_ascii_tilemap("#####\n#...#\n#####").unwrap();
+        assert_eq!(parsed.width, 5);
+        assert_eq!(parsed.height, 3);
+        assert_eq!(parsed.cells.len(), 15);
+        assert_eq!(parsed.cells[0], 1);
+        assert_eq!(parsed.solid[0], 1);
+        assert_eq!(parsed.cells[6], 0); // (1,1)
+        assert_eq!(parsed.solid[6], 0);
+        assert_eq!(parsed.cells[8], 0); // (3,1)
+        // digits + unknown glyph
+        let mixed = parse_ascii_tilemap("#2.\nX 0").unwrap();
+        assert_eq!(mixed.width, 3);
+        assert_eq!(mixed.height, 2);
+        assert_eq!(mixed.cells, vec![1, 2, 0, 1, 0, 0]);
+        assert_eq!(mixed.solid, vec![1, 1, 0, 1, 0, 0]);
+    }
+
+    #[test]
+    fn parse_ascii_custom_map_and_pad() {
+        let map = AsciiCharMap::parse("#=1,.=0,P=2:0").unwrap();
+        let parsed = parse_ascii_tilemap_with("#P\n.", Some(&map)).unwrap();
+        assert_eq!(parsed.width, 2);
+        assert_eq!(parsed.height, 2);
+        assert_eq!(parsed.cells, vec![1, 2, 0, 0]);
+        assert_eq!(parsed.solid, vec![1, 0, 0, 0]);
+        assert!(parse_ascii_tilemap("").is_err());
+        assert!(AsciiCharMap::parse("wall=1").is_err());
+    }
+
+    #[test]
+    fn from_ascii_resizes_default_grid() {
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Maze",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let out = tilemap_from_ascii(
+            &mut scene,
+            "Maze",
+            "#####\n#...#\n#####",
+            0,
+            0,
+            true,
+            None,
+        )
+        .unwrap();
+        assert!(out.resized);
+        assert_eq!((out.width, out.height, out.stamped), (5, 3, 15));
+        let tm = scene
+            .find_entity("Maze")
+            .unwrap()
+            .components
+            .tilemap
+            .as_ref()
+            .unwrap();
+        assert_eq!((tm.width, tm.height), (5, 3));
+        assert_eq!(tilemap_get_cell(&scene, "Maze", 0, 0).unwrap(), (1, true));
+        assert_eq!(tilemap_get_cell(&scene, "Maze", 1, 1).unwrap(), (0, false));
+        assert_eq!(tilemap_get_cell(&scene, "Maze", 4, 2).unwrap(), (1, true));
     }
 }

@@ -76,6 +76,8 @@ wiimaker entity add-component my-game --name Player AudioSource --clip beep --vo
 wiimaker entity add my-game --name Player --sprite hero_2 --x 320 --y 240
 wiimaker entity add-component my-game --name Maze Tilemap --cols 28 --rows 31 --cell 16
 wiimaker tilemap stamp my-game --name Maze --ascii $'###\n#.#\n###'
+wiimaker tilemap from-ascii my-game maze.txt --name Maze --json
+# optional: --map '#=1,.=0,P=2:0' --resize false
 wiimaker tilemap set my-game --name Maze --x 1 --y 1 --id 0
 wiimaker tilemap get my-game --name Maze --x 1 --y 1 --json
 wiimaker tilemap set-palette my-game --name Maze --id 2 --sprite water --anim water --fps 8 --auto-tile id

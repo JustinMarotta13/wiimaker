@@ -867,7 +867,7 @@ impl EditorApp {
         self.cook();
     }
 
-    /// Copy PNG/WAV into `assets/`, then cook + refresh (Project drag-drop / import).
+    /// Copy PNG/WAV into `assets/` (cook PNG), TXT maze files into `assets/` (Project import).
     pub(crate) fn import_asset_paths(&mut self, paths: &[PathBuf]) {
         if paths.is_empty() {
             return;
@@ -884,7 +884,7 @@ impl EditorApp {
                 continue;
             };
             let ext_l = ext.to_ascii_lowercase();
-            if ext_l != "png" && ext_l != "wav" {
+            if ext_l != "png" && ext_l != "wav" && ext_l != "txt" {
                 continue;
             }
             let stem = src
@@ -907,7 +907,7 @@ impl EditorApp {
             }
         }
         if imported.is_empty() {
-            self.status = "drop PNG or WAV files to import".into();
+            self.status = "drop PNG, WAV, or TXT files to import".into();
             return;
         }
         if need_cook {
@@ -917,6 +917,45 @@ impl EditorApp {
             return;
         }
         self.status = format!("imported {} · assets ready", imported.join(", "));
+    }
+
+    /// Stamp a UTF-8 maze file into the named Tilemap (CLI twin: `tilemap from-ascii`).
+    pub(crate) fn import_ascii_tilemap(&mut self, entity: &str, path: &std::path::Path) {
+        use wiimaker_scene::{add_entity, tilemap_from_ascii_path, MutateOpts};
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.game_dir.join(path)
+        };
+        self.push_undo();
+        if self.scene.find_entity(entity).is_none() {
+            if let Err(e) = add_entity(&mut self.scene, entity, &MutateOpts::default()) {
+                let _ = self.undo.undo(&mut self.scene);
+                self.status = format!("import ASCII failed: {e}");
+                return;
+            }
+        }
+        match tilemap_from_ascii_path(&mut self.scene, entity, &abs, 0, 0, true, None) {
+            Ok(r) => {
+                self.sync_baseline();
+                self.mark_dirty();
+                let file = abs
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("map");
+                self.status = format!(
+                    "imported {file} → {entity} {}×{} ({} cells{})",
+                    r.width,
+                    r.height,
+                    r.stamped,
+                    if r.resized { ", resized" } else { "" }
+                );
+            }
+            Err(e) => {
+                let _ = self.undo.undo(&mut self.scene);
+                self.status = format!("import ASCII failed: {e}");
+            }
+        }
     }
 
     pub(crate) fn preview_wav_clip(&mut self, clip: &str, volume: f32) {
