@@ -12,7 +12,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 |---|---|
 | Project window | `game.toml` + `assets/` + `scenes/` + editor **Project** explorer |
 | Hierarchy | editor Hierarchy (parent/unparent DnD, multi-select, duplicate) |
-| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer** |
+| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer**, Sprite **Pivot** X/Y override + Reset |
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, **Move axis handles** (red X / green Y), Snap + nudge |
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
@@ -28,13 +28,12 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-15):** Component-level pivot override.
+**Recommended next morning (2026-09-16):** Clear-color editor UI with undo.
 
 ---
 
 ## Later
 
-- **Component-level pivot override** — durable engine follow-up.
 - **Clear-color editor UI with undo** — editor follow-up; CLI `scene set-clear` exists.
 - **Wii audio / Wiimote** — after host oneshots.
 - **Wii GX text** — host DrawText exists; C player still KIND_NONE.
@@ -90,6 +89,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Tilemap CLI stamp from ASCII** (2026-09-15) — `tilemap from-ascii maze.txt --name Maze` reads UTF-8 (`#` wall, `.`/` `/`0` empty, `1`–`9` id; optional `--map '#=1,P=2:0'`). Default **resizes** the grid to the file (unlike inline `stamp --ascii`, which clips). Mutate: `parse_ascii_tilemap` / `tilemap_from_ascii` / `tilemap_from_ascii_path` in `wiimaker-scene`. Editor: Inspector Tilemap **Import ASCII**, Project `.txt` **Stamp into Tilemap**, drop TXT → `assets/`. `--json`. Host-first.
 
+- **Component-level Sprite pivot override** (2026-09-16) — optional `SceneSprite.pivot: [f32; 2]` (omit = catalog cell). Hydrate / `animate_world` (preserves override on frame swap) / pick / Scene outline / `render_world` / WSCN0003 bake use the effective pivot. Inspector Sprite **Pivot** X/Y DragValues + catalog hint + **Reset**. CLI `entity set --pivot-x --pivot-y --clear-pivot`; `add-component Sprite --pivot-x --pivot-y`. Prefab `Sprite.pivot` in Apply/Revert/orange-bold. Host-first; WSCN0003 unchanged.
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -107,8 +108,8 @@ Global: `--json`
 | `doctor` | validate |
 | `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` · `scene set-game-view` | build-* mutate `game.toml` `scenes`; set-game-view writes `.wiimaker/prefs.toml` |
 | `editor prefs` · `editor set-scene-view` · `editor play-status` | Scene zoom/pan/grid/gizmos/snap in prefs; play-status reports App plugin vs WASD fallback (no new prefs) |
-| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer` (`--z` alias) |
-| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Camera` \| `Follow` (`--target` `--lerp`) \| `GridMover` (`--cell` `--speed` `--queued-dir`) \| `AudioSource` (`--clip` `--volume` `--play-on-awake`) \| `Text` (`--text` `--size` `--color` `--align`) |
+| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer` (`--z` alias) `--pivot-x --pivot-y --clear-pivot` |
+| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Camera` \| `Follow` (`--target` `--lerp`) \| `GridMover` (`--cell` `--speed` `--queued-dir`) \| `AudioSource` (`--clip` `--volume` `--play-on-awake`) \| `Text` (`--text` `--size` `--color` `--align`) · Sprite `--pivot-x --pivot-y` |
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
 | `entity overlaps` · `entity triggers` | `--name` [ `--other` ] · pairwise/list overlaps; `triggers <name>` lists entered triggers |
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
@@ -128,12 +129,12 @@ Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
 Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship Component-level pivot override (Later).** Durable engine follow-up.
+**Ship Clear-color editor UI with undo (Later).** Editor follow-up; CLI `scene set-clear` exists.
 

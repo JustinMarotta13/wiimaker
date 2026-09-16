@@ -6,8 +6,8 @@ use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
     constrain_translate, fitted_blit_rect, pick_entity_at_with_catalog_and_layers,
     pointer_to_scene, render_world_ex, scene_blit_rect, set_entity_rotation_z, set_entity_scale,
-    set_entity_world_xy, tilemap_autotile_mask, tilemap_set_cell, GameViewAspect, GameViewPreset,
-    MoveHandleLayout, Scene, TranslateHandle,
+    set_entity_world_xy, sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell,
+    GameViewAspect, GameViewPreset, MoveHandleLayout, Scene, TranslateHandle,
 };
 
 use crate::app::{CenterTab, EditTool, EditorApp, PlayKind, PlayMode, TilePaintDrag, ViewportDrag};
@@ -1184,10 +1184,7 @@ fn paint_one_outline(
 
     if let Some(sp) = &ent.components.sprite {
         if sp.enabled {
-            let pivot = catalog
-                .lookup(&sp.texture)
-                .map(|r| r.pivot)
-                .unwrap_or([0.5, 0.5]);
+            let pivot = sprite_effective_pivot(sp, Some(catalog));
             let w = sp.size[0] * world.scale[0];
             let h = sp.size[1] * world.scale[1];
             let left = world.translation[0] - w * pivot[0];

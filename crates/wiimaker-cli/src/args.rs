@@ -290,6 +290,15 @@ pub enum EntityCmd {
         /// Order in Layer (component `z` within the sorting layer)
         #[arg(long, visible_alias = "z")]
         order_in_layer: Option<f32>,
+        /// Sprite component pivot X (normalized). Requires a Sprite.
+        #[arg(long)]
+        pivot_x: Option<f32>,
+        /// Sprite component pivot Y (normalized). Requires a Sprite.
+        #[arg(long)]
+        pivot_y: Option<f32>,
+        /// Clear Sprite pivot override (fall back to catalog).
+        #[arg(long)]
+        clear_pivot: bool,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -369,6 +378,12 @@ pub enum EntityCmd {
         /// HUD Text align: Left, Center, Right (default Left)
         #[arg(long)]
         align: Option<String>,
+        /// Sprite pivot X override (normalized)
+        #[arg(long)]
+        pivot_x: Option<f32>,
+        /// Sprite pivot Y override (normalized)
+        #[arg(long)]
+        pivot_y: Option<f32>,
         #[arg(long)]
         scene: Option<String>,
     },

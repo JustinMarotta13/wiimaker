@@ -277,6 +277,10 @@ pub struct SceneSprite {
     /// When false, skipped by hydrate / pick / bake (Unity component checkbox).
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled: bool,
+    /// Optional normalized pivot override (`[0,0]` top-left, `[0.5,0.5]` center).
+    /// Omitted / `None` → catalog cell pivot (unchanged default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<[f32; 2]>,
 }
 
 fn default_sprite_size() -> [f32; 2] {
@@ -298,6 +302,11 @@ impl SceneSprite {
     /// Display name: empty → [`DEFAULT_SORTING_LAYER`].
     pub fn sorting_layer_name(&self) -> &str {
         display_sorting_layer(&self.sorting_layer)
+    }
+
+    /// Component override, else `fallback` (typically the catalog cell pivot).
+    pub fn effective_pivot(&self, fallback: [f32; 2]) -> [f32; 2] {
+        self.pivot.unwrap_or(fallback)
     }
 }
 

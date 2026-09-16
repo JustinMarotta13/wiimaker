@@ -63,6 +63,8 @@ pub struct Sprite {
     pub uv: Rect,
     /// Normalized pivot in sprite space (`0.5, 0.5` = center).
     pub pivot: Vec2,
+    /// When true, animation frame swaps keep [`Sprite::pivot`] (scene component override).
+    pub lock_pivot: bool,
     pub color: Rgba8,
     /// Order in layer (Unity Order in Layer). Combined with [`Sprite::sorting_layer`].
     pub z: f32,
@@ -77,6 +79,7 @@ impl Sprite {
             size,
             uv: Rect::unit(),
             pivot: Vec2::new(0.5, 0.5),
+            lock_pivot: false,
             color: Rgba8::WHITE,
             z: 0.0,
             sorting_layer: default_sorting_layer_index(),

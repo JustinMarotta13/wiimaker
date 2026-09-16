@@ -15,8 +15,8 @@ use wiimaker_scene::{
     rename_entity, resolve_prefab_asset, revert_prefab_instance, save_prefab, save_scene,
     set_component_enabled, set_entity_anim, set_entity_audio_source, set_entity_follow,
     set_entity_grid_mover, set_entity_parent, set_entity_rotation_z, set_entity_scale,
-    set_entity_sorting, set_entity_text, set_entity_transform, unpack_prefab_instance, MutateOpts,
-    Scene, SceneColliderKind, SceneDir, SceneTextAlign,
+    set_entity_sorting, set_entity_sprite_pivot, set_entity_text, set_entity_transform,
+    unpack_prefab_instance, MutateOpts, Scene, SceneColliderKind, SceneDir, SceneTextAlign,
 };
 
 use crate::args::EntityCmd;
@@ -90,6 +90,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             align,
             sorting_layer,
             order_in_layer,
+            pivot_x,
+            pivot_y,
+            clear_pivot,
             scene,
         } => {
             let (_gd, project, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -113,8 +116,11 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 && align.is_none()
                 && sorting_layer.is_none()
                 && order_in_layer.is_none()
+                && pivot_x.is_none()
+                && pivot_y.is_none()
+                && !clear_pivot
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer --pivot-x --pivot-y --clear-pivot");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -175,6 +181,12 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 }
                 set_entity_sorting(&mut sc, &name, sorting_layer.as_deref(), order_in_layer)?;
             }
+            if clear_pivot || pivot_x.is_some() || pivot_y.is_some() {
+                if clear_pivot && (pivot_x.is_some() || pivot_y.is_some()) {
+                    bail!("entity set: cannot combine --clear-pivot with --pivot-x/--pivot-y");
+                }
+                set_entity_sprite_pivot(&mut sc, &name, pivot_x, pivot_y, clear_pivot)?;
+            }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("updated entity {name}"))
         }
@@ -206,6 +218,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             size,
             color,
             align,
+            pivot_x,
+            pivot_y,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -214,6 +228,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     let tex =
                         texture.ok_or_else(|| anyhow::anyhow!("--texture required for Sprite"))?;
                     add_component_sprite(&mut sc, &name, &tex, [width, height])?;
+                    if pivot_x.is_some() || pivot_y.is_some() {
+                        set_entity_sprite_pivot(&mut sc, &name, pivot_x, pivot_y, false)?;
+                    }
                 }
                 "disc" => {
                     add_component_disc(&mut sc, &name, radius, [72, 210, 160, 255])?;

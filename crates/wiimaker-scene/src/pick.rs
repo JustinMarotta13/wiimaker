@@ -99,10 +99,11 @@ fn entity_hit_key(
     };
     if let Some(sp) = &ent.components.sprite {
         if sp.enabled {
-            let pivot = catalog
+            let catalog_pivot = catalog
                 .and_then(|c| c.lookup(&sp.texture))
                 .map(|r| r.pivot)
                 .unwrap_or([0.5, 0.5]);
+            let pivot = sp.effective_pivot(catalog_pivot);
             if point_in_sprite(&world, sp.size, pivot, sx, sy) {
                 bump(&mut hit, sp.sorting_layer_name(), sp.z);
             }
@@ -209,6 +210,7 @@ mod tests {
                     z,
                     sorting_layer: String::new(),
                     enabled: true,
+                    pivot: None,
                 }),
                 ..Default::default()
             },
@@ -267,6 +269,19 @@ mod tests {
         assert_eq!(pick_entity_at(&scene, 120.0, 110.0).as_deref(), Some("A"));
         assert_eq!(pick_entity_at(&scene, 121.0, 100.0), None);
         assert_eq!(pick_entity_at(&scene, 100.0, 111.0), None);
+    }
+
+    #[test]
+    fn sprite_hit_uses_component_pivot_override() {
+        let mut scene = Scene::new("t");
+        let mut e = sprite_ent("A", 100.0, 100.0, 40.0, 20.0, 0.0);
+        e.components.sprite.as_mut().unwrap().pivot = Some([0.0, 1.0]);
+        scene.entities.push(e);
+        // bottom-left pivot: AABB [100,80]..[140,100]
+        assert_eq!(pick_entity_at(&scene, 100.0, 100.0).as_deref(), Some("A"));
+        assert_eq!(pick_entity_at(&scene, 120.0, 90.0).as_deref(), Some("A"));
+        assert_eq!(pick_entity_at(&scene, 81.0, 100.0), None);
+        assert_eq!(pick_entity_at(&scene, 100.0, 101.0), None);
     }
 
     #[test]

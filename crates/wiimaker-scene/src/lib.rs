@@ -28,7 +28,7 @@ pub use hydrate::{
     hydrate, hydrate_into, hydrate_into_with_catalog, hydrate_into_with_catalogs, hydrate_lenient,
     hydrate_lenient_with_catalog, hydrate_lenient_with_catalogs,
     hydrate_lenient_with_sorting_layers, hydrate_with_catalog, hydrate_with_catalogs,
-    load_scene_into_world, TextureMap,
+    load_scene_into_world, sprite_effective_pivot, TextureMap,
 };
 pub use mutate::{
     add_component_animation, add_component_audio_source, add_component_camera, add_component_disc,
@@ -40,8 +40,8 @@ pub use mutate::{
     remove_component_text, remove_entity, rename_entity, revert_prefab_instance,
     set_component_enabled, set_entity_anim, set_entity_audio_source, set_entity_follow,
     set_entity_grid_mover, set_entity_parent, set_entity_rotation_z, set_entity_scale,
-    set_entity_text, set_entity_transform, set_entity_world_xy, set_scene_clear,
-    unique_entity_name, unpack_prefab_instance, MutateOpts,
+    set_entity_sprite_pivot, set_entity_text, set_entity_transform, set_entity_world_xy,
+    set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{
     pick_entity_at, pick_entity_at_with_catalog, pick_entity_at_with_catalog_and_layers,

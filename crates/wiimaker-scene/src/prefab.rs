@@ -206,6 +206,11 @@ fn push_sprite(out: &mut Vec<String>, a: &SceneSprite, b: &SceneSprite) {
     if a.enabled != b.enabled {
         out.push("Sprite.enabled".into());
     }
+    match (&a.pivot, &b.pivot) {
+        (None, None) => {}
+        (Some(x), Some(y)) if near2(x, y) => {}
+        _ => out.push("Sprite.pivot".into()),
+    }
 }
 
 fn push_disc(out: &mut Vec<String>, a: &SceneDisc, b: &SceneDisc) {
@@ -443,5 +448,33 @@ mod tests {
         prefab.components.disc = None;
         let ov = prefab_overrides(&inst, &prefab);
         assert!(ov.component("Disc"));
+    }
+
+    #[test]
+    fn override_detects_sprite_pivot() {
+        let prefab = EntityData {
+            name: "Orb".into(),
+            parent: None,
+            transform: SceneTransform::from_xy(0.0, 0.0),
+            components: SceneComponents {
+                sprite: Some(SceneSprite {
+                    texture: "tex".into(),
+                    size: [16.0, 16.0],
+                    color: [255, 255, 255, 255],
+                    z: 0.0,
+                    sorting_layer: String::new(),
+                    enabled: true,
+                    pivot: None,
+                }),
+                ..Default::default()
+            },
+            tag: 0,
+            prefab: None,
+        };
+        let mut inst = prefab.clone();
+        assert!(prefab_overrides(&inst, &prefab).is_empty());
+        inst.components.sprite.as_mut().unwrap().pivot = Some([0.0, 1.0]);
+        let ov = prefab_overrides(&inst, &prefab);
+        assert!(ov.contains("Sprite.pivot"), "{ov:?}");
     }
 }

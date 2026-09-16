@@ -57,6 +57,7 @@ pub fn add_entity(scene: &mut Scene, name: &str, opts: &MutateOpts) -> Result<()
             z: 0.0,
             sorting_layer: String::new(),
             enabled: true,
+            pivot: None,
         });
     }
     if let Some(radius) = opts.radius {
@@ -333,7 +334,43 @@ pub fn add_component_sprite(
         z: 0.0,
         sorting_layer: String::new(),
         enabled: true,
+        pivot: None,
     });
+    Ok(())
+}
+
+/// Set or clear the Sprite component pivot override (catalog fallback when cleared).
+///
+/// Pass `clear` to drop the override. Otherwise `x` / `y` write the override;
+/// a missing axis keeps the current override or `0.5`.
+pub fn set_entity_sprite_pivot(
+    scene: &mut Scene,
+    name: &str,
+    x: Option<f32>,
+    y: Option<f32>,
+    clear: bool,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let sp = ent
+        .components
+        .sprite
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Sprite"))?;
+    if clear {
+        sp.pivot = None;
+        return Ok(());
+    }
+    if x.is_none() && y.is_none() {
+        bail!("set pivot: pass --pivot-x and/or --pivot-y, or --clear-pivot");
+    }
+    let mut p = sp.pivot.unwrap_or([0.5, 0.5]);
+    if let Some(vx) = x {
+        p[0] = vx;
+    }
+    if let Some(vy) = y {
+        p[1] = vy;
+    }
+    sp.pivot = Some(p);
     Ok(())
 }
 
@@ -1210,5 +1247,44 @@ mod tests {
             inst.prefab.as_deref(),
             Some("assets/prefabs/dot.prefab.json")
         );
+    }
+
+    #[test]
+    fn set_entity_sprite_pivot_sets_and_clears() {
+        let mut scene = empty_scene();
+        add_entity(&mut scene, "orb", &MutateOpts::default()).unwrap();
+        assert!(set_entity_sprite_pivot(&mut scene, "orb", Some(0.0), Some(1.0), false).is_err());
+        add_component_sprite(&mut scene, "orb", "tex", [16.0, 16.0]).unwrap();
+        set_entity_sprite_pivot(&mut scene, "orb", Some(0.0), Some(1.0), false).unwrap();
+        let sp = scene
+            .find_entity("orb")
+            .unwrap()
+            .components
+            .sprite
+            .as_ref()
+            .unwrap();
+        assert_eq!(sp.pivot, Some([0.0, 1.0]));
+        let json = serde_json::to_string(sp).unwrap();
+        assert!(json.contains("\"pivot\""), "{json}");
+        set_entity_sprite_pivot(&mut scene, "orb", None, None, true).unwrap();
+        let sp = scene
+            .find_entity("orb")
+            .unwrap()
+            .components
+            .sprite
+            .as_ref()
+            .unwrap();
+        assert!(sp.pivot.is_none());
+        let json = serde_json::to_string(sp).unwrap();
+        assert!(!json.contains("pivot"), "{json}");
+        set_entity_sprite_pivot(&mut scene, "orb", Some(0.25), None, false).unwrap();
+        let sp = scene
+            .find_entity("orb")
+            .unwrap()
+            .components
+            .sprite
+            .as_ref()
+            .unwrap();
+        assert_eq!(sp.pivot, Some([0.25, 0.5]));
     }
 }
