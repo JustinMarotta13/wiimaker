@@ -11,7 +11,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Inspector numeric fields are Unity-style XYZ DragValues (not sliders). Undo: `begin_inspector_gesture` once per drag; sync baseline on release / after discrete mutates.
 - Discrete edits (add/remove/rename/duplicate/paste/components/reparent): `push_undo()` then mutate, then `sync_baseline()`.
 - egui_dock Unity layout (Hierarchy | Scene+Game | Inspector, Project+Console bottom). Scene blit fills the leaf; never letterbox a 640×480 postage stamp beside Hierarchy. Map picks with `pointer_to_scene` on the image rect (= well). Never `set_min_width(available_width())` on dock panels. Virtualize Hierarchy rows when a parent has hundreds of children.
-- Sprites use catalog pivot (default center): dest = translation − pivot × size × scale. Hit-tests / selection outline must match `render_world`.
+- Sprites use catalog pivot by default (center): dest = translation − pivot × size × scale. Optional `SceneSprite.pivot` overrides per entity; pick / selection outline / `render_world` share that math.
 - Viewport drag translate: push one undo snapshot at drag **start** only (not per frame). Use `set_entity_world_xy` so children keep correct local pose under parents.
 - After open-scene: set `scene`/`scene_path`, `dirty = false`, clear selection + undo stack, then `rehydrate()`. Do not rewrite `game.toml` just to preview another scene.
 - Dirty switch uses `pending_open` + egui "Unsaved changes" modal (Save / Discard / Cancel).
@@ -29,6 +29,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - GridMover Inspector: Cell, Speed, queued cardinal combo. Add Component → GridMover. Template `App` and fallback Play: `step_grid_movers` from WASD/arrows; if Player has GridMover, skip free WASD.
 - AudioSource Inspector: clip combo (Project `*.wav`), Volume, Play On Awake, Play (host oneshot). Project: `.wav` rows, double-click / context Play preview. Drop WAV into the editor to copy into `assets/`.
 - Sorting layers: Inspector Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** (`z`). Project `game.toml` inspector: ordered list with ↑↓, –, select + draft **+ Add** / **Rename**. Mutate helpers in `wiimaker-scene` remap other scenes/prefabs on rename/remove; editor remaps the open scene in memory.
+- Sprite Inspector: **Pivot** X/Y DragValues (normalized; catalog values shown when not overridden, muted hint). Editing writes `SceneSprite.pivot`. **Reset** clears the override (catalog again).
 - Text Inspector: string (multiline), Size, Color, Align combo, Sorting Layer / Order in Layer. Add Component → Text. Host bitmap HUD; Wii GX not wired.
 - Prefabs: scene entity `prefab` field (relative `*.prefab.json` or stem; missing = not an instance). Instantiate / Save as Prefab records the link. Inspector instance card: **Apply** (push to asset) · **Revert** · **Unpack Completely**. Overridden Transform/component labels are orange+bold (`theme::PREFAB_OVERRIDE`) on dark Pro. CLI: `entity create-prefab` / `instantiate-prefab` / `apply-prefab` / `revert-prefab` / `unpack-prefab` / `prefab-status`. Nested prefabs / variants / per-property Apply are not in v0.
 - Multi-select: status `selected N: A, B`; Hierarchy uses full-width blue selection (Unity), not `>`/`+` prefixes.

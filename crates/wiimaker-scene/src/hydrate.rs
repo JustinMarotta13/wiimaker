@@ -153,6 +153,7 @@ fn spawn_entity(
             let mut sprite = Sprite::new(tex, size);
             sprite.uv = uv;
             sprite.pivot = pivot;
+            sprite.lock_pivot = sp.pivot.is_some();
             sprite.color = sp.color_rgba();
             sprite.z = sp.z;
             sprite.sorting_layer = world.sorting_layer_index(&sp.sorting_layer);
@@ -198,26 +199,14 @@ fn spawn_entity(
                 let anim = Animation::new(a.clip.clone(), cells, fps, loop_);
                 // Apply first frame onto sprite when possible.
                 if let Some(cell) = anim.cell_name() {
-                    if let Some(cat) = catalog {
-                        if let Some(r) = cat.lookup(cell) {
-                            if let Some(tex) = textures.get(&r.sheet_texture) {
-                                if let Some(sp) = world.sprite_mut(id) {
-                                    sp.texture = tex;
-                                    sp.uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
-                                    sp.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
-                                    sp.size = Vec2::new(r.pixel_size[0], r.pixel_size[1]);
-                                } else {
-                                    let mut sprite = Sprite::new(
-                                        tex,
-                                        Vec2::new(r.pixel_size[0], r.pixel_size[1]),
-                                    );
-                                    sprite.uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
-                                    sprite.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
-                                    world.set_sprite(id, Some(sprite));
-                                }
-                            }
-                        }
-                    }
+                    apply_animation_cell(
+                        world,
+                        id,
+                        cell,
+                        textures,
+                        catalog,
+                        ent.components.sprite.as_ref().and_then(|s| s.pivot),
+                    );
                 }
                 world.set_animation(id, Some(anim));
             } else {
@@ -252,25 +241,77 @@ fn spawn_entity(
     Ok(())
 }
 
+/// Catalog cell pivot unless the Sprite component overrides.
+pub fn sprite_effective_pivot(
+    sp: &crate::scene::SceneSprite,
+    catalog: Option<&SpriteCatalog>,
+) -> [f32; 2] {
+    let fallback = catalog
+        .and_then(|c| c.lookup(&sp.texture))
+        .map(|r| r.pivot)
+        .unwrap_or([0.5, 0.5]);
+    sp.effective_pivot(fallback)
+}
+
 fn resolve_sprite(
     sp: &crate::scene::SceneSprite,
     catalog: Option<&SpriteCatalog>,
 ) -> (String, Rect, Vec2, Vec2) {
+    let pivot = sprite_effective_pivot(sp, catalog);
+    let pivot = Vec2::new(pivot[0], pivot[1]);
     if let Some(cat) = catalog {
         if let Some(r) = cat.lookup(&sp.texture) {
             let uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
-            let pivot = Vec2::new(r.pivot[0], r.pivot[1]);
             // Scene size wins when author set it; cells often keep authored size.
             let size = sp.size_vec();
             return (r.sheet_texture.clone(), uv, pivot, size);
         }
     }
-    (
-        sp.texture.clone(),
-        Rect::unit(),
-        Vec2::new(0.5, 0.5),
-        sp.size_vec(),
-    )
+    (sp.texture.clone(), Rect::unit(), pivot, sp.size_vec())
+}
+
+fn apply_animation_cell(
+    world: &mut World,
+    id: wiimaker_core::world::EntityId,
+    cell: &str,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    pivot_override: Option<[f32; 2]>,
+) {
+    let Some(cat) = catalog else {
+        return;
+    };
+    let Some(r) = cat.lookup(cell) else {
+        return;
+    };
+    let Some(tex) = textures.get(&r.sheet_texture) else {
+        return;
+    };
+    let uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
+    let size = Vec2::new(r.pixel_size[0], r.pixel_size[1]);
+    if let Some(sp) = world.sprite_mut(id) {
+        sp.texture = tex;
+        sp.uv = uv;
+        if !sp.lock_pivot {
+            if let Some(p) = pivot_override {
+                sp.pivot = Vec2::new(p[0], p[1]);
+                sp.lock_pivot = true;
+            } else {
+                sp.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
+            }
+        }
+        sp.size = size;
+    } else {
+        let mut sprite = Sprite::new(tex, size);
+        sprite.uv = uv;
+        if let Some(p) = pivot_override {
+            sprite.pivot = Vec2::new(p[0], p[1]);
+            sprite.lock_pivot = true;
+        } else {
+            sprite.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
+        }
+        world.set_sprite(id, Some(sprite));
+    }
 }
 
 /// Soft hydrate: missing textures skip the sprite instead of failing (editor preview).
@@ -320,6 +361,7 @@ pub fn hydrate_lenient_with_sorting_layers(
                     let mut sprite = Sprite::new(tex, size);
                     sprite.uv = uv;
                     sprite.pivot = pivot;
+                    sprite.lock_pivot = sp.pivot.is_some();
                     sprite.color = sp.color_rgba();
                     sprite.z = sp.z;
                     sprite.sorting_layer = world.sorting_layer_index(&sp.sorting_layer);
@@ -359,26 +401,14 @@ pub fn hydrate_lenient_with_sorting_layers(
                 let (cells, fps, loop_) = resolve_animation(a, anims);
                 let anim = Animation::new(a.clip.clone(), cells, fps, loop_);
                 if let Some(cell) = anim.cell_name() {
-                    if let Some(cat) = catalog {
-                        if let Some(r) = cat.lookup(cell) {
-                            if let Some(tex) = textures.get(&r.sheet_texture) {
-                                if let Some(sp) = world.sprite_mut(id) {
-                                    sp.texture = tex;
-                                    sp.uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
-                                    sp.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
-                                    sp.size = Vec2::new(r.pixel_size[0], r.pixel_size[1]);
-                                } else {
-                                    let mut sprite = Sprite::new(
-                                        tex,
-                                        Vec2::new(r.pixel_size[0], r.pixel_size[1]),
-                                    );
-                                    sprite.uv = Rect::new(r.uv[0], r.uv[1], r.uv[2], r.uv[3]);
-                                    sprite.pivot = Vec2::new(r.pivot[0], r.pivot[1]);
-                                    world.set_sprite(id, Some(sprite));
-                                }
-                            }
-                        }
-                    }
+                    apply_animation_cell(
+                        &mut world,
+                        id,
+                        cell,
+                        textures,
+                        catalog,
+                        ent.components.sprite.as_ref().and_then(|s| s.pivot),
+                    );
                 }
                 world.set_animation(id, Some(anim));
             }

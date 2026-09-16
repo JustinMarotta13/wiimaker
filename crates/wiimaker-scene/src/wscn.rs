@@ -71,7 +71,8 @@ pub fn bake_scene_wscn_with_catalog(
                         ent.name
                     );
                 }
-                let (sheet, uv, pivot) = resolve_for_bake(&sp.texture, catalog);
+                let (sheet, uv, catalog_pivot) = resolve_for_bake(&sp.texture, catalog);
+                let pivot = sp.effective_pivot(catalog_pivot);
                 let idx = pack.texture_index(&sheet).ok_or_else(|| {
                     anyhow::anyhow!(
                         "entity '{}': texture '{}' missing from wpack",
@@ -211,5 +212,82 @@ mod tests {
         let plen = u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
         assert!(plen > 0);
         assert_eq!(i + 4 + plen, bytes.len());
+    }
+
+    fn dummy_pack(name: &str) -> WPack {
+        let mut pack = WPack::new();
+        pack.textures.push(wiimaker_assets::PackedTexture {
+            name: name.into(),
+            width: 8,
+            height: 8,
+            rgba16: vec![0; 128],
+        });
+        pack
+    }
+
+    fn sprite_pivot_from_wscn(bytes: &[u8]) -> [f32; 2] {
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let mut i = 8 + 4 + 4;
+        let nlen = u16::from_le_bytes([bytes[i], bytes[i + 1]]) as usize;
+        i += 2 + nlen + 6 * 4;
+        assert_eq!(bytes[i], KIND_SPRITE);
+        i += 1; // kind
+        i += 2; // tex idx
+        i += 8; // size xy
+        i += 16; // uv
+        let px = f32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
+        let py = f32::from_le_bytes(bytes[i + 4..i + 8].try_into().unwrap());
+        [px, py]
+    }
+
+    #[test]
+    fn bake_writes_effective_pivot() {
+        use crate::mutate::add_component_sprite;
+        use wiimaker_assets::{ResolvedSprite, SpriteCatalog};
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Hero",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_sprite(&mut scene, "Hero", "hero_2", [16.0, 16.0]).unwrap();
+        let pack = dummy_pack("sheet");
+
+        let mut cat = SpriteCatalog::empty();
+        cat.insert(
+            "hero_2",
+            ResolvedSprite {
+                sheet_texture: "sheet".into(),
+                uv: [0.0, 0.0, 1.0, 1.0],
+                pivot: [0.25, 0.75],
+                pixel_size: [16.0, 16.0],
+                is_cell: true,
+            },
+        );
+
+        let bytes = bake_scene_wscn_with_catalog(&scene, &pack, Some(&cat)).unwrap();
+        let p = sprite_pivot_from_wscn(&bytes);
+        assert!((p[0] - 0.25).abs() < 1e-4 && (p[1] - 0.75).abs() < 1e-4);
+
+        scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == "Hero")
+            .unwrap()
+            .components
+            .sprite
+            .as_mut()
+            .unwrap()
+            .pivot = Some([0.0, 1.0]);
+        let bytes = bake_scene_wscn_with_catalog(&scene, &pack, Some(&cat)).unwrap();
+        let p = sprite_pivot_from_wscn(&bytes);
+        assert!((p[0] - 0.0).abs() < 1e-4 && (p[1] - 1.0).abs() < 1e-4);
+        assert_eq!(&bytes[0..8], b"WSCN0003");
     }
 }

@@ -193,6 +193,10 @@ impl EditorApp {
         }
 
         let catalog_names: Vec<String> = self.catalog.names().to_vec();
+        let catalog_pivot_by_name: std::collections::HashMap<String, [f32; 2]> = catalog_names
+            .iter()
+            .filter_map(|n| self.catalog.lookup(n).map(|r| (n.clone(), r.pivot)))
+            .collect();
         let entity_names: Vec<String> = self.scene.entities.iter().map(|e| e.name.clone()).collect();
         let layer_names: Vec<String> = self.project.effective_sorting_layers();
         let mut pending_sprite_tex: Option<(String, [f32; 2])> = None;
@@ -285,6 +289,42 @@ impl EditorApp {
                         0.5,
                         prefab_ov.contains("Sprite.size"),
                     );
+                    let catalog_pivot = catalog_pivot_by_name
+                        .get(&sp.texture)
+                        .copied()
+                        .unwrap_or([0.5, 0.5]);
+                    let mut pivot_edit = sp.pivot.unwrap_or(catalog_pivot);
+                    ui.horizontal(|ui| {
+                        let changed = theme::vec2_row_ov(
+                            ui,
+                            "Pivot",
+                            &mut pivot_edit,
+                            0.01,
+                            prefab_ov.contains("Sprite.pivot"),
+                        );
+                        if changed {
+                            sp.pivot = Some(pivot_edit);
+                            dirty = true;
+                        }
+                        if sp.pivot.is_some()
+                            && ui
+                                .add_sized([44.0, 18.0], egui::Button::new("Reset"))
+                                .on_hover_text("Use catalog cell pivot")
+                                .clicked()
+                        {
+                            sp.pivot = None;
+                            dirty = true;
+                        }
+                    });
+                    if sp.pivot.is_none() {
+                        theme::muted(
+                            ui,
+                            format!(
+                                "catalog · {:.2}, {:.2}",
+                                catalog_pivot[0], catalog_pivot[1]
+                            ),
+                        );
+                    }
                     dirty |= sorting_layer_fields(
                         ui,
                         "sprite_sort",

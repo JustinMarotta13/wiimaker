@@ -266,6 +266,12 @@ impl SpriteCatalog {
         }
         self.by_name.insert(name, resolved);
     }
+
+    /// Insert or replace a resolved sprite (tests / synthetic catalogs).
+    pub fn insert(&mut self, name: impl Into<String>, resolved: ResolvedSprite) {
+        self.push(name.into(), resolved);
+        self.names.sort();
+    }
 }
 
 /// Slice a sheet PNG: write/update `.sprites.json` with grid cells.
@@ -296,11 +302,7 @@ pub fn slice_sheet(
 }
 
 /// Set pivot on a cell inside its sheet sidecar.
-pub fn set_sprite_pivot(
-    assets_dir: &Path,
-    sprite_name: &str,
-    pivot: Pivot,
-) -> Result<PathBuf> {
+pub fn set_sprite_pivot(assets_dir: &Path, sprite_name: &str, pivot: Pivot) -> Result<PathBuf> {
     // Find which sidecar owns this sprite name.
     if !assets_dir.is_dir() {
         bail!("assets dir missing");

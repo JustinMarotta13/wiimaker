@@ -54,7 +54,9 @@ pub fn animate_world(world: &mut World, catalog: &SpriteCatalog, textures: &Text
         if let Some(sp) = world.sprite_mut(id) {
             sp.texture = tex_id;
             sp.uv = Rect::new(uv[0], uv[1], uv[2], uv[3]);
-            sp.pivot = Vec2::new(pivot[0], pivot[1]);
+            if !sp.lock_pivot {
+                sp.pivot = Vec2::new(pivot[0], pivot[1]);
+            }
             sp.size = Vec2::new(pixel_size[0], pixel_size[1]);
         }
     }
@@ -86,7 +88,9 @@ pub fn apply_animation_frame(
     if let Some(sp) = world.sprite_mut(id) {
         sp.texture = tex_id;
         sp.uv = Rect::new(uv[0], uv[1], uv[2], uv[3]);
-        sp.pivot = Vec2::new(pivot[0], pivot[1]);
+        if !sp.lock_pivot {
+            sp.pivot = Vec2::new(pivot[0], pivot[1]);
+        }
         sp.size = Vec2::new(pixel_size[0], pixel_size[1]);
     }
 }
@@ -166,5 +170,69 @@ mod tests {
             pixel_size: [8.0, 8.0],
             is_cell: true,
         };
+    }
+
+    fn cell(pivot: [f32; 2]) -> ResolvedSprite {
+        ResolvedSprite {
+            sheet_texture: "sheet".into(),
+            uv: [0.0, 0.0, 1.0, 1.0],
+            pivot,
+            pixel_size: [8.0, 8.0],
+            is_cell: true,
+        }
+    }
+
+    #[test]
+    fn animate_preserves_locked_component_pivot() {
+        let mut cat = SpriteCatalog::empty();
+        cat.insert("a", cell([0.1, 0.1]));
+        cat.insert("b", cell([0.9, 0.9]));
+        let mut tex = TextureMap::new();
+        tex.insert("sheet", TextureId(0));
+        let mut world = World::new();
+        let id = world.spawn_named("p", Transform::from_xy(0.0, 0.0));
+        let mut sp = Sprite::new(TextureId(0), Vec2::new(16.0, 16.0));
+        sp.pivot = Vec2::new(0.0, 1.0);
+        sp.lock_pivot = true;
+        world.set_sprite(id, Some(sp));
+        world.set_animation(
+            id,
+            Some(Animation::new(
+                "chomp",
+                vec!["a".into(), "b".into()],
+                10.0,
+                true,
+            )),
+        );
+        animate_world(&mut world, &cat, &tex, 0.11);
+        let sp = world.sprite(id).unwrap();
+        assert!((sp.pivot.x - 0.0).abs() < 1e-4);
+        assert!((sp.pivot.y - 1.0).abs() < 1e-4);
+        assert_eq!(world.animation(id).unwrap().frame, 1);
+    }
+
+    #[test]
+    fn animate_applies_catalog_pivot_when_unlocked() {
+        let mut cat = SpriteCatalog::empty();
+        cat.insert("a", cell([0.1, 0.1]));
+        cat.insert("b", cell([0.9, 0.9]));
+        let mut tex = TextureMap::new();
+        tex.insert("sheet", TextureId(0));
+        let mut world = World::new();
+        let id = world.spawn_named("p", Transform::from_xy(0.0, 0.0));
+        world.set_sprite(id, Some(Sprite::new(TextureId(0), Vec2::new(16.0, 16.0))));
+        world.set_animation(
+            id,
+            Some(Animation::new(
+                "chomp",
+                vec!["a".into(), "b".into()],
+                10.0,
+                true,
+            )),
+        );
+        animate_world(&mut world, &cat, &tex, 0.11);
+        let sp = world.sprite(id).unwrap();
+        assert!((sp.pivot.x - 0.9).abs() < 1e-4);
+        assert!((sp.pivot.y - 0.9).abs() < 1e-4);
     }
 }
