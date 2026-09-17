@@ -19,8 +19,11 @@ pub struct Scene {
     pub entities: Vec<EntityData>,
 }
 
+/// Default Scene/Game GX clear (navy). Editor Reset and `Scene::new` share this.
+pub const DEFAULT_CLEAR_COLOR: [u8; 4] = [12, 18, 32, 255];
+
 fn default_clear() -> [u8; 4] {
-    [12, 18, 32, 255]
+    DEFAULT_CLEAR_COLOR
 }
 
 impl Scene {

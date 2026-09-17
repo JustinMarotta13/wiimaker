@@ -6,8 +6,8 @@ use wiimaker_scene::{
     remove_component_audio_source, remove_component_camera, remove_component_collider,
     remove_component_disc, remove_component_grid_mover, remove_component_sprite,
     remove_component_text, remove_component_tilemap, save_project, set_component_enabled,
-    tilemap_resize, SceneColliderKind, SceneDir, SceneTextAlign,
-    DEFAULT_SORTING_LAYER,
+    set_scene_clear, tilemap_resize, SceneColliderKind, SceneDir, SceneTextAlign,
+    DEFAULT_CLEAR_COLOR, DEFAULT_SORTING_LAYER,
 };
 
 use crate::app::EditorApp;
@@ -35,7 +35,15 @@ impl EditorApp {
         }
         let Some(sel) = self.primary_selected().map(|s| s.to_string()) else {
             ui.add_space(8.0);
-            theme::muted(ui, "None");
+            ui.label(
+                RichText::new(&self.scene.name)
+                    .strong()
+                    .size(14.0)
+                    .color(theme::TEXT),
+            );
+            theme::muted(ui, "No GameObject selected");
+            ui.add_space(8.0);
+            self.ui_inspector_environment(ui);
             return;
         };
         if self.selected.len() > 1 {
@@ -1567,6 +1575,68 @@ impl EditorApp {
         }
     }
 
+    /// Scene Environment / Clear Color — empty Inspector and open `.scene.json`.
+    fn ui_inspector_environment(&mut self, ui: &mut egui::Ui) {
+        let c = self.scene.clear_color;
+        let mut col = egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], 255);
+        let mut rgb_changed = false;
+        let mut reset = false;
+        let is_default = c == DEFAULT_CLEAR_COLOR;
+
+        ui.label(
+            RichText::new("Environment")
+                .strong()
+                .size(12.0)
+                .color(theme::TEXT_MUTED),
+        );
+        ui.add_space(4.0);
+        theme::card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Clear Color")
+                        .size(12.0)
+                        .color(theme::TEXT_MUTED),
+                );
+                if ui.color_edit_button_srgba(&mut col).changed() {
+                    rgb_changed = true;
+                }
+                if !is_default
+                    && ui
+                        .add_sized([44.0, 18.0], egui::Button::new("Reset"))
+                        .on_hover_text("Restore default navy clear [12, 18, 32]")
+                        .clicked()
+                {
+                    reset = true;
+                }
+            });
+            theme::muted(ui, "Scene / Game viewport background");
+        });
+
+        if rgb_changed {
+            let rgb = [col.r(), col.g(), col.b()];
+            if rgb != [c[0], c[1], c[2]] {
+                self.begin_inspector_gesture();
+                set_scene_clear(&mut self.scene, rgb);
+                self.mark_dirty();
+                self.status = format!("clear color → {},{},{}", rgb[0], rgb[1], rgb[2]);
+            }
+        }
+        if reset {
+            self.push_undo();
+            set_scene_clear(
+                &mut self.scene,
+                [
+                    DEFAULT_CLEAR_COLOR[0],
+                    DEFAULT_CLEAR_COLOR[1],
+                    DEFAULT_CLEAR_COLOR[2],
+                ],
+            );
+            self.sync_baseline();
+            self.mark_dirty();
+            self.status = "clear color reset".into();
+        }
+    }
+
     fn ui_inspector_file(&mut self, ui: &mut egui::Ui) {
         let Some(rel) = self.selected_file.clone() else {
             return;
@@ -1614,6 +1684,13 @@ impl EditorApp {
             }
         });
 
+        let is_scene = rel.to_string_lossy().ends_with(".scene.json");
+        let is_open_scene = is_scene && abs == self.scene_path;
+        if is_open_scene {
+            ui.add_space(8.0);
+            self.ui_inspector_environment(ui);
+        }
+
         ui.add_space(8.0);
         ui.label(
             RichText::new("Actions")
@@ -1623,7 +1700,6 @@ impl EditorApp {
         );
         ui.add_space(4.0);
         theme::card_frame().show(ui, |ui| {
-            let is_scene = rel.to_string_lossy().ends_with(".scene.json");
             let is_sprites = name.ends_with(".sprites.json");
             if ext == "png" {
                 let stem = rel
@@ -1661,8 +1737,7 @@ impl EditorApp {
                 ui.add_space(4.0);
                 theme::muted(ui, "Slice cells · set pivot · writes .sprites.json");
             } else if is_scene {
-                let is_open = abs == self.scene_path;
-                if is_open {
+                if is_open_scene {
                     theme::muted(ui, "This scene is already open");
                 } else if ui.button("Open scene").clicked() {
                     self.request_open_scene(abs.clone());

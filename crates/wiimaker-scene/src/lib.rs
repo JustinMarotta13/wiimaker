@@ -66,7 +66,7 @@ pub use scene::{
     display_sorting_layer, load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab,
     Scene, SceneAnimation, SceneAudioSource, SceneAutoTile, SceneCamera, SceneCollider,
     SceneColliderKind, SceneComponents, SceneDir, SceneDisc, SceneGridMover, SceneSprite,
-    SceneText, SceneTextAlign, SceneTilePalette, SceneTilemap, SceneTransform,
+    SceneText, SceneTextAlign, SceneTilePalette, SceneTilemap, SceneTransform, DEFAULT_CLEAR_COLOR,
 };
 pub use sorting::{
     add_sorting_layer, entity_max_sorting_key, list_sorting_layers, move_sorting_layer,

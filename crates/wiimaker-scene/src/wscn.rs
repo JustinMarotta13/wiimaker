@@ -186,6 +186,18 @@ mod tests {
     use crate::tilemap::{add_component_tilemap, tilemap_stamp_ascii};
 
     #[test]
+    fn bake_writes_clear_color() {
+        use crate::mutate::set_scene_clear;
+
+        let mut scene = Scene::new("t");
+        set_scene_clear(&mut scene, [1, 2, 3]);
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        assert_eq!(&bytes[8..12], &[1, 2, 3, 255]);
+        assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 0);
+    }
+
+    #[test]
     fn bake_tilemap_kind_and_magic() {
         let mut scene = Scene::new("maze");
         add_entity(
