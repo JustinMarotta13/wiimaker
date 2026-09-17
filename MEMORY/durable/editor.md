@@ -30,6 +30,7 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - AudioSource Inspector: clip combo (Project `*.wav`), Volume, Play On Awake, Play (host oneshot). Project: `.wav` rows, double-click / context Play preview. Drop WAV into the editor to copy into `assets/`.
 - Sorting layers: Inspector Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** (`z`). Project `game.toml` inspector: ordered list with ↑↓, –, select + draft **+ Add** / **Rename**. Mutate helpers in `wiimaker-scene` remap other scenes/prefabs on rename/remove; editor remaps the open scene in memory.
 - Sprite Inspector: **Pivot** X/Y DragValues (normalized; catalog values shown when not overridden, muted hint). Editing writes `SceneSprite.pivot`. **Reset** clears the override (catalog again).
+- Scene **Environment** / **Clear Color**: Inspector shows it when nothing is selected (replaces bare "None") and when the open `.scene.json` is selected in Project. Color drag uses `begin_inspector_gesture` once; **Reset** is discrete `push_undo` then `set_scene_clear` (RGB, A=255) then `sync_baseline`. Viewport blit already uses `scene.clear_rgba()`. CLI twin: `scene set-clear --rgb` (unchanged).
 - Text Inspector: string (multiline), Size, Color, Align combo, Sorting Layer / Order in Layer. Add Component → Text. Host bitmap HUD; Wii GX not wired.
 - Prefabs: scene entity `prefab` field (relative `*.prefab.json` or stem; missing = not an instance). Instantiate / Save as Prefab records the link. Inspector instance card: **Apply** (push to asset) · **Revert** · **Unpack Completely**. Overridden Transform/component labels are orange+bold (`theme::PREFAB_OVERRIDE`) on dark Pro. CLI: `entity create-prefab` / `instantiate-prefab` / `apply-prefab` / `revert-prefab` / `unpack-prefab` / `prefab-status`. Nested prefabs / variants / per-property Apply are not in v0.
 - Multi-select: status `selected N: A, B`; Hierarchy uses full-width blue selection (Unity), not `>`/`+` prefixes.
@@ -54,13 +55,13 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - File → **Build Settings…** (also Project / Inspector on `game.toml`): ordered `game.toml` `scenes` list, star = `default_scene`, +/- add/remove, Open. CLI twins: `scene build-list` / `build-add` / `build-remove`.
 - Entity hierarchy: optional `parent` name on `EntityData`; transform is **local**; hydrate/pick/wscn/outline compose world via `Scene::world_transform`. Delete cascades to descendants. CLI: `entity set-parent --name X [--parent Y]`.
 - Inspector sprite field is a catalog ComboBox (cells + whole textures), not PNG stems only.
-- Inspector focus is entity XOR project file (`selected` / `selected_file`).
+- Inspector focus is entity XOR project file (`selected` / `selected_file`). Empty selection still shows the open scene's Environment / Clear Color card (not a GameObject).
+- Scene clear color lives on `Scene.clear_color` (`[u8; 4]`, default `DEFAULT_CLEAR_COLOR` `[12,18,32,255]`). Editor Environment picker + CLI `scene set-clear` both call `set_scene_clear`. WSCN bake writes the 4 bytes after magic.
 - Scene/Game chrome prefs: `<game>/.wiimaker/prefs.toml` (`EditorPrefs` in `wiimaker-scene`). Not `game.toml`. Editor toolbar + `scene set-game-view` / `editor set-scene-view` share `load_editor_prefs` / `save_editor_prefs`. Scene zoom 1 = fill well; Game locked aspect uses `fitted_blit_rect` letterbox/pillarbox + Scale slider.
 - Selection is `Vec<String>` (last = primary for Inspector); Cmd-click toggles.
 
 ## Open follow-ups
 
-- Optional: clear-color editor UI with undo.
 - Optional: full rotation in parent/world compose (currently translation×scale).
 - Optional: collapsible folders / filter in Project explorer.
 - Optional: shorten window title when `game.toml` `title` already includes `wiimaker ·` (today: `wiimaker · wiimaker · hello-orb`).

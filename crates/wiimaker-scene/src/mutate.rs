@@ -1287,4 +1287,18 @@ mod tests {
             .unwrap();
         assert_eq!(sp.pivot, Some([0.25, 0.5]));
     }
+
+    #[test]
+    fn set_scene_clear_sets_rgb_and_opaque_alpha() {
+        let mut scene = empty_scene();
+        assert_eq!(scene.clear_color, crate::scene::DEFAULT_CLEAR_COLOR);
+        scene.clear_color = [1, 2, 3, 4];
+        set_scene_clear(&mut scene, [200, 10, 30]);
+        assert_eq!(scene.clear_color, [200, 10, 30, 255]);
+        let json = serde_json::to_string(&scene).unwrap();
+        let loaded: Scene = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.clear_color, [200, 10, 30, 255]);
+        let rgba = loaded.clear_rgba();
+        assert_eq!([rgba.r, rgba.g, rgba.b, rgba.a], [200, 10, 30, 255]);
+    }
 }

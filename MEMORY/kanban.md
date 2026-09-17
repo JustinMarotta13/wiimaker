@@ -12,7 +12,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 |---|---|
 | Project window | `game.toml` + `assets/` + `scenes/` + editor **Project** explorer |
 | Hierarchy | editor Hierarchy (parent/unparent DnD, multi-select, duplicate) |
-| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer**, Sprite **Pivot** X/Y override + Reset |
+| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer**, Sprite **Pivot** X/Y override + Reset, scene **Environment** **Clear Color** (empty selection + open `.scene.json`) |
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, **Move axis handles** (red X / green Y), Snap + nudge |
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
@@ -28,13 +28,12 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-16):** Clear-color editor UI with undo.
+**Recommended next morning (2026-09-17):** Project explorer collapsible folders / filter.
 
 ---
 
 ## Later
 
-- **Clear-color editor UI with undo** — editor follow-up; CLI `scene set-clear` exists.
 - **Wii audio / Wiimote** — after host oneshots.
 - **Wii GX text** — host DrawText exists; C player still KIND_NONE.
 - **Wii GX tilemaps** — host animated / auto-tile exists; C still skips the Tilemap payload.
@@ -91,6 +90,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Component-level Sprite pivot override** (2026-09-16) — optional `SceneSprite.pivot: [f32; 2]` (omit = catalog cell). Hydrate / `animate_world` (preserves override on frame swap) / pick / Scene outline / `render_world` / WSCN0003 bake use the effective pivot. Inspector Sprite **Pivot** X/Y DragValues + catalog hint + **Reset**. CLI `entity set --pivot-x --pivot-y --clear-pivot`; `add-component Sprite --pivot-x --pivot-y`. Prefab `Sprite.pivot` in Apply/Revert/orange-bold. Host-first; WSCN0003 unchanged.
 
+- **Clear-color editor UI with undo** (2026-09-17) — Inspector **Environment** card with **Clear Color** picker + **Reset** (empty selection and open `.scene.json` in Project). Drag uses `begin_inspector_gesture`; Reset is discrete `push_undo`. Mutate via `set_scene_clear` (RGB, A=255). Viewport already blits `scene.clear_rgba()`. CLI twin unchanged: `scene set-clear --rgb`. Tests: mutate + UndoStack + WSCN bake of clear bytes. Host-first; WSCN0003 already stored clear_color.
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -129,12 +130,12 @@ Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
 Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale
 Bottom tabs: Project · Console
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Ship Clear-color editor UI with undo (Later).** Editor follow-up; CLI `scene set-clear` exists.
+**Ship Project explorer collapsible folders / filter.** Unity-chrome; Later is otherwise Wii-backend.
 

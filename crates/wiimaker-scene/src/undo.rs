@@ -125,6 +125,22 @@ mod tests {
     }
 
     #[test]
+    fn undo_restores_clear_color() {
+        use crate::mutate::set_scene_clear;
+
+        let mut stack = UndoStack::new(50);
+        let mut scene = Scene::new("test");
+        assert_eq!(scene.clear_color, crate::scene::DEFAULT_CLEAR_COLOR);
+        stack.push(&scene);
+        set_scene_clear(&mut scene, [255, 0, 0]);
+        assert_eq!(scene.clear_color, [255, 0, 0, 255]);
+        assert!(stack.undo(&mut scene));
+        assert_eq!(scene.clear_color, crate::scene::DEFAULT_CLEAR_COLOR);
+        assert!(stack.redo(&mut scene));
+        assert_eq!(scene.clear_color, [255, 0, 0, 255]);
+    }
+
+    #[test]
     fn caps_depth() {
         let mut stack = UndoStack::new(3);
         let mut scene = Scene::new("t");
