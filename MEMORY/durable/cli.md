@@ -23,7 +23,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - Text / HUD: `entity add-component <game> --name Hud Text --text "Score: 0" --size 16 --color 255,255,255 --align left`. `entity set --text --size --color --align` creates Text if missing. `--color` is `R,G,B` or `R,G,B,A`.
 - `scene list` returns paths relative to the game dir (via `list_scenes`), e.g. `scenes/main.scene.json`.
 - `scene set-game-view <game> [--width --height] [--aspect free|fixed] [--preset free|640x480|16:9|4:3|custom] [--scale]` writes `.wiimaker/prefs.toml` (same as Game tab).
-- `editor prefs <game>` dumps Scene/Game chrome; `editor set-scene-view` sets zoom/pan/grid/gizmos/snap (`--json`). Move-tool axis handles are editor-only (CLI n/a).
+- `editor prefs <game>` dumps Scene/Game/Project chrome; `editor set-scene-view` sets zoom/pan/grid/gizmos/snap; `editor set-project-view` collapse/expand/clear folder paths (`--json`). Move-tool axis handles are editor-only (CLI n/a). Filter text is session-only (not in prefs).
 - `editor play-status <game> [--build] [--json]` reports whether in-editor Play will load the game `App` cdylib or the WASD fallback. No new prefs — CLI `run` remains the external host twin.
 - `entity list` prints an indented tree (non-json); JSON still dumps flat entity array with `parent` fields.
 - Tilemap: `tilemap set|fill|stamp|from-ascii|get|set-palette|mask`. `from-ascii FILE --name Maze` resolves FILE as cwd, then game dir, then `assets/`. Default `--resize true` (unlike inline `stamp --ascii`, which clips). Quote `--map '#=1,P=2:0'` because `#` is a shell comment.

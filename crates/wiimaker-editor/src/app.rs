@@ -112,6 +112,7 @@ pub(crate) struct EditorApp {
     #[allow(dead_code)]
     pub(crate) new_entity_name: String,
     pub(crate) hierarchy_filter: String,
+    pub(crate) project_filter: String,
     pub(crate) asset_names: Vec<String>,
     /// Cached relative paths under the game dir for the Project explorer.
     pub(crate) project_entries: Vec<ProjectEntry>,
@@ -198,6 +199,7 @@ impl EditorApp {
             status: String::new(),
             new_entity_name: "NewEntity".into(),
             hierarchy_filter: String::new(),
+            project_filter: String::new(),
             asset_names: Vec::new(),
             project_entries: Vec::new(),
             catalog: SpriteCatalog::empty(),

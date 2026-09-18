@@ -28,7 +28,7 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-17):** Project explorer collapsible folders / filter.
+**Recommended next morning (2026-09-18):** Console Search / filter (Unity Console chrome).
 
 ---
 
@@ -92,6 +92,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Clear-color editor UI with undo** (2026-09-17) — Inspector **Environment** card with **Clear Color** picker + **Reset** (empty selection and open `.scene.json` in Project). Drag uses `begin_inspector_gesture`; Reset is discrete `push_undo`. Mutate via `set_scene_clear` (RGB, A=255). Viewport already blits `scene.clear_rgba()`. CLI twin unchanged: `scene set-clear --rgb`. Tests: mutate + UndoStack + WSCN bake of clear bytes. Host-first; WSCN0003 already stored clear_color.
 
+- **Project explorer collapsible folders / filter** (2026-09-18) — Project Search (Hierarchy chrome: search icon + hint "Search"; session-only `project_filter`). Folders use geometric `foldout_button` + `#`; triangle toggles collapse without selecting; row click selects for Inspector; double-click folder toggles. Collapsed relative paths in `.wiimaker/prefs.toml` `project_view.collapsed` (empty = all expanded). Filter auto-reveals ancestors of matches. CLI: `editor set-project-view --collapse/--expand/--clear-collapsed` · `editor prefs --json` includes `project_view`. Host-first.
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -108,7 +110,7 @@ Global: `--json`
 | `play-wii` | build then Dolphin |
 | `doctor` | validate |
 | `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` · `scene set-game-view` | build-* mutate `game.toml` `scenes`; set-game-view writes `.wiimaker/prefs.toml` |
-| `editor prefs` · `editor set-scene-view` · `editor play-status` | Scene zoom/pan/grid/gizmos/snap in prefs; play-status reports App plugin vs WASD fallback (no new prefs) |
+| `editor prefs` · `editor set-scene-view` · `editor set-project-view` · `editor play-status` | Scene zoom/pan/grid/gizmos/snap + Project collapsed folders in prefs; play-status reports App plugin vs WASD fallback (no new prefs). Filter text is session-only. |
 | `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer` (`--z` alias) `--pivot-x --pivot-y --clear-pivot` |
 | `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Camera` \| `Follow` (`--target` `--lerp`) \| `GridMover` (`--cell` `--speed` `--queued-dir`) \| `AudioSource` (`--clip` `--volume` `--play-on-awake`) \| `Text` (`--text` `--size` `--color` `--align`) · Sprite `--pivot-x --pivot-y` |
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
@@ -130,6 +132,7 @@ Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
 Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale
 Bottom tabs: Project · Console
+Project: Search (filename / relative path) · collapsible folders (foldout + `#`) · Refresh · New scene · Set default · Build Settings…
 Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
@@ -137,5 +140,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Ship Project explorer collapsible folders / filter.** Unity-chrome; Later is otherwise Wii-backend.
+**Ship Console Search / filter.** Unity Console chrome (search icon + hint "Search", session-only like Hierarchy); Later is otherwise Wii-backend.
 

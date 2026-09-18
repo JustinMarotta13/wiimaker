@@ -1,8 +1,9 @@
 //! Editor chrome prefs (`<game>/.wiimaker/prefs.toml`).
 //!
-//! Scene zoom / pan / grid / gizmos and Game view aspect live here — not in
-//! `game.toml`, which is runtime/build metadata. Editor GUI and CLI both call
-//! [`load_editor_prefs`] / [`save_editor_prefs`].
+//! Scene zoom / pan / grid / gizmos, Game view aspect, and Project explorer
+//! collapsed folders live here — not in `game.toml`, which is runtime/build
+//! metadata. Editor GUI and CLI both call [`load_editor_prefs`] /
+//! [`save_editor_prefs`].
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -160,12 +161,23 @@ impl GameViewPrefs {
     }
 }
 
+/// Project explorer chrome (collapsed folders). Search filter is session-only.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProjectViewPrefs {
+    /// Relative folder paths that are collapsed (e.g. `assets`, `assets/fx`).
+    /// Empty = all expanded.
+    #[serde(default)]
+    pub collapsed: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EditorPrefs {
     #[serde(default)]
     pub scene_view: SceneViewPrefs,
     #[serde(default)]
     pub game_view: GameViewPrefs,
+    #[serde(default)]
+    pub project_view: ProjectViewPrefs,
 }
 
 pub fn load_editor_prefs(game_dir: &Path) -> Result<EditorPrefs> {
@@ -212,14 +224,7 @@ pub fn set_game_view(
     scale: Option<f32>,
 ) -> Result<EditorPrefs> {
     let mut prefs = load_editor_prefs(game_dir)?;
-    apply_game_view(
-        &mut prefs.game_view,
-        width,
-        height,
-        aspect,
-        preset,
-        scale,
-    )?;
+    apply_game_view(&mut prefs.game_view, width, height, aspect, preset, scale)?;
     save_editor_prefs(game_dir, &prefs)?;
     Ok(prefs)
 }
@@ -419,16 +424,104 @@ pub fn scene_blit_rect(
     (x, y, w, h)
 }
 
+/// Slash-normalized relative path with no leading/trailing `/`.
+pub fn normalize_project_rel(path: &str) -> String {
+    path.replace('\\', "/").trim().trim_matches('/').to_string()
+}
+
+/// True when `rel` is a descendant of a collapsed folder (the folder row itself stays visible).
+pub fn project_rel_hidden_by_collapse(rel: &str, collapsed: &[String]) -> bool {
+    if collapsed.is_empty() {
+        return false;
+    }
+    let rel = normalize_project_rel(rel);
+    let collapsed: Vec<String> = collapsed.iter().map(|s| normalize_project_rel(s)).collect();
+    let mut path = rel.as_str();
+    while let Some((parent, _)) = path.rsplit_once('/') {
+        if collapsed.iter().any(|c| c == parent) {
+            return true;
+        }
+        path = parent;
+    }
+    false
+}
+
+/// True when this folder path is itself listed as collapsed.
+pub fn folder_is_collapsed(collapsed: &[String], rel: &str) -> bool {
+    let n = normalize_project_rel(rel);
+    if n.is_empty() {
+        return false;
+    }
+    collapsed.iter().any(|c| normalize_project_rel(c) == n)
+}
+
+/// Toggle `rel` in the collapsed list (normalize + sort). Empty paths are ignored.
+pub fn toggle_project_collapsed(pv: &mut ProjectViewPrefs, rel: &str) {
+    let n = normalize_project_rel(rel);
+    if n.is_empty() {
+        return;
+    }
+    if folder_is_collapsed(&pv.collapsed, &n) {
+        pv.collapsed.retain(|c| normalize_project_rel(c) != n);
+    } else {
+        pv.collapsed.push(n);
+        pv.collapsed.sort();
+        pv.collapsed.dedup();
+    }
+}
+
+/// Mutate Project view collapsed folders. `clear_collapsed` runs first, then
+/// `--collapse` paths are added, then `--expand` paths are removed (expand wins).
+pub fn apply_project_view(
+    pv: &mut ProjectViewPrefs,
+    collapse: &[String],
+    expand: &[String],
+    clear_collapsed: bool,
+) -> Result<()> {
+    if clear_collapsed {
+        pv.collapsed.clear();
+    }
+    for p in collapse {
+        let n = normalize_project_rel(p);
+        if n.is_empty() {
+            bail!("collapse path must not be empty");
+        }
+        if !folder_is_collapsed(&pv.collapsed, &n) {
+            pv.collapsed.push(n);
+        }
+    }
+    for p in expand {
+        let n = normalize_project_rel(p);
+        if n.is_empty() {
+            bail!("expand path must not be empty");
+        }
+        pv.collapsed.retain(|c| normalize_project_rel(c) != n);
+    }
+    pv.collapsed.sort();
+    pv.collapsed.dedup();
+    Ok(())
+}
+
+/// Mutate Project view fields and persist.
+pub fn set_project_view(
+    game_dir: &Path,
+    collapse: &[String],
+    expand: &[String],
+    clear_collapsed: bool,
+) -> Result<EditorPrefs> {
+    let mut prefs = load_editor_prefs(game_dir)?;
+    apply_project_view(&mut prefs.project_view, collapse, expand, clear_collapsed)?;
+    save_editor_prefs(game_dir, &prefs)?;
+    Ok(prefs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn tmp(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "wiimaker-prefs-{}-{}",
-            label,
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("wiimaker-prefs-{}-{}", label, std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -500,7 +593,9 @@ mod tests {
         assert!(!p.scene_view.gizmos);
         assert!(p.scene_view.snap);
         assert!((p.scene_view.snap_size - 32.0).abs() < 1e-4);
-        assert!(set_scene_view(&dir, None, None, None, None, None, None, None, Some(false)).is_err());
+        assert!(
+            set_scene_view(&dir, None, None, None, None, None, None, None, Some(false)).is_err()
+        );
     }
 
     #[test]
@@ -543,5 +638,111 @@ mod tests {
         assert!((x - (-100.0 + 10.0)).abs() < 0.01);
         let _ = y;
         let _ = h;
+    }
+
+    #[test]
+    fn project_view_collapse_roundtrip() {
+        let dir = tmp("project-view");
+        set_project_view(
+            &dir,
+            &["assets/".into(), "assets/fx".into(), r"assets\ui".into()],
+            &[],
+            false,
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(
+            p.project_view.collapsed,
+            vec![
+                "assets".to_string(),
+                "assets/fx".to_string(),
+                "assets/ui".to_string()
+            ]
+        );
+        let text = fs::read_to_string(editor_prefs_path(&dir)).unwrap();
+        assert!(text.contains("project_view") || text.contains("collapsed"));
+
+        set_project_view(&dir, &[], &["assets".into()], false).unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(
+            p.project_view.collapsed,
+            vec!["assets/fx".to_string(), "assets/ui".to_string()]
+        );
+
+        set_project_view(&dir, &["assets".into()], &[], false).unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(p.project_view.collapsed.len(), 3);
+
+        set_project_view(&dir, &["assets".into()], &[], false).unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(
+            p.project_view
+                .collapsed
+                .iter()
+                .filter(|c| *c == "assets")
+                .count(),
+            1
+        );
+
+        set_project_view(&dir, &["scenes".into()], &[], true).unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(p.project_view.collapsed, vec!["scenes".to_string()]);
+
+        let mut pv = p.project_view.clone();
+        assert!(apply_project_view(&mut pv, &["".into()], &[], false).is_err());
+        assert!(set_project_view(&dir, &[], &["".into()], false).is_err());
+    }
+
+    #[test]
+    fn project_rel_hidden_by_collapsed_ancestors() {
+        let collapsed = vec!["assets".into(), "scenes/ui".into()];
+        assert!(!project_rel_hidden_by_collapse("assets", &collapsed));
+        assert!(project_rel_hidden_by_collapse("assets/fx", &collapsed));
+        assert!(project_rel_hidden_by_collapse(
+            "assets/fx/spark.png",
+            &collapsed
+        ));
+        assert!(!project_rel_hidden_by_collapse("game.toml", &collapsed));
+        assert!(!project_rel_hidden_by_collapse("scenes", &collapsed));
+        assert!(!project_rel_hidden_by_collapse(
+            "scenes/main.scene.json",
+            &collapsed
+        ));
+        assert!(!project_rel_hidden_by_collapse("scenes/ui", &collapsed));
+        assert!(project_rel_hidden_by_collapse(
+            "scenes/ui/hud.png",
+            &collapsed
+        ));
+        assert!(folder_is_collapsed(&collapsed, "assets/"));
+        assert!(!folder_is_collapsed(&collapsed, "assets/fx"));
+    }
+
+    #[test]
+    fn toggle_project_collapsed_roundtrip() {
+        let mut pv = ProjectViewPrefs::default();
+        toggle_project_collapsed(&mut pv, "assets/");
+        assert_eq!(pv.collapsed, vec!["assets".to_string()]);
+        toggle_project_collapsed(&mut pv, "assets");
+        assert!(pv.collapsed.is_empty());
+        toggle_project_collapsed(&mut pv, "");
+        assert!(pv.collapsed.is_empty());
+    }
+
+    #[test]
+    fn missing_prefs_include_empty_project_view() {
+        let dir = tmp("project-view-default");
+        let p = load_editor_prefs(&dir).unwrap();
+        assert!(p.project_view.collapsed.is_empty());
+        assert_eq!(p.project_view, ProjectViewPrefs::default());
+    }
+
+    #[test]
+    fn old_prefs_without_project_view() {
+        let dir = tmp("old-prefs");
+        fs::create_dir_all(dir.join(".wiimaker")).unwrap();
+        fs::write(editor_prefs_path(&dir), "[scene_view]\nzoom = 2.0\n").unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert!((p.scene_view.zoom - 2.0).abs() < 1e-4);
+        assert!(p.project_view.collapsed.is_empty());
     }
 }
