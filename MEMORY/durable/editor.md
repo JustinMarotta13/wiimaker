@@ -37,6 +37,8 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Drop PNG/WAV/TXT anywhere in the editor window → copy into `assets/` + cook refresh (TXT skips cook).
 - Sprite Editor: Project file (PNG / `.sprites.json`) → Inspector **Edit Sprites…**, or double-click / context menu; writes `.sprites.json` then refresh catalog.
 - Project panel is a **file explorer** (`game.toml`, `assets/`, `scenes/`). Click → `selected_file` (clears entity selection); Inspector shows path/type/size + type-specific actions.
+- Project Search (session-only `project_filter`, Hierarchy chrome: `search_icon` + hint "Search") filters filename / relative path case-insensitively. Matches auto-reveal ancestor folders (collapsed prefs unchanged while filtering).
+- Project folders: geometric `foldout_button` (not Unicode ▶/▼) + `#` marker. Triangle click toggles collapse without selecting; row click selects for Inspector; double-click folder toggles. Collapsed relative paths persist in `.wiimaker/prefs.toml` `project_view.collapsed` (empty = all expanded). CLI: `editor set-project-view` / `editor prefs`.
 - Project rows: full-width painted hover/select (not `selectable_label`); folders use accent + strong text — never `TEXT_MUTED` for primary labels. ASCII type markers only (Unicode glyphs fail in this shell).
 - **Icons must be painter geometry** (`theme::{cube_icon, foldout_button, enable_checkbox, icon_menu_button, play_control, search_icon, tool_toggle}`). egui default fonts on this Linux box do not rasterize `▾ ▸ ⋮ ⋯ ▶` (or a hollow `rect_stroke` cube, which reads as tofu). Do not use Unicode/emoji as icons. Geometric stand-ins only — never Unity cube/logo artwork.
 - Project row `new_child` text: always `set_clip_rect(row_rect.intersect(ui.clip_rect()))`. Replacing the ScrollArea clip lets scrolled-off labels paint over the Project header/meta chips.
@@ -57,13 +59,12 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Inspector sprite field is a catalog ComboBox (cells + whole textures), not PNG stems only.
 - Inspector focus is entity XOR project file (`selected` / `selected_file`). Empty selection still shows the open scene's Environment / Clear Color card (not a GameObject).
 - Scene clear color lives on `Scene.clear_color` (`[u8; 4]`, default `DEFAULT_CLEAR_COLOR` `[12,18,32,255]`). Editor Environment picker + CLI `scene set-clear` both call `set_scene_clear`. WSCN bake writes the 4 bytes after magic.
-- Scene/Game chrome prefs: `<game>/.wiimaker/prefs.toml` (`EditorPrefs` in `wiimaker-scene`). Not `game.toml`. Editor toolbar + `scene set-game-view` / `editor set-scene-view` share `load_editor_prefs` / `save_editor_prefs`. Scene zoom 1 = fill well; Game locked aspect uses `fitted_blit_rect` letterbox/pillarbox + Scale slider.
+- Scene/Game/Project chrome prefs: `<game>/.wiimaker/prefs.toml` (`EditorPrefs` in `wiimaker-scene`). Not `game.toml`. Editor toolbar + `scene set-game-view` / `editor set-scene-view` / `editor set-project-view` share `load_editor_prefs` / `save_editor_prefs`. Scene zoom 1 = fill well; Game locked aspect uses `fitted_blit_rect` letterbox/pillarbox + Scale slider. Project `collapsed` is relative folder paths; Search filter is session-only.
 - Selection is `Vec<String>` (last = primary for Inspector); Cmd-click toggles.
 
 ## Open follow-ups
 
 - Optional: full rotation in parent/world compose (currently translation×scale).
-- Optional: collapsible folders / filter in Project explorer.
 - Optional: shorten window title when `game.toml` `title` already includes `wiimaker ·` (today: `wiimaker · wiimaker · hello-orb`).
 
 ## computer-control MCP (2026-07-24)

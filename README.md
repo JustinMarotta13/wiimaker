@@ -67,6 +67,7 @@ wiimaker scene build-add my-game --scene main
 wiimaker scene build-list my-game --json
 wiimaker scene set-game-view my-game --preset 640x480 --scale 1
 wiimaker editor set-scene-view my-game --zoom 1.25 --grid true --gizmos true
+wiimaker editor set-project-view my-game --collapse assets --collapse assets/fx
 wiimaker editor prefs my-game --json
 wiimaker editor play-status my-game --json   # in-editor Play backend (plugin vs WASD fallback)
 wiimaker asset import my-game ./beep.wav
@@ -102,7 +103,7 @@ wiimaker play-wii my-game      # build then Dolphin
 
 Scene / entity edits write `.scene.json` — the same files the egui editor saves.
 
-Editor Scene/Game chrome (zoom, grid, gizmos, Game aspect) lives in `<game>/.wiimaker/prefs.toml`, not `game.toml`. `wiimaker scene set-game-view` and `wiimaker editor set-scene-view` mutate that file; the editor toolbar writes the same store.
+Editor Scene/Game/Project chrome (zoom, grid, gizmos, Game aspect, Project collapsed folders) lives in `<game>/.wiimaker/prefs.toml`, not `game.toml`. `wiimaker scene set-game-view`, `wiimaker editor set-scene-view`, and `wiimaker editor set-project-view` mutate that file; the editor writes the same store. Project Search is session-only.
 
 Sprite sheets keep one PNG; cells live in `assets/<stem>.sprites.json` (Grid By Cell Count + normalized pivot). Scenes reference cell names like `hero_2`.
 

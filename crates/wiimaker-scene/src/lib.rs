@@ -52,9 +52,11 @@ pub use prefab::{
     resolve_prefab_asset, PrefabOverrides,
 };
 pub use prefs::{
-    apply_game_view, apply_scene_view, editor_prefs_path, fitted_blit_rect, infer_game_view_preset,
-    load_editor_prefs, save_editor_prefs, scene_blit_rect, set_game_view, set_scene_view,
-    EditorPrefs, GameViewAspect, GameViewPrefs, GameViewPreset, SceneViewPrefs, EDITOR_PREFS_REL,
+    apply_game_view, apply_project_view, apply_scene_view, editor_prefs_path, fitted_blit_rect,
+    folder_is_collapsed, infer_game_view_preset, load_editor_prefs, normalize_project_rel,
+    project_rel_hidden_by_collapse, save_editor_prefs, scene_blit_rect, set_game_view,
+    set_project_view, set_scene_view, toggle_project_collapsed, EditorPrefs, GameViewAspect,
+    GameViewPrefs, GameViewPreset, ProjectViewPrefs, SceneViewPrefs, EDITOR_PREFS_REL,
 };
 pub use project::{
     add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,

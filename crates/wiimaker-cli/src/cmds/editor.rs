@@ -3,7 +3,8 @@ use std::path::Path;
 use anyhow::Result;
 use wiimaker_play::{build_play_plugin, inspect_play_plugin};
 use wiimaker_scene::{
-    find_game_dir, load_editor_prefs, load_project, set_scene_view, EDITOR_PREFS_REL,
+    find_game_dir, load_editor_prefs, load_project, set_project_view, set_scene_view,
+    EDITOR_PREFS_REL,
 };
 
 use crate::args::EditorCmd;
@@ -93,6 +94,14 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                     prefs.game_view.height,
                     prefs.game_view.scale,
                 );
+                if prefs.project_view.collapsed.is_empty() {
+                    println!("project: collapsed=(all expanded)");
+                } else {
+                    println!(
+                        "project: collapsed={}",
+                        prefs.project_view.collapsed.join(",")
+                    );
+                }
             }
             Ok(())
         }
@@ -135,6 +144,52 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                 Ok(())
             } else {
                 emit_ok(json, "scene view prefs updated")
+            }
+        }
+        EditorCmd::SetProjectView {
+            game,
+            collapse,
+            expand,
+            clear_collapsed,
+        } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let mutate = clear_collapsed || !collapse.is_empty() || !expand.is_empty();
+            let prefs = if mutate {
+                set_project_view(&game_dir, &collapse, &expand, clear_collapsed)?
+            } else {
+                load_editor_prefs(&game_dir)?
+            };
+            let collapsed = &prefs.project_view.collapsed;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "message": if mutate {
+                            "project view prefs updated"
+                        } else {
+                            "project view prefs"
+                        },
+                        "path": game_dir.join(EDITOR_PREFS_REL).to_string_lossy(),
+                        "collapsed": collapsed,
+                        "prefs": prefs,
+                    })
+                );
+                Ok(())
+            } else if mutate {
+                emit_ok(json, "project view prefs updated")?;
+                if collapsed.is_empty() {
+                    println!("collapsed=(all expanded)");
+                } else {
+                    println!("collapsed={}", collapsed.join(","));
+                }
+                Ok(())
+            } else if collapsed.is_empty() {
+                println!("project: collapsed=(all expanded)");
+                Ok(())
+            } else {
+                println!("project: collapsed={}", collapsed.join(","));
+                Ok(())
             }
         }
     }

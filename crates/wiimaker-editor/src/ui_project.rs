@@ -1,142 +1,170 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, RichText, Sense};
+use wiimaker_scene::{
+    folder_is_collapsed, normalize_project_rel, project_rel_hidden_by_collapse,
+    toggle_project_collapsed,
+};
 
 use crate::app::{EditorApp, ProjectEntry};
 use crate::theme;
 
 impl EditorApp {
     pub(crate) fn ui_project_body(&mut self, ui: &mut egui::Ui) {
-                ui.horizontal(|ui| {
-                    theme::meta_chip(ui, "game", &self.project.name);
-                    ui.separator();
-                    theme::meta_chip(ui, "scene", &self.scene.name);
-                    ui.separator();
-                    theme::meta_chip(ui, "files", &self.project_entries.len().to_string());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("Refresh")
-                            .on_hover_text("Rescan assets / scenes")
-                            .clicked()
-                        {
-                            self.refresh_project_tree();
-                            self.refresh_scenes();
-                            if let Err(e) = self.reload_assets() {
-                                self.status = format!("refresh failed: {e}");
-                            } else {
-                                self.status = "project refreshed".into();
-                            }
-                        }
-                    });
-                });
-                theme::muted(ui, "Drop PNG, WAV, or TXT maze files anywhere to import");
-                // Prefab quick actions stay above the scroll list so Instantiate is always visible.
-                let prefabs: Vec<_> = self
-                    .project_entries
-                    .iter()
-                    .filter(|e| {
-                        !e.is_dir && e.rel.to_string_lossy().ends_with(".prefab.json")
-                    })
-                    .cloned()
-                    .collect();
-                if !prefabs.is_empty() {
-                    ui.add_space(2.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new("Prefabs")
-                                .size(11.0)
-                                .color(theme::TEXT_MUTED),
-                        );
-                        for p in &prefabs {
-                            let stem = p
-                                .rel
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("prefab")
-                                .trim_end_matches(".prefab.json");
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new(format!("Instantiate {stem}")).size(12.0),
-                                    )
-                                    .fill(theme::BG_SUNKEN),
-                                )
-                                .on_hover_text(format!("Spawn {} into the open scene", p.rel.display()))
-                                .clicked()
-                            {
-                                self.instantiate_prefab_rel(&p.rel);
-                            }
-                        }
-                    });
+        ui.horizontal(|ui| {
+            theme::meta_chip(ui, "game", &self.project.name);
+            ui.separator();
+            theme::meta_chip(ui, "scene", &self.scene.name);
+            ui.separator();
+            theme::meta_chip(ui, "files", &self.project_entries.len().to_string());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button("Refresh")
+                    .on_hover_text("Rescan assets / scenes")
+                    .clicked()
+                {
+                    self.refresh_project_tree();
+                    self.refresh_scenes();
+                    if let Err(e) = self.reload_assets() {
+                        self.status = format!("refresh failed: {e}");
+                    } else {
+                        self.status = "project refreshed".into();
+                    }
                 }
-                ui.add_space(4.0);
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            theme::search_icon(ui, 14.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.project_filter)
+                    .desired_width(ui.available_width())
+                    .hint_text("Search"),
+            );
+        });
+        theme::muted(ui, "Drop PNG, WAV, or TXT maze files anywhere to import");
+        // Prefab quick actions stay above the scroll list so Instantiate is always visible.
+        let prefabs: Vec<_> = self
+            .project_entries
+            .iter()
+            .filter(|e| !e.is_dir && e.rel.to_string_lossy().ends_with(".prefab.json"))
+            .cloned()
+            .collect();
+        if !prefabs.is_empty() {
+            ui.add_space(2.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Prefabs").size(11.0).color(theme::TEXT_MUTED));
+                for p in &prefabs {
+                    let stem = p
+                        .rel
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("prefab")
+                        .trim_end_matches(".prefab.json");
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(format!("Instantiate {stem}")).size(12.0),
+                            )
+                            .fill(theme::BG_SUNKEN),
+                        )
+                        .on_hover_text(format!("Spawn {} into the open scene", p.rel.display()))
+                        .clicked()
+                    {
+                        self.instantiate_prefab_rel(&p.rel);
+                    }
+                }
+            });
+        }
+        ui.add_space(4.0);
 
-                let list_h = (ui.available_height() - 36.0).max(48.0);
-                theme::card_frame().show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("project_tree")
-                        .auto_shrink([false, false])
-                        .max_height(list_h)
-                        .show(ui, |ui| {
-                            let entries = self.project_entries.clone();
-                            let scene_path = self.scene_path.clone();
-                            let game_dir = self.game_dir.clone();
-                            if entries.is_empty() {
-                                theme::muted(ui, "No project files found");
+        let list_h = (ui.available_height() - 36.0).max(48.0);
+        theme::card_frame().show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("project_tree")
+                .auto_shrink([false, false])
+                .max_height(list_h)
+                .show(ui, |ui| {
+                    let entries = self.project_entries.clone();
+                    let scene_path = self.scene_path.clone();
+                    let game_dir = self.game_dir.clone();
+                    let collapsed = self.prefs.project_view.collapsed.clone();
+                    let filter = self.project_filter.clone();
+                    let filtering = !filter.trim().is_empty();
+                    let visible = visible_project_entries(&entries, &collapsed, &filter);
+                    if entries.is_empty() {
+                        theme::muted(ui, "No project files found");
+                    } else if visible.is_empty() {
+                        theme::muted(ui, "No matching files");
+                    }
+                    for entry in visible {
+                        let selected = self.selected_file.as_ref() == Some(&entry.rel);
+                        let is_open_scene =
+                            !entry.is_dir && game_dir.join(&entry.rel) == scene_path;
+                        let has_children = entry.is_dir && dir_has_children(&entries, &entry.rel);
+                        let expanded = filtering
+                            || !folder_is_collapsed(&collapsed, &project_rel_key(&entry.rel));
+                        let (resp, fold_clicked) =
+                            project_row(ui, entry, selected, is_open_scene, has_children, expanded);
+                        if fold_clicked {
+                            if !filtering {
+                                self.toggle_project_folder(&entry.rel);
                             }
-                            for entry in &entries {
-                                let selected = self.selected_file.as_ref() == Some(&entry.rel);
-                                let is_open_scene =
-                                    !entry.is_dir && game_dir.join(&entry.rel) == scene_path;
-                                let resp = project_row(ui, entry, selected, is_open_scene);
-                                if resp.clicked() {
-                                    self.select_file(Some(entry.rel.clone()));
-                                }
-                                if resp.double_clicked() && !entry.is_dir {
-                                    self.open_project_entry(entry);
-                                }
-                                resp.context_menu(|ui| {
-                                    self.project_entry_context_menu(ui, entry);
-                                });
+                        } else if resp.double_clicked() {
+                            if entry.is_dir && has_children && !filtering {
+                                self.toggle_project_folder(&entry.rel);
+                            } else if !entry.is_dir {
+                                self.open_project_entry(entry);
                             }
+                            if resp.clicked() {
+                                self.select_file(Some(entry.rel.clone()));
+                            }
+                        } else if resp.clicked() {
+                            self.select_file(Some(entry.rel.clone()));
+                        }
+                        resp.context_menu(|ui| {
+                            self.project_entry_context_menu(ui, entry, has_children);
                         });
+                    }
                 });
+        });
 
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.new_scene_name)
-                            .desired_width(120.0)
-                            .hint_text("new scene name"),
-                    );
-                    if ui
-                        .add(egui::Button::new(
-                            RichText::new("New scene").color(theme::TEXT),
-                        ))
-                        .clicked()
-                    {
-                        self.create_new_scene();
-                        self.refresh_project_tree();
-                    }
-                    if ui
-                        .add(egui::Button::new(
-                            RichText::new("Set default").color(theme::TEXT),
-                        ))
-                        .on_hover_text("Persist current scene as game.toml default")
-                        .clicked()
-                    {
-                        self.set_as_default_scene();
-                    }
-                    if ui
-                        .add(egui::Button::new(
-                            RichText::new("Build Settings…").color(theme::TEXT),
-                        ))
-                        .on_hover_text("Scenes in Build list on game.toml")
-                        .clicked()
-                    {
-                        self.show_build_settings = true;
-                    }
-                });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.new_scene_name)
+                    .desired_width(120.0)
+                    .hint_text("new scene name"),
+            );
+            if ui
+                .add(egui::Button::new(
+                    RichText::new("New scene").color(theme::TEXT),
+                ))
+                .clicked()
+            {
+                self.create_new_scene();
+                self.refresh_project_tree();
+            }
+            if ui
+                .add(egui::Button::new(
+                    RichText::new("Set default").color(theme::TEXT),
+                ))
+                .on_hover_text("Persist current scene as game.toml default")
+                .clicked()
+            {
+                self.set_as_default_scene();
+            }
+            if ui
+                .add(egui::Button::new(
+                    RichText::new("Build Settings…").color(theme::TEXT),
+                ))
+                .on_hover_text("Scenes in Build list on game.toml")
+                .clicked()
+            {
+                self.show_build_settings = true;
+            }
+        });
     }
 
     fn open_project_entry(&mut self, entry: &ProjectEntry) {
@@ -176,7 +204,17 @@ impl EditorApp {
         }
     }
 
-    fn project_entry_context_menu(&mut self, ui: &mut egui::Ui, entry: &ProjectEntry) {
+    pub(crate) fn toggle_project_folder(&mut self, rel: &Path) {
+        toggle_project_collapsed(&mut self.prefs.project_view, &rel.to_string_lossy());
+        self.persist_prefs();
+    }
+
+    fn project_entry_context_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        entry: &ProjectEntry,
+        has_children: bool,
+    ) {
         if entry.rel.extension().and_then(|e| e.to_str()) == Some("png") {
             if ui.button("Edit Sprites…").clicked() {
                 if let Some(stem) = entry.rel.file_stem().and_then(|s| s.to_str()) {
@@ -214,6 +252,17 @@ impl EditorApp {
         if ui.button("Reveal in Inspector").clicked() {
             self.select_file(Some(entry.rel.clone()));
             ui.close_menu();
+        }
+        if entry.is_dir && has_children {
+            let collapsed = folder_is_collapsed(
+                &self.prefs.project_view.collapsed,
+                &project_rel_key(&entry.rel),
+            );
+            let label = if collapsed { "Expand" } else { "Collapse" };
+            if ui.button(label).clicked() {
+                self.toggle_project_folder(&entry.rel);
+                ui.close_menu();
+            }
         }
     }
 }
@@ -259,7 +308,10 @@ impl EditorApp {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     if scenes.is_empty() {
-                        theme::muted(ui, "Empty list — filesystem scene list is used for authoring");
+                        theme::muted(
+                            ui,
+                            "Empty list — filesystem scene list is used for authoring",
+                        );
                     }
                     for rel in &scenes {
                         let is_default = *rel == default;
@@ -371,12 +423,72 @@ impl EditorApp {
     }
 }
 
+fn project_rel_key(rel: &Path) -> String {
+    normalize_project_rel(&rel.to_string_lossy())
+}
+
+fn project_entry_matches(entry: &ProjectEntry, needle: &str) -> bool {
+    let rel = project_rel_key(&entry.rel).to_lowercase();
+    if rel.contains(needle) {
+        return true;
+    }
+    entry
+        .rel
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase().contains(needle))
+        .unwrap_or(false)
+}
+
+fn visible_project_entries<'a>(
+    entries: &'a [ProjectEntry],
+    collapsed: &[String],
+    filter: &str,
+) -> Vec<&'a ProjectEntry> {
+    let needle = filter.trim().to_lowercase();
+    if needle.is_empty() {
+        return entries
+            .iter()
+            .filter(|e| !project_rel_hidden_by_collapse(&project_rel_key(&e.rel), collapsed))
+            .collect();
+    }
+    let mut show = HashSet::new();
+    for e in entries {
+        if !project_entry_matches(e, &needle) {
+            continue;
+        }
+        let key = project_rel_key(&e.rel);
+        show.insert(key.clone());
+        let mut path = key.as_str();
+        while let Some((parent, _)) = path.rsplit_once('/') {
+            show.insert(parent.to_string());
+            path = parent;
+        }
+    }
+    entries
+        .iter()
+        .filter(|e| show.contains(&project_rel_key(&e.rel)))
+        .collect()
+}
+
+fn dir_has_children(entries: &[ProjectEntry], rel: &Path) -> bool {
+    let prefix = format!("{}/", project_rel_key(rel));
+    if prefix == "/" {
+        return false;
+    }
+    entries
+        .iter()
+        .any(|e| project_rel_key(&e.rel).starts_with(&prefix))
+}
+
 fn project_row(
     ui: &mut egui::Ui,
     entry: &ProjectEntry,
     selected: bool,
     is_open_scene: bool,
-) -> egui::Response {
+    has_children: bool,
+    expanded: bool,
+) -> (egui::Response, bool) {
     let indent = 6.0 + entry.depth as f32 * 16.0;
     let (marker, name_color, kind) = entry_visuals(entry, is_open_scene);
     let file_name = entry
@@ -390,7 +502,10 @@ fn project_row(
         file_name.to_string()
     };
     let name_text = if selected {
-        RichText::new(name).strong().size(12.5).color(theme::SELECT_STROKE)
+        RichText::new(name)
+            .strong()
+            .size(12.5)
+            .color(theme::SELECT_STROKE)
     } else if entry.is_dir {
         RichText::new(name).strong().size(12.5).color(name_color)
     } else {
@@ -431,7 +546,7 @@ fn project_row(
         egui::pos2(text_right.max(rect.left() + 40.0), rect.bottom()),
     );
     let clip = text_rect.intersect(ui.clip_rect());
-    if clip.height() > 0.5 {
+    let fold_clicked = if clip.height() > 0.5 {
         let mut text_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(text_rect)
@@ -439,9 +554,20 @@ fn project_row(
         );
         text_ui.set_clip_rect(clip);
         text_ui.add_space(indent);
+        let mut fold_clicked = false;
+        if entry.is_dir && has_children {
+            if theme::foldout_button(&mut text_ui, expanded).clicked() {
+                fold_clicked = true;
+            }
+        } else {
+            text_ui.add_space(14.0);
+        }
         text_ui.label(RichText::new(marker).size(12.0).color(name_color));
         text_ui.add(egui::Label::new(name_text).truncate());
-    }
+        fold_clicked
+    } else {
+        false
+    };
 
     ui.painter().galley(
         egui::pos2(
@@ -460,10 +586,16 @@ fn project_row(
         );
     }
 
-    resp.on_hover_text(entry.rel.to_string_lossy())
+    (
+        resp.on_hover_text(entry.rel.to_string_lossy()),
+        fold_clicked,
+    )
 }
 
-fn entry_visuals(entry: &ProjectEntry, is_open_scene: bool) -> (&'static str, Color32, &'static str) {
+fn entry_visuals(
+    entry: &ProjectEntry,
+    is_open_scene: bool,
+) -> (&'static str, Color32, &'static str) {
     if entry.is_dir {
         return ("#", theme::ACCENT, "Folder");
     }

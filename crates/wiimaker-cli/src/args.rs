@@ -167,6 +167,19 @@ pub enum EditorCmd {
         #[arg(long, action = clap::ArgAction::Set)]
         mode_2d: Option<bool>,
     },
+    /// Project explorer collapsed folders (writes `.wiimaker/prefs.toml`)
+    SetProjectView {
+        game: String,
+        /// Collapse a relative folder (`assets`, `assets/fx`). Repeatable.
+        #[arg(long)]
+        collapse: Vec<String>,
+        /// Expand a previously collapsed folder. Repeatable.
+        #[arg(long)]
+        expand: Vec<String>,
+        /// Clear the collapsed list (all expanded). Applied before `--collapse`.
+        #[arg(long)]
+        clear_collapsed: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

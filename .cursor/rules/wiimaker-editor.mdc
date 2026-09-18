@@ -21,7 +21,7 @@ Project: file explorer (assets / scenes / game.toml)
 - Hierarchy: tree / create / rename / delete / select / drag-drop reparent
 - Inspector: entity (Local Transform + parent + components) **or** selected project file (meta + actions)
 - Viewport: live `render_world` blit; pick/drag uses world transforms
-- Project: browse game files; PNG → Edit Sprites / assign; `.scene.json` → open / set default
+- Project: browse game files (Search + collapsible folders); PNG → Edit Sprites / assign; `.scene.json` → open / set default
 
 ## Mutation rule
 
