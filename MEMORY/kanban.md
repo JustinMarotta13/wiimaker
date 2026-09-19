@@ -16,6 +16,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, **Move axis handles** (red X / green Y), Snap + nudge |
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
+| Console | editor Console: Search (session-only, Hierarchy chrome) + Info/Warn/Error toggles · Clear · Doctor |
 | Prefab | `.prefab.json` · instance `prefab` link · Save as Prefab / Instantiate / Apply (push to asset) / Revert / Unpack Completely · orange-bold Inspector overrides |
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
@@ -28,7 +29,7 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-18):** Console Search / filter (Unity Console chrome).
+**Recommended next morning (2026-09-19):** Wii GX text — host `DrawText` exists; C player still `KIND_NONE`.
 
 ---
 
@@ -94,6 +95,8 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Project explorer collapsible folders / filter** (2026-09-18) — Project Search (Hierarchy chrome: search icon + hint "Search"; session-only `project_filter`). Folders use geometric `foldout_button` + `#`; triangle toggles collapse without selecting; row click selects for Inspector; double-click folder toggles. Collapsed relative paths in `.wiimaker/prefs.toml` `project_view.collapsed` (empty = all expanded). Filter auto-reveals ancestors of matches. CLI: `editor set-project-view --collapse/--expand/--clear-collapsed` · `editor prefs --json` includes `project_view`. Host-first.
 
+- **Console Search / filter** (2026-09-19) — Unity Console chrome: search icon + hint "Search" (session-only `console_filter`, like Hierarchy/Project). Case-insensitive match on line text **or** level tag (`info`/`warn`/`error`). Session-only Info/Warn/Error toggles. Count is `N messages` or `k / N messages` while filtering. Clear + Doctor stay. No CLI / prefs (session-only). Tests: `console_line_matches` / count label in `ui_console.rs`. Host-first.
+
 ### CLI commands (exact names)
 
 Global: `--json`
@@ -133,6 +136,7 @@ Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · G
 Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale
 Bottom tabs: Project · Console
 Project: Search (filename / relative path) · collapsible folders (foldout + `#`) · Refresh · New scene · Set default · Build Settings…
+Console: Search (text + info/warn/error tags) · Info / Warn / Error toggles · Clear · Doctor · count `N messages` / `k / N messages`
 Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
@@ -140,5 +144,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Ship Console Search / filter.** Unity Console chrome (search icon + hint "Search", session-only like Hierarchy); Later is otherwise Wii-backend.
+**Ship Wii GX text.** Host `DrawText` + bitmap HUD already exist; C player still skips (`KIND_NONE`). Later also has Wii audio / Wiimote and Wii GX tilemaps.
 
