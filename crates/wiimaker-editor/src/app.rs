@@ -87,6 +87,17 @@ pub(crate) enum ConsoleLevel {
     Error,
 }
 
+impl ConsoleLevel {
+    /// Tag shown in the Console list and matched by Search (`info` / `warn` / `error`).
+    pub(crate) fn as_tag(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ConsoleLine {
     pub(crate) level: ConsoleLevel,
@@ -113,6 +124,12 @@ pub(crate) struct EditorApp {
     pub(crate) new_entity_name: String,
     pub(crate) hierarchy_filter: String,
     pub(crate) project_filter: String,
+    /// Console Search text (session-only, like Hierarchy / Project).
+    pub(crate) console_filter: String,
+    /// Session-only Console level toggles (Unity I/W/E). All on by default.
+    pub(crate) console_show_info: bool,
+    pub(crate) console_show_warn: bool,
+    pub(crate) console_show_error: bool,
     pub(crate) asset_names: Vec<String>,
     /// Cached relative paths under the game dir for the Project explorer.
     pub(crate) project_entries: Vec<ProjectEntry>,
@@ -200,6 +217,10 @@ impl EditorApp {
             new_entity_name: "NewEntity".into(),
             hierarchy_filter: String::new(),
             project_filter: String::new(),
+            console_filter: String::new(),
+            console_show_info: true,
+            console_show_warn: true,
+            console_show_error: true,
             asset_names: Vec::new(),
             project_entries: Vec::new(),
             catalog: SpriteCatalog::empty(),
