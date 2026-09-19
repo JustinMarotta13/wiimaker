@@ -48,17 +48,16 @@ pub(crate) fn console_count_label(visible: usize, total: usize, filtering: bool)
     }
 }
 
-fn console_is_filtering(
-    needle: &str,
-    show_info: bool,
-    show_warn: bool,
-    show_error: bool,
-) -> bool {
+fn console_is_filtering(needle: &str, show_info: bool, show_warn: bool, show_error: bool) -> bool {
     !needle.trim().is_empty() || !show_info || !show_warn || !show_error
 }
 
 fn level_toggle(ui: &mut egui::Ui, on: &mut bool, tag: &str, color: egui::Color32) {
-    let fill = if *on { theme::BG_RAISED } else { theme::BG_SUNKEN };
+    let fill = if *on {
+        theme::BG_RAISED
+    } else {
+        theme::BG_SUNKEN
+    };
     let text_color = if *on { color } else { theme::TEXT_DIM };
     let btn = ui.add(
         egui::Button::new(
@@ -190,11 +189,7 @@ mod tests {
 
     #[test]
     fn empty_filter_matches_all_text() {
-        assert!(console_line_matches(
-            ConsoleLevel::Info,
-            "doctor: ok",
-            ""
-        ));
+        assert!(console_line_matches(ConsoleLevel::Info, "doctor: ok", ""));
         assert!(console_line_matches(
             ConsoleLevel::Error,
             "missing clip",
@@ -223,18 +218,10 @@ mod tests {
 
     #[test]
     fn level_tag_match_is_case_insensitive() {
-        assert!(console_line_matches(
-            ConsoleLevel::Error,
-            "boom",
-            "error"
-        ));
+        assert!(console_line_matches(ConsoleLevel::Error, "boom", "error"));
         assert!(console_line_matches(ConsoleLevel::Warn, "slow", "WARN"));
         assert!(console_line_matches(ConsoleLevel::Info, "hi", "InFo"));
-        assert!(!console_line_matches(
-            ConsoleLevel::Info,
-            "hi",
-            "error"
-        ));
+        assert!(!console_line_matches(ConsoleLevel::Info, "hi", "error"));
     }
 
     #[test]
