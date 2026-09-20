@@ -337,7 +337,7 @@ mod tests {
 
     fn skip_to_kind(bytes: &[u8]) -> usize {
         assert_eq!(&bytes[0..8], b"WSCN0003");
-        let mut i = 8 + 4 + 4;
+        let i = 8 + 4 + 4;
         let nlen = u16::from_le_bytes([bytes[i], bytes[i + 1]]) as usize;
         i + 2 + nlen + 6 * 4
     }

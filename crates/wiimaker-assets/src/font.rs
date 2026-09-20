@@ -231,7 +231,7 @@ pub fn font8x8_c_header() -> String {
         let ch = FIRST_CHAR + i as u8;
         let hex: Vec<String> = glyph.iter().map(|b| format!("0x{b:02X}")).collect();
         s.push_str(&format!(
-            "    {{ {}, }}, /* {} */\n",
+            "    {{ {} }}, /* {} */\n",
             hex.join(", "),
             glyph_c_comment(ch)
         ));
