@@ -6,6 +6,10 @@
 //! Host-first Sorting Layers are **not** packed: WSCN0003 still stores raw `z`
 //! (order-in-layer). The C player sorts by `z` only. Do not bump the magic for
 //! this feature.
+//!
+//! `KIND_TEXT = 4` is packed under the same magic (sprite / disc / tilemap still
+//! win when those components are enabled). Tilemaps remain length-prefixed and
+//! skipped by the C player.
 
 use std::fs::File;
 use std::io::Write;
@@ -24,6 +28,11 @@ pub const KIND_NONE: u8 = 0;
 pub const KIND_SPRITE: u8 = 1;
 pub const KIND_DISC: u8 = 2;
 pub const KIND_TILEMAP: u8 = 3;
+/// HUD bitmap string (same 8×8 bits as `wiimaker-assets` font.rs). Magic stays WSCN0003.
+pub const KIND_TEXT: u8 = 4;
+
+/// Reasonable UTF-8 byte cap for Wii C `Entity.text` (loader still skips a longer bake).
+pub const WSCN_TEXT_MAX_BYTES: usize = 255;
 
 /// Bake a scene against a cooked pack into little-endian `scene.wscn` bytes.
 pub fn bake_scene_wscn(scene: &Scene, pack: &WPack) -> Result<Vec<u8>> {
@@ -63,8 +72,9 @@ pub fn bake_scene_wscn_with_catalog(
             &ent.components.sprite,
             &ent.components.disc,
             &ent.components.tilemap,
+            &ent.components.text,
         ) {
-            (Some(sp), _, _) if sp.enabled => {
+            (Some(sp), _, _, _) if sp.enabled => {
                 if ent.components.disc.as_ref().is_some_and(|d| d.enabled) {
                     bail!(
                         "entity '{}': Wii bake supports Sprite or Disc, not both",
@@ -97,18 +107,21 @@ pub fn bake_scene_wscn_with_catalog(
                 buf.write_all(&sp.color)?;
                 buf.write_f32::<LittleEndian>(sp.z)?;
             }
-            (_, Some(d), _) if d.enabled => {
+            (_, Some(d), _, _) if d.enabled => {
                 buf.write_u8(KIND_DISC)?;
                 buf.write_f32::<LittleEndian>(d.radius)?;
                 buf.write_all(&d.color)?;
                 buf.write_f32::<LittleEndian>(d.z)?;
             }
-            (_, _, Some(tm)) if tm.enabled => {
+            (_, _, Some(tm), _) if tm.enabled => {
                 buf.write_u8(KIND_TILEMAP)?;
                 write_tilemap_payload(&mut buf, tm)?;
             }
-            // Text / Animation / AudioSource / GridMover / Camera-only: host-first.
-            // WSCN0003 has no glyph kind; C player skips KIND_NONE.
+            (_, _, _, Some(t)) if t.enabled => {
+                buf.write_u8(KIND_TEXT)?;
+                write_text_payload(&mut buf, t)?;
+            }
+            // Animation / AudioSource / GridMover / Camera-only: host-first.
             _ => {
                 buf.write_u8(KIND_NONE)?;
             }
@@ -150,6 +163,25 @@ pub fn write_scene_wscn_with_catalog(
     Ok(())
 }
 
+/// KIND_TEXT payload (little-endian, after the kind byte):
+/// - `u16` UTF-8 byte length + that many bytes (ASCII is enough; truncated to
+///   [`WSCN_TEXT_MAX_BYTES`])
+/// - `f32` size (glyph cell height in world px; host `Text.size`)
+/// - `u8` align (`0` Left, `1` Center, `2` Right — [`crate::scene::SceneTextAlign`])
+/// - `u8[4]` color RGBA
+/// - `f32` z (order-in-layer)
+fn write_text_payload(buf: &mut Vec<u8>, t: &crate::scene::SceneText) -> Result<()> {
+    let bytes = t.text.as_bytes();
+    let n = bytes.len().min(WSCN_TEXT_MAX_BYTES);
+    buf.write_u16::<LittleEndian>(n as u16)?;
+    buf.write_all(&bytes[..n])?;
+    buf.write_f32::<LittleEndian>(t.size)?;
+    buf.write_u8(t.align.to_wscn())?;
+    buf.write_all(&t.color)?;
+    buf.write_f32::<LittleEndian>(t.z)?;
+    Ok(())
+}
+
 fn write_tilemap_payload(buf: &mut Vec<u8>, tm: &crate::scene::SceneTilemap) -> Result<()> {
     let n = (tm.width as usize).saturating_mul(tm.height as usize);
     let solid_bytes = (n + 7) / 8;
@@ -181,8 +213,8 @@ fn write_tilemap_payload(buf: &mut Vec<u8>, tm: &crate::scene::SceneTilemap) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mutate::{add_entity, MutateOpts};
-    use crate::scene::Scene;
+    use crate::mutate::{add_component_sprite, add_entity, MutateOpts};
+    use crate::scene::{Scene, SceneTextAlign};
     use crate::tilemap::{add_component_tilemap, tilemap_stamp_ascii};
 
     #[test]
@@ -301,5 +333,151 @@ mod tests {
         let p = sprite_pivot_from_wscn(&bytes);
         assert!((p[0] - 0.0).abs() < 1e-4 && (p[1] - 1.0).abs() < 1e-4);
         assert_eq!(&bytes[0..8], b"WSCN0003");
+    }
+
+    fn skip_to_kind(bytes: &[u8]) -> usize {
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let i = 8 + 4 + 4;
+        let nlen = u16::from_le_bytes([bytes[i], bytes[i + 1]]) as usize;
+        i + 2 + nlen + 6 * 4
+    }
+
+    #[test]
+    fn bake_text_kind_and_payload() {
+        use crate::mutate::add_component_text;
+
+        let mut scene = Scene::new("hud");
+        add_entity(
+            &mut scene,
+            "Score",
+            &MutateOpts {
+                x: Some(40.0),
+                y: Some(12.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_text(
+            &mut scene,
+            "Score",
+            "Hi",
+            16.0,
+            [255, 32, 64, 200],
+            SceneTextAlign::Center,
+        )
+        .unwrap();
+        scene.entities[0].components.text.as_mut().unwrap().z = 3.5;
+
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let mut i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_TEXT);
+        i += 1;
+        let slen = u16::from_le_bytes(bytes[i..i + 2].try_into().unwrap()) as usize;
+        i += 2;
+        assert_eq!(slen, 2);
+        assert_eq!(&bytes[i..i + 2], b"Hi");
+        i += 2;
+        let size = f32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
+        i += 4;
+        assert!((size - 16.0).abs() < 1e-4);
+        assert_eq!(bytes[i], 1); // Center
+        i += 1;
+        assert_eq!(&bytes[i..i + 4], &[255, 32, 64, 200]);
+        i += 4;
+        let z = f32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
+        assert!((z - 3.5).abs() < 1e-4);
+        assert_eq!(i + 4, bytes.len());
+    }
+
+    #[test]
+    fn bake_sprite_wins_over_text() {
+        use crate::mutate::add_component_text;
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Hero",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_sprite(&mut scene, "Hero", "sheet", [16.0, 16.0]).unwrap();
+        add_component_text(
+            &mut scene,
+            "Hero",
+            "nope",
+            8.0,
+            [255, 255, 255, 255],
+            SceneTextAlign::Left,
+        )
+        .unwrap();
+        let bytes = bake_scene_wscn(&scene, &dummy_pack("sheet")).unwrap();
+        assert_eq!(bytes[skip_to_kind(&bytes)], KIND_SPRITE);
+    }
+
+    #[test]
+    fn bake_disc_wins_over_text() {
+        use crate::mutate::{add_component_disc, add_component_text};
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Orb",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_disc(&mut scene, "Orb", 10.0, [255, 0, 0, 255]).unwrap();
+        add_component_text(
+            &mut scene,
+            "Orb",
+            "nope",
+            8.0,
+            [255, 255, 255, 255],
+            SceneTextAlign::Left,
+        )
+        .unwrap();
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        assert_eq!(bytes[skip_to_kind(&bytes)], KIND_DISC);
+    }
+
+    #[test]
+    fn bake_text_preferred_over_none_with_camera() {
+        use crate::mutate::{add_component_camera, add_component_text};
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Hud",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_camera(&mut scene, "Hud", true).unwrap();
+        add_component_text(
+            &mut scene,
+            "Hud",
+            "GO",
+            8.0,
+            [255, 255, 255, 255],
+            SceneTextAlign::Right,
+        )
+        .unwrap();
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        let i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_TEXT);
+        let slen = u16::from_le_bytes(bytes[i + 1..i + 3].try_into().unwrap()) as usize;
+        assert_eq!(&bytes[i + 3..i + 3 + slen], b"GO");
+        assert_eq!(bytes[i + 3 + slen + 4], 2); // Right after size f32
     }
 }

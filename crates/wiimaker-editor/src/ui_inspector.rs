@@ -1164,7 +1164,7 @@ impl EditorApp {
                             prefab_ov.contains("Text.z"),
                         );
                         ui.label(
-                            RichText::new("Host bitmap HUD · Wii GX skip")
+                            RichText::new("Host + Wii GX 8×8 bitmap HUD")
                                 .size(11.0)
                                 .color(theme::TEXT_DIM),
                         );

@@ -825,7 +825,7 @@ fn is_default_text_align(v: &SceneTextAlign) -> bool {
     *v == SceneTextAlign::Left
 }
 
-/// Host-first HUD string (Unity Text analogue). Not in WSCN.
+/// Host HUD string (Unity Text analogue). WSCN0003 `KIND_TEXT`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SceneText {
     #[serde(default)]
@@ -920,6 +920,15 @@ impl SceneTextAlign {
 
     pub fn parse(s: &str) -> Option<Self> {
         wiimaker_core::TextAlign::parse(s).map(Self::from_runtime)
+    }
+
+    /// WSCN `KIND_TEXT` align byte: 0 Left, 1 Center, 2 Right.
+    pub fn to_wscn(self) -> u8 {
+        match self {
+            SceneTextAlign::Left => 0,
+            SceneTextAlign::Center => 1,
+            SceneTextAlign::Right => 2,
+        }
     }
 }
 

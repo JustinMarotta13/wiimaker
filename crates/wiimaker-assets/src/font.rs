@@ -210,6 +210,52 @@ pub fn write_hud_font_png(path: impl AsRef<Path>) -> Result<()> {
         .with_context(|| format!("write {}", path.as_ref().display()))
 }
 
+/// C header for `runtime/wii` GX glyphs. Same bits as [`GLYPHS`] / host atlas.
+pub fn font8x8_c_header() -> String {
+    let mut s = String::new();
+    s.push_str("/*\n");
+    s.push_str(" * Generated from crates/wiimaker-assets/src/font.rs (font8x8 / public domain).\n");
+    s.push_str(" * Do not invent a second font — regenerate from those bits.\n");
+    s.push_str(" */\n");
+    s.push_str("#ifndef WIIMAKER_FONT8X8_H\n");
+    s.push_str("#define WIIMAKER_FONT8X8_H\n\n");
+    s.push_str("#include <stdint.h>\n\n");
+    s.push_str("#define FONT8X8_CELL 8\n");
+    s.push_str("#define FONT8X8_FIRST 32\n");
+    s.push_str("#define FONT8X8_LAST 126\n");
+    s.push_str("#define FONT8X8_MISSING 63 /* '?' */\n");
+    s.push_str("#define FONT8X8_COUNT 95\n\n");
+    s.push_str("/* Row-major 8x8 bits; bit 0 is the leftmost pixel (font8x8 convention). */\n");
+    s.push_str("static const uint8_t FONT8X8_GLYPHS[FONT8X8_COUNT][8] = {\n");
+    for (i, glyph) in GLYPHS.iter().enumerate() {
+        let ch = FIRST_CHAR + i as u8;
+        let hex: Vec<String> = glyph.iter().map(|b| format!("0x{b:02X}")).collect();
+        s.push_str(&format!(
+            "    {{ {} }}, /* {} */\n",
+            hex.join(", "),
+            glyph_c_comment(ch)
+        ));
+    }
+    s.push_str("};\n\n");
+    s.push_str("#endif /* WIIMAKER_FONT8X8_H */\n");
+    s
+}
+
+fn glyph_c_comment(ch: u8) -> String {
+    let shown = match ch {
+        b'\\' => "\\\\".to_string(),
+        b'\'' => "\\'".to_string(),
+        _ => (ch as char).to_string(),
+    };
+    format!("{ch} '{shown}'")
+}
+
+/// Write `runtime/wii/include/font8x8.h` (or `path`) from [`GLYPHS`].
+pub fn write_font8x8_header(path: impl AsRef<Path>) -> Result<()> {
+    std::fs::write(path.as_ref(), font8x8_c_header())
+        .with_context(|| format!("write {}", path.as_ref().display()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +302,14 @@ mod tests {
         let gen = atlas_image();
         assert_eq!(file.dimensions(), gen.dimensions());
         assert_eq!(file.as_raw(), gen.as_raw());
+    }
+
+    #[test]
+    fn wii_c_header_matches_glyph_bits() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/wii/include/font8x8.h");
+        let on_disk = std::fs::read_to_string(&path).expect("font8x8.h");
+        assert_eq!(on_disk, font8x8_c_header());
+        assert!(on_disk.contains("0x0C, 0x1E, 0x33, 0x33, 0x3F, 0x33, 0x33, 0x00"));
     }
 }

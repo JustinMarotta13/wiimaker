@@ -1,7 +1,7 @@
 /*
  * Minimal GX helpers shared with the game via FFI.
- * Disc = untextured fan; Sprite = textured screen-space quad.
- * DrawText / HUD glyphs are host-first (wiimaker-host raster); GX skips them.
+ * Disc = untextured fan; Sprite = textured screen-space quad;
+ * Text = untextured colored quads from the built-in 8x8 font bits.
  */
 
 #include <gccore.h>
@@ -9,6 +9,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "font8x8.h"
 #include "wiimaker_abi.h"
 
 #define WIIMAKER_MAX_TEX 32
@@ -103,6 +104,132 @@ void wiimaker_gx_draw_sprite(uint32_t tex_id, float x, float y, float w, float h
     GX_Color1u32(rgba8);
     GX_TexCoord2f32(u0, v1);
     GX_End();
+}
+
+static unsigned char map_font_char(unsigned char ch) {
+    if (ch >= FONT8X8_FIRST && ch <= FONT8X8_LAST)
+        return ch;
+    return FONT8X8_MISSING;
+}
+
+/* Advance one printable unit (ASCII or one '?' for a UTF-8 sequence). Newline → '\n'. */
+static int next_text_unit(const char *s, uint16_t len, uint16_t *i, unsigned char *out) {
+    if (*i >= len)
+        return 0;
+    unsigned char c = (unsigned char)s[*i];
+    (*i)++;
+    if (c == '\n') {
+        *out = '\n';
+        return 1;
+    }
+    if (c == '\r') {
+        if (*i < len && (unsigned char)s[*i] == '\n')
+            (*i)++;
+        *out = '\n';
+        return 1;
+    }
+    if (c < 0x80u) {
+        *out = map_font_char(c);
+        return 1;
+    }
+    int extra = 0;
+    if ((c & 0xE0u) == 0xC0u)
+        extra = 1;
+    else if ((c & 0xF0u) == 0xE0u)
+        extra = 2;
+    else if ((c & 0xF8u) == 0xF0u)
+        extra = 3;
+    while (extra-- > 0 && *i < len && ((unsigned char)s[*i] & 0xC0u) == 0x80u)
+        (*i)++;
+    *out = FONT8X8_MISSING;
+    return 1;
+}
+
+static int count_line_cols(const char *s, uint16_t len, uint16_t start) {
+    int cols = 0;
+    uint16_t i = start;
+    unsigned char ch;
+    while (next_text_unit(s, len, &i, &ch)) {
+        if (ch == '\n')
+            break;
+        cols++;
+    }
+    return cols;
+}
+
+static float text_line_origin_x(float anchor_x, int cols, float glyph_w, uint8_t align) {
+    float w = (float)cols * glyph_w;
+    if (align == 1)
+        return anchor_x - w * 0.5f;
+    if (align == 2)
+        return anchor_x - w;
+    return anchor_x;
+}
+
+static void draw_glyph_quads(float x, float y, float cell, uint32_t rgba8, unsigned char ch) {
+    const uint8_t *g = FONT8X8_GLYPHS[map_font_char(ch) - FONT8X8_FIRST];
+    int n = 0;
+    for (int py = 0; py < FONT8X8_CELL; py++) {
+        uint8_t bits = g[py];
+        for (int px = 0; px < FONT8X8_CELL; px++) {
+            if ((bits >> px) & 1)
+                n++;
+        }
+    }
+    if (n == 0)
+        return;
+
+    GX_Begin(GX_QUADS, GX_VTXFMT0, (u16)(n * 4));
+    for (int py = 0; py < FONT8X8_CELL; py++) {
+        uint8_t bits = g[py];
+        for (int px = 0; px < FONT8X8_CELL; px++) {
+            if (((bits >> px) & 1) == 0)
+                continue;
+            float x0 = x + (float)px * cell;
+            float y0 = y + (float)py * cell;
+            float x1 = x0 + cell;
+            float y1 = y0 + cell;
+            GX_Position3f32(x0, y0, 0.0f);
+            GX_Color1u32(rgba8);
+            GX_Position3f32(x1, y0, 0.0f);
+            GX_Color1u32(rgba8);
+            GX_Position3f32(x1, y1, 0.0f);
+            GX_Color1u32(rgba8);
+            GX_Position3f32(x0, y1, 0.0f);
+            GX_Color1u32(rgba8);
+        }
+    }
+    GX_End();
+}
+
+void wiimaker_gx_draw_text(float x, float y, const char *text, uint16_t len, float size,
+                           uint8_t align, uint32_t rgba8) {
+    if (!text || size <= 0.5f)
+        return;
+    if (len == 0) {
+        size_t n = strlen(text);
+        if (n > 0xffffu)
+            n = 0xffffu;
+        len = (uint16_t)n;
+    }
+    float cell = size / (float)FONT8X8_CELL;
+    setup_untextured();
+
+    float cy = y;
+    uint16_t i = 0;
+    while (i < len) {
+        uint16_t line_start = i;
+        int cols = count_line_cols(text, len, line_start);
+        float cx = text_line_origin_x(x, cols, size, align);
+        unsigned char ch;
+        while (next_text_unit(text, len, &i, &ch)) {
+            if (ch == '\n')
+                break;
+            draw_glyph_quads(cx, cy, cell, rgba8, ch);
+            cx += size;
+        }
+        cy += size;
+    }
 }
 
 uint16_t wiimaker_tex_width(uint32_t tex_id) {

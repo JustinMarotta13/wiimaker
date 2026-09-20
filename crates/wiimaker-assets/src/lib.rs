@@ -20,8 +20,9 @@ mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
 pub use font::{
-    atlas_image, atlas_rgba8, glyph_bits, glyph_uv, map_char, write_hud_font_png, FIRST_CHAR,
-    FONT_ATLAS_H, FONT_ATLAS_W, FONT_CELL_PX, FONT_COLS, LAST_CHAR, MISSING_CHAR,
+    atlas_image, atlas_rgba8, font8x8_c_header, glyph_bits, glyph_uv, map_char,
+    write_font8x8_header, write_hud_font_png, FIRST_CHAR, FONT_ATLAS_H, FONT_ATLAS_W, FONT_CELL_PX,
+    FONT_COLS, LAST_CHAR, MISSING_CHAR,
 };
 pub use sprites::{
     grid_by_cell_count, set_sprite_pivot, slice_sheet, Pivot, PixelRect, ResolvedSprite,
