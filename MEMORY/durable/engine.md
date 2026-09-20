@@ -12,14 +12,14 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 - Objcopy embed: copy bins into `runtime/wii/build/` first so symbols are `_binary_assets_wpack_*` / `_binary_scene_wscn_*` (path-mangled names break the C externs).
 - Sprite sheets: sidecar `assets/<stem>.sprites.json`; cook still packs the whole PNG once. Catalog resolves cell name → sheet texture + UV (in **packed** PoT space) + pivot.
 - Core `Sprite` has `pivot` (default `0.5,0.5`) and `uv`; optional `lock_pivot` keeps a scene component override across animation frame swaps. Render/pick/outline must share the same pivot math.
-- WSCN magic is **`WSCN0003`**: sprite payload includes `u0,v0,u1,v1` + `pivot_x,pivot_y` (effective: SceneSprite override if set, else catalog); `KIND_TILEMAP=3` is length-prefixed (C skips; host hydrates JSON). Old `WSCN0002` still loads in C.
+- WSCN magic is **`WSCN0003`**: sprite payload includes `u0,v0,u1,v1` + `pivot_x,pivot_y` (effective: SceneSprite override if set, else catalog); `KIND_TILEMAP=3` is length-prefixed (C skips; host hydrates JSON); `KIND_TEXT=4` is `u16` UTF-8 len + bytes, `f32` size, `u8` align (0/1/2), RGBA, `f32` z. Old `WSCN0002` still loads in C.
 
 ## Decisions
 
 - `load_scene_into_world` (`wiimaker-scene`, thin `wiimaker-host` wrapper taking `&TextureAtlas`) resolves stem/path, `hydrate_into_with_catalogs` (clears World), returns clear color. Keep the atlas; do not recook on switch.
 - Active Camera: dests in `render_world` are world − (cam − 320,240). Camera at default spawn is identity. Camera offset is applied in `render_world` dests; `SetCamera` is reserved for a future backend that transforms at flush time (do not emit both).
 - Sorting layers: `game.toml` `sorting_layers = ["Background", "Default", "Foreground"]` (omitted → those defaults). Sprite/Disc/Tilemap/Text keep `z` as Order in Layer and optional `sorting_layer` name (empty/`Default` omitted on save). Runtime stores `sorting_layer: u16` index; unknown names hydrate to Default. `render_world` stable-sorts all drawable kinds by (layer index, then z). `load_scene_into_world` copies the project list onto `World` before hydrate. WSCN0003 unchanged (C still sorts by raw `z`).
-- HUD text: `DrawCmd::DrawText` + `World`/`Scene` `Text`. Host samples a **built-in** 8×8 ASCII atlas (`wiimaker-assets::atlas_rgba8`, fixture `fixtures/hud_font.png`) — not cooked into game `.wpack`. Missing glyphs → `?`. Wii GX skip; WSCN text-only entities bake `KIND_NONE`.
+- HUD text: `DrawCmd::DrawText` + `World`/`Scene` `Text`. Host samples a **built-in** 8×8 ASCII atlas (`wiimaker-assets::atlas_rgba8`, fixture `fixtures/hud_font.png`) — not cooked into game `.wpack`. Missing glyphs → `?`. Wii GX draws the same bits as untextured quads (`KIND_TEXT` under WSCN0003; `runtime/wii/include/font8x8.h` generated from `font.rs`). Sprite/Disc/Tilemap still win bake priority over Text.
 - In-editor Play and host `run` share `wiimaker-play`: `step_app` + `apply_pad_keys` + optional game `cdylib` ABI (`export_play_app!`, ABI 1). Template/hello-orb export a plugin; crates without `cdylib` keep WASD/`Player` fallback. `WIIMAKER_PLAY_FALLBACK=1` forces fallback. Plugin hydrates the current scene JSON (unsaved edits).
 - `World::follow_cameras` after play movement / game `update`. `World::step_grid_movers(&input, dt)` in the same tick (before follow). Diagonals: horizontal wins; reverse is immediate; 90° waits for cell center. Stick +Y (host Up) = `Dir::Up` = −Y.
 - GridMover is host-first (JSON hydrate); WSCN bake skips it like Animation / AudioSource.
@@ -36,5 +36,4 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 
 - Rust staticlib for Wii sharing host `App` / `World` (replace C scene player).
 - Sprite sheet offset/padding, Grid By Cell Size.
-- Wii GX DrawText (host bitmap HUD exists; C player KIND_NONE).
 - Wii GX tilemaps (host animated / auto-tile exists; C skips WSCN Tilemap payload).

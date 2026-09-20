@@ -38,6 +38,10 @@ void wiimaker_gx_set_clear(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 void wiimaker_gx_draw_disc(float x, float y, float radius, uint32_t rgba8);
 void wiimaker_gx_draw_sprite(uint32_t tex_id, float x, float y, float w, float h,
                              float u0, float v0, float u1, float v1, uint32_t rgba8);
+/* Bitmap HUD: untextured ink-pixel quads from font8x8.h (same bits as wiimaker-assets font.rs).
+ * `align`: 0 Left, 1 Center, 2 Right relative to (x, y). `size` is glyph cell height in world px. */
+void wiimaker_gx_draw_text(float x, float y, const char *text, uint16_t len, float size,
+                           uint8_t align, uint32_t rgba8);
 
 /* Texture upload from cooked `.wpack` (GX-tiled RGB5A3). */
 int wiimaker_tex_load_wpack(const uint8_t *data, uint32_t size);

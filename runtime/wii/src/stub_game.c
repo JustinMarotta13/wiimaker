@@ -1,6 +1,6 @@
 /*
  * Scene-driven C game for Wii (until Rust staticlib lands).
- * Loads embedded assets.wpack + scene.wscn, draws sprites/discs,
+ * Loads embedded assets.wpack + scene.wscn, draws sprites/discs/text,
  * and keeps hello-orb Player / OrbShadow gameplay.
  */
 
@@ -20,8 +20,10 @@ extern const uint8_t _binary_scene_wscn_end[];
 #define KIND_SPRITE 1
 #define KIND_DISC 2
 #define KIND_TILEMAP 3
+#define KIND_TEXT 4
 #define MAX_ENTITIES 64
 #define MAX_NAME 48
+#define MAX_TEXT 256
 
 typedef struct {
     char name[MAX_NAME];
@@ -35,6 +37,10 @@ typedef struct {
     float radius;
     uint8_t color[4];
     float z;
+    char text[MAX_TEXT];
+    uint16_t text_len;
+    float text_size;
+    uint8_t text_align;
 } Entity;
 
 static Entity ents[MAX_ENTITIES];
@@ -180,6 +186,23 @@ static int load_scene(const uint8_t *data, uint32_t size) {
             if (p + plen > end)
                 return -1;
             p += plen;
+        } else if (e->kind == KIND_TEXT) {
+            /* u16 len + utf8, f32 size, u8 align, u8[4] rgba, f32 z */
+            uint16_t slen = rd_u16(&p, end);
+            if (p + slen > end)
+                return -1;
+            uint16_t copy = slen < (MAX_TEXT - 1) ? slen : (MAX_TEXT - 1);
+            memcpy(e->text, p, copy);
+            e->text[copy] = '\0';
+            e->text_len = copy;
+            p += slen;
+            e->text_size = rd_f32(&p, end);
+            e->text_align = (p < end) ? *p++ : 0;
+            if (p + 4 > end)
+                return -1;
+            memcpy(e->color, p, 4);
+            p += 4;
+            e->z = rd_f32(&p, end);
         }
 
         if (strcmp(e->name, "Player") == 0) {
@@ -277,6 +300,12 @@ int wiimaker_game_frame(const WiimakerInput *input, float dt) {
                 col = orb_rgba(hue, pulse);
             float scale = e->sx > e->sy ? e->sx : e->sy;
             wiimaker_gx_draw_disc(e->x, e->y, e->radius * scale, col);
+        } else if (e->kind == KIND_TEXT) {
+            float scale = e->sx > e->sy ? e->sx : e->sy;
+            if (scale < 0.0f)
+                scale = -scale;
+            wiimaker_gx_draw_text(e->x, e->y, e->text, e->text_len, e->text_size * scale,
+                                  e->text_align, rgba_pack(e->color));
         }
     }
 

@@ -48,7 +48,7 @@ $(BUILD):
 $(BUILD)/bootstrap.o: src/bootstrap.c include/wiimaker_abi.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/gx_draw.o: src/gx_draw.c include/wiimaker_abi.h | $(BUILD)
+$(BUILD)/gx_draw.o: src/gx_draw.c include/wiimaker_abi.h include/font8x8.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/stub_game.o: src/stub_game.c include/wiimaker_abi.h | $(BUILD)

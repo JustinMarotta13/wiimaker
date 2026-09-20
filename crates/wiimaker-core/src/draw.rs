@@ -75,7 +75,8 @@ pub enum DrawCmd {
         z: f32,
     },
     /// Bitmap HUD string. Host samples the built-in 8×8 atlas (one quad per glyph).
-    /// Wii GX v1 skips this command. `pos` is the alignment anchor (top of first line).
+    /// Wii GX draws the same bits as untextured quads (`KIND_TEXT` in WSCN0003).
+    /// `pos` is the alignment anchor (top of first line).
     DrawText {
         pos: Vec2,
         text: String,

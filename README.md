@@ -109,7 +109,7 @@ Sprite sheets keep one PNG; cells live in `assets/<stem>.sprites.json` (Grid By 
 
 A tiny PCM16 beep lives at `crates/wiimaker-assets/fixtures/beep.wav` (also copied into `templates/basic-game/assets/` for new games). Host-only; not packed into `.wpack` yet.
 
-HUD text uses a built-in 8×8 bitmap font on the host (`DrawCmd::DrawText`). The visual fixture is `crates/wiimaker-assets/fixtures/hud_font.png`; it is **not** cooked into `.wpack`. Wii GX skips glyphs for now.
+HUD text uses a built-in 8×8 bitmap font (`DrawCmd::DrawText` on host; WSCN0003 `KIND_TEXT` + GX quads on Wii). The visual fixture is `crates/wiimaker-assets/fixtures/hud_font.png`; it is **not** cooked into `.wpack`. Missing glyphs draw as `?`.
 
 ## Quick start (Wii)
 

@@ -71,7 +71,9 @@ enum DrawCmd {
 
 Host interprets this with a software rasterizer (v0) or GL (v1).
 Wii maps each command onto GX immediate / display-list calls.
-`DrawText` is host-first (built-in 8×8 atlas in `wiimaker-host`); GX skips it.
+`DrawText` uses the built-in 8×8 font (`wiimaker-assets` `font.rs`); the host
+raster samples an atlas, and the Wii C player draws the same bits as untextured
+GX quads (`KIND_TEXT` in WSCN0003). Tilemaps are still skipped on GX.
 
 ### Wii runtime (C)
 
