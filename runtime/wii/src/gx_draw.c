@@ -1,7 +1,8 @@
 /*
  * Minimal GX helpers shared with the game via FFI.
  * Disc = untextured fan; Sprite = textured screen-space quad;
- * Text = untextured colored quads from the built-in 8x8 font bits.
+ * Text = untextured colored quads from the built-in 8x8 font bits;
+ * Quad = untextured screen-space rect (tilemap palette color cells).
  */
 
 #include <gccore.h>
@@ -103,6 +104,24 @@ void wiimaker_gx_draw_sprite(uint32_t tex_id, float x, float y, float w, float h
     GX_Position3f32(x0, y1, 0.0f);
     GX_Color1u32(rgba8);
     GX_TexCoord2f32(u0, v1);
+    GX_End();
+}
+
+void wiimaker_gx_draw_quad(float x, float y, float w, float h, uint32_t rgba8) {
+    setup_untextured();
+    float x0 = x;
+    float y0 = y;
+    float x1 = x + w;
+    float y1 = y + h;
+    GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+    GX_Position3f32(x0, y0, 0.0f);
+    GX_Color1u32(rgba8);
+    GX_Position3f32(x1, y0, 0.0f);
+    GX_Color1u32(rgba8);
+    GX_Position3f32(x1, y1, 0.0f);
+    GX_Color1u32(rgba8);
+    GX_Position3f32(x0, y1, 0.0f);
+    GX_Color1u32(rgba8);
     GX_End();
 }
 

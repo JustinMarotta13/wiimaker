@@ -111,6 +111,8 @@ A tiny PCM16 beep lives at `crates/wiimaker-assets/fixtures/beep.wav` (also copi
 
 HUD text uses a built-in 8×8 bitmap font (`DrawCmd::DrawText` on host; WSCN0003 `KIND_TEXT` + GX quads on Wii). The visual fixture is `crates/wiimaker-assets/fixtures/hud_font.png`; it is **not** cooked into `.wpack`. Missing glyphs draw as `?`.
 
+Tilemaps bake into the same `WSCN0003` blob (`KIND_TILEMAP=3`, length-prefixed grid + palette). The Wii C player draws occupied cells as GX textured quads (palette sprite / auto-tile variant / anim frame 0+) or untextured tinted quads when the palette has no texture — matching host `render_world`. Editor/CLI tilemap tools are unchanged.
+
 ## Quick start (Wii)
 
 Requires [devkitPro](https://devkitpro.org/) `wii-dev` **or** Docker:
@@ -122,7 +124,9 @@ wiimaker dolphin hello-orb     # or: ./tools/run-dolphin.sh target/wii/hello-orb
 wiimaker play-wii hello-orb
 ```
 
-`build` prepares `.wpack`, bakes `scene.wscn` (WSCN0003 with UV + pivot + Tilemap), and embeds both into the `.dol`. Editor toolbar: **Build** · **Play in Dolphin** · **Build & Run** (Cook is under ⋯).
+`build` prepares `.wpack`, bakes `scene.wscn` (WSCN0003 with UV + pivot + Tilemap palette + `KIND_TEXT`), and embeds both into the `.dol`. Editor toolbar: **Build** · **Play in Dolphin** · **Build & Run** (Cook is under ⋯).
+
+**Dolphin check (tilemaps):** `wiimaker build <game>` then `wiimaker dolphin <game>` (or File → Open `target/wii/<game>/boot.dol`). Occupied tile cells should match host `wiimaker run` / editor Game view (colored walls, sprite tiles, auto-tile variants). Animated palette clips tick on GX when the bake includes 2+ frames. This environment cannot run Dolphin; use that path on a machine with it.
 
 ## Workspace layout
 

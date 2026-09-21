@@ -21,22 +21,22 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap + `KIND_TEXT`), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host cpal). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT`), GX C player draws sprites/discs/text/tilemap cells, `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host cpal). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** nested prefabs / prefab variants, Wii GX draw of tilemaps (payload skipped — animated / auto-tile host-only), Wii ASND.
+**Not present:** nested prefabs / prefab variants, Wii ASND / Wiimote.
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-09-20):** Wii GX tilemaps — host animated / auto-tile exists; C still skips the Tilemap payload.
+**Recommended next morning (2026-09-21):** Wii ASND audio oneshots — host `AudioSource` already plays PCM16 WAV; C runtime comments only.
 
 ---
 
 ## Later
 
-- **Wii audio / Wiimote** — after host oneshots.
-- **Wii GX tilemaps** — host animated / auto-tile exists; C still skips the Tilemap payload.
+- **Wiimote** — after Wii audio; GCN/classic pad already works.
+- **Rust staticlib** — share host `App` / `World` instead of the C scene player.
 
 ---
 
@@ -84,9 +84,11 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Text / HUD** (2026-09-14) — `DrawCmd::DrawText` + scene `Text` (string, size, color, align, sorting layer / order-in-layer). Host raster samples a built-in 8×8 ASCII atlas (`wiimaker-assets` bits + `fixtures/hud_font.png`); **not** cooked into `.wpack`. `render_world` emits DrawText (camera offset + layer sort like Sprite/Disc). Inspector Text foldout + Add Component. CLI `entity add-component … Text --text --size --color --align` · `entity set --text --size --color --align` (`--json`). Missing glyphs → `?`.
 
-- **Wii GX text** (2026-09-20) — WSCN0003 `KIND_TEXT=4` (do not bump magic). Payload: `u16` UTF-8 len + bytes, `f32` size, `u8` align (0 Left / 1 Center / 2 Right), RGBA, `f32` z. Sprite/Disc/Tilemap still win bake priority. C player loads onto `Entity` and draws via `wiimaker_gx_draw_text` (untextured ink-pixel quads; bits from `wiimaker-assets` `font.rs` → `runtime/wii/include/font8x8.h`). Tilemaps stay skipped on Wii.
+- **Wii GX text** (2026-09-20) — WSCN0003 `KIND_TEXT=4` (do not bump magic). Payload: `u16` UTF-8 len + bytes, `f32` size, `u8` align (0 Left / 1 Center / 2 Right), RGBA, `f32` z. Sprite/Disc/Tilemap still win bake priority. C player loads onto `Entity` and draws via `wiimaker_gx_draw_text` (untextured ink-pixel quads; bits from `wiimaker-assets` `font.rs` → `runtime/wii/include/font8x8.h`).
 
-- **Animated tiles / auto-tile** (2026-09-14) — palette `anim` / `anim_fps` (reuses `*.anim.json`) + `auto_tile` `id`|`solid` NESW bitmask (N=1 E=2 S=4 W=8). Variants: `auto_sprites[mask]` or catalog `{sprite}_{mask}`. Runtime `TileVisual` frames tick in `animate_world` / `World::tick_tilemaps`; `render_world` picks auto-tile textures per cell. Inspector palette Anim + Auto Tile + painted NESW badge; Scene Edit ticks tile anims; Paint hover shows mask. CLI `tilemap set-palette` · `tilemap mask`; `tilemap get --json` includes `mask`. Mutate: `tilemap_set_palette` / `tilemap_autotile_mask`. Host-first; WSCN0003 still bakes static cell ids (C skips payload).
+- **Wii GX tilemaps** (2026-09-21) — WSCN0003 `KIND_TILEMAP=3` stays length-prefixed (do not bump magic). Bake appends a resolved palette after cells/solid: id, RGBA, wpack tex+UV or `WSCN_TILE_NO_TEX` (untextured tint), `auto_tile` + NESW variants, optional anim frames (cap 16). C player draws occupied cells via `wiimaker_gx_draw_sprite` / `wiimaker_gx_draw_quad`; ticks palette clips. Host editor/CLI unchanged. Older bakes without a palette tail still draw the default wall tint.
+
+- **Animated tiles / auto-tile** (2026-09-14) — palette `anim` / `anim_fps` (reuses `*.anim.json`) + `auto_tile` `id`|`solid` NESW bitmask (N=1 E=2 S=4 W=8). Variants: `auto_sprites[mask]` or catalog `{sprite}_{mask}`. Runtime `TileVisual` frames tick in `animate_world` / `World::tick_tilemaps`; `render_world` picks auto-tile textures per cell. Inspector palette Anim + Auto Tile + painted NESW badge; Scene Edit ticks tile anims; Paint hover shows mask. CLI `tilemap set-palette` · `tilemap mask`; `tilemap get --json` includes `mask`. Mutate: `tilemap_set_palette` / `tilemap_autotile_mask`. WSCN bake packs the resolved palette for GX.
 
 - **Tilemap CLI stamp from ASCII** (2026-09-15) — `tilemap from-ascii maze.txt --name Maze` reads UTF-8 (`#` wall, `.`/` `/`0` empty, `1`–`9` id; optional `--map '#=1,P=2:0'`). Default **resizes** the grid to the file (unlike inline `stamp --ascii`, which clips). Mutate: `parse_ascii_tilemap` / `tilemap_from_ascii` / `tilemap_from_ascii_path` in `wiimaker-scene`. Editor: Inspector Tilemap **Import ASCII**, Project `.txt` **Stamp into Tilemap**, drop TXT → `assets/`. `--json`. Host-first.
 
@@ -145,5 +147,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Ship Wii GX tilemaps.** Host animated / auto-tile already exist; C player still skips the WSCN Tilemap payload. Later also has Wii audio / Wiimote.
+**Ship Wii ASND audio oneshots.** Host `AudioSource` + WAV playback already exist; the C runtime is comment-only. Later: Wiimote, then Rust staticlib.
 

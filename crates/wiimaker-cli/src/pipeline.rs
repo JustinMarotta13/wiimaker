@@ -9,9 +9,9 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use wiimaker_assets::{CookWarning, SpriteCatalog, WPack};
+use wiimaker_assets::{AnimClipCatalog, CookWarning, SpriteCatalog, WPack};
 use wiimaker_scene::{
-    find_game_dir, load_project, load_scene, write_scene_wscn_with_catalog, GameProject,
+    find_game_dir, load_project, load_scene, write_scene_wscn_with_catalogs, GameProject,
 };
 
 #[derive(Debug, Serialize)]
@@ -96,9 +96,10 @@ pub fn bake_wii(root: &Path, name: &str) -> Result<BakeWiiOut> {
             .find(|t| t.name == stem)
             .map(|t| (t.width as u32, t.height as u32))
     })?;
+    let anims = AnimClipCatalog::load_dir(&assets)?;
     let scene = load_scene(&project.scene_path(&game_dir))?;
     let out = project.wscn_path(&game_dir);
-    write_scene_wscn_with_catalog(&out, &scene, &pack, Some(&catalog))?;
+    write_scene_wscn_with_catalogs(&out, &scene, &pack, Some(&catalog), Some(&anims))?;
     Ok(BakeWiiOut {
         output: out.display().to_string(),
         entities: scene.entities.len(),

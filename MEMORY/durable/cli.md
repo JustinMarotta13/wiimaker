@@ -31,8 +31,8 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 ## Decisions
 
 - CLI sources are modular: `main.rs` dispatch · `args.rs` (clap) · `cmds/{project,scene,entity,asset,editor}.rs` · `util.rs` · `pipeline.rs` (ship helpers).
-- Wii embed uses `scene.wscn` **WSCN0003** (UV + pivot + length-prefixed Tilemap) rather than parsing JSON on console.
-- Tilemap: `tilemap set|fill|stamp|from-ascii|get|set-palette|mask` (`--name --x --y --id`, `--ascii` or `--cells --width`, `from-ascii FILE` with optional `--map '#=1,P=2:0'` and `--resize` default true, palette `--sprite --color --anim --fps --auto-tile id|solid|off --auto-sprites`). Auto-creates a default Tilemap on the named entity if missing. `from-ascii` resizes the grid to the file (stamp `--ascii` stays inline and clips). `entity add-component … Tilemap --cols --rows --cell`. `get --json` includes NESW `mask`. Host-first; WSCN bake unchanged.
+- Wii embed uses `scene.wscn` **WSCN0003** (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT`) rather than parsing JSON on console.
+- Tilemap: `tilemap set|fill|stamp|from-ascii|get|set-palette|mask` (`--name --x --y --id`, `--ascii` or `--cells --width`, `from-ascii FILE` with optional `--map '#=1,P=2:0'` and `--resize` default true, palette `--sprite --color --anim --fps --auto-tile id|solid|off --auto-sprites`). Auto-creates a default Tilemap on the named entity if missing. `from-ascii` resizes the grid to the file (stamp `--ascii` stays inline and clips). `entity add-component … Tilemap --cols --rows --cell`. `get --json` includes NESW `mask`. WSCN bake packs resolved palette (tex/UV, auto-tile variants, anim frames) for GX.
 - Collider / Trigger: `entity add-component … Collider|--trigger|--filter` or kind `Trigger`; `entity triggers <game> <name>`; `entity despawn <game> <name>`; `entity set --tag N`.
 - Entity mutate twins stay in `wiimaker-scene` (`duplicate_entity`, `rename_entity`, `set_entity_parent`, `unique_entity_name`).
 - Sheet grid math / catalog live in `wiimaker-assets` — CLI and editor must not fork slice logic.
