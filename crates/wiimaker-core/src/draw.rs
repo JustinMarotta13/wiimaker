@@ -77,6 +77,8 @@ pub enum DrawCmd {
     /// Bitmap HUD string. Host samples the built-in 8×8 atlas (one quad per glyph).
     /// Wii GX draws the same bits as untextured quads (`KIND_TEXT` in WSCN0003).
     /// `pos` is the alignment anchor (top of first line).
+    /// Tilemaps are not a DrawCmd: host `render_world` emits per-cell sprites;
+    /// Wii GX loads `KIND_TILEMAP` and draws those cells itself.
     DrawText {
         pos: Vec2,
         text: String,

@@ -7,9 +7,10 @@
 //! (order-in-layer). The C player sorts by `z` only. Do not bump the magic for
 //! this feature.
 //!
-//! `KIND_TEXT = 4` is packed under the same magic (sprite / disc / tilemap still
-//! win when those components are enabled). Tilemaps remain length-prefixed and
-//! skipped by the C player.
+//! `KIND_TEXT = 4` and `KIND_TILEMAP = 3` share this magic (sprite / disc /
+//! tilemap still win when those components are enabled). Tilemap payloads stay
+//! length-prefixed: grid + solid bits, then a resolved palette the GX player
+//! draws as textured or untextured quads.
 
 use std::fs::File;
 use std::io::Write;
@@ -17,7 +18,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use byteorder::{LittleEndian, WriteBytesExt};
-use wiimaker_assets::{SpriteCatalog, WPack};
+use wiimaker_assets::{AnimClipCatalog, SpriteCatalog, WPack};
 
 use crate::scene::Scene;
 
@@ -34,6 +35,21 @@ pub const KIND_TEXT: u8 = 4;
 /// Reasonable UTF-8 byte cap for Wii C `Entity.text` (loader still skips a longer bake).
 pub const WSCN_TEXT_MAX_BYTES: usize = 255;
 
+/// Wpack index meaning “no texture” — GX draws an untextured tinted quad
+/// (host `TextureId(u32::MAX)` white sample × palette color).
+pub const WSCN_TILE_NO_TEX: u16 = 0xFFFF;
+
+/// Palette `auto_tile` byte in the tilemap payload.
+pub const WSCN_TILEMAP_AUTO_OFF: u8 = 0;
+pub const WSCN_TILEMAP_AUTO_ID: u8 = 1;
+pub const WSCN_TILEMAP_AUTO_SOLID: u8 = 2;
+
+/// Cap baked anim frames so the C player stays small (host clips may be longer).
+pub const WSCN_TILEMAP_MAX_FRAMES: usize = 16;
+
+/// Same default wall tint as [`crate::scene::SceneTilePalette`] / host `QUAD` cells.
+pub const WSCN_TILE_DEFAULT_COLOR: [u8; 4] = [48, 88, 176, 255];
+
 /// Bake a scene against a cooked pack into little-endian `scene.wscn` bytes.
 pub fn bake_scene_wscn(scene: &Scene, pack: &WPack) -> Result<Vec<u8>> {
     bake_scene_wscn_with_catalog(scene, pack, None)
@@ -43,6 +59,15 @@ pub fn bake_scene_wscn_with_catalog(
     scene: &Scene,
     pack: &WPack,
     catalog: Option<&SpriteCatalog>,
+) -> Result<Vec<u8>> {
+    bake_scene_wscn_with_catalogs(scene, pack, catalog, None)
+}
+
+pub fn bake_scene_wscn_with_catalogs(
+    scene: &Scene,
+    pack: &WPack,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
 ) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     buf.write_all(WSCN_MAGIC)?;
@@ -115,7 +140,7 @@ pub fn bake_scene_wscn_with_catalog(
             }
             (_, _, Some(tm), _) if tm.enabled => {
                 buf.write_u8(KIND_TILEMAP)?;
-                write_tilemap_payload(&mut buf, tm)?;
+                write_tilemap_payload(&mut buf, tm, pack, catalog, anims)?;
             }
             (_, _, _, Some(t)) if t.enabled => {
                 buf.write_u8(KIND_TEXT)?;
@@ -153,11 +178,21 @@ pub fn write_scene_wscn_with_catalog(
     pack: &WPack,
     catalog: Option<&SpriteCatalog>,
 ) -> Result<()> {
+    write_scene_wscn_with_catalogs(path, scene, pack, catalog, None)
+}
+
+pub fn write_scene_wscn_with_catalogs(
+    path: impl AsRef<Path>,
+    scene: &Scene,
+    pack: &WPack,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+) -> Result<()> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let bytes = bake_scene_wscn_with_catalog(scene, pack, catalog)?;
+    let bytes = bake_scene_wscn_with_catalogs(scene, pack, catalog, anims)?;
     let mut f = File::create(path).with_context(|| format!("create {}", path.display()))?;
     f.write_all(&bytes)?;
     Ok(())
@@ -182,10 +217,26 @@ fn write_text_payload(buf: &mut Vec<u8>, t: &crate::scene::SceneText) -> Result<
     Ok(())
 }
 
-fn write_tilemap_payload(buf: &mut Vec<u8>, tm: &crate::scene::SceneTilemap) -> Result<()> {
+/// KIND_TILEMAP payload (little-endian, after the kind byte):
+/// - `u32` length of the rest of this blob (C can skip unknown tails)
+/// - `f32` cell, origin x/y · `u16` width/height · `f32` z · `u32` n
+/// - `u16` cells `[n]` row-major · packed solid bits `ceil(n/8)`
+/// - palette (appended; older bakes omit this and GX uses the default wall tint):
+///   - `u16` pal_n
+///   - per entry: `u16` id, `u8[4]` RGBA, `u16` tex ([`WSCN_TILE_NO_TEX`] = color quad),
+///     `f32` u0,v0,u1,v1, `u8` auto_mode (0 off / 1 id / 2 solid),
+///     `u16` auto_bits (NESW mask slots 0..=15), then that many (tex+uv),
+///     `u8` frame_n, `f32` fps, then `frame_n` (tex+uv) anim frames (frame 0 is
+///     the static/base texture; GX ticks when frame_n > 1)
+fn write_tilemap_payload(
+    buf: &mut Vec<u8>,
+    tm: &crate::scene::SceneTilemap,
+    pack: &WPack,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+) -> Result<()> {
     let n = (tm.width as usize).saturating_mul(tm.height as usize);
     let solid_bytes = (n + 7) / 8;
-    // payload after the length prefix: cell, origin xy, w/h, z, n, cells, solid bits
     let mut payload = Vec::new();
     payload.write_f32::<LittleEndian>(tm.cell)?;
     payload.write_f32::<LittleEndian>(tm.origin[0])?;
@@ -205,8 +256,163 @@ fn write_tilemap_payload(buf: &mut Vec<u8>, tm: &crate::scene::SceneTilemap) -> 
         }
     }
     payload.write_all(&bits)?;
+    write_tilemap_palette(&mut payload, tm, pack, catalog, anims)?;
     buf.write_u32::<LittleEndian>(payload.len() as u32)?;
     buf.write_all(&payload)?;
+    Ok(())
+}
+
+fn resolve_tile_tex(
+    name: &str,
+    pack: &WPack,
+    catalog: Option<&SpriteCatalog>,
+) -> Option<(u16, [f32; 4])> {
+    let (sheet, uv, _) = resolve_for_bake(name, catalog);
+    let idx = pack.texture_index(&sheet)?;
+    if idx > u16::MAX as usize {
+        return None;
+    }
+    Some((idx as u16, [uv[0], uv[1], uv[0] + uv[2], uv[1] + uv[3]]))
+}
+
+fn write_tex_uv(payload: &mut Vec<u8>, tex: u16, uv: [f32; 4]) -> Result<()> {
+    payload.write_u16::<LittleEndian>(tex)?;
+    for v in uv {
+        payload.write_f32::<LittleEndian>(v)?;
+    }
+    Ok(())
+}
+
+fn write_tilemap_palette(
+    payload: &mut Vec<u8>,
+    tm: &crate::scene::SceneTilemap,
+    pack: &WPack,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+) -> Result<()> {
+    let entries: Vec<&crate::scene::SceneTilePalette> = tm.palette.iter().collect();
+    if entries.is_empty() {
+        payload.write_u16::<LittleEndian>(1)?;
+        write_palette_entry(
+            payload,
+            1,
+            WSCN_TILE_DEFAULT_COLOR,
+            None,
+            WSCN_TILEMAP_AUTO_OFF,
+            &[],
+        )?;
+        payload.write_u8(0)?;
+        payload.write_f32::<LittleEndian>(0.0)?;
+        return Ok(());
+    }
+    payload.write_u16::<LittleEndian>(entries.len().min(u16::MAX as usize) as u16)?;
+    for pal in entries {
+        let mut base = pal
+            .sprite
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|name| resolve_tile_tex(name, pack, catalog));
+
+        let mut frames: Vec<(u16, [f32; 4])> = Vec::new();
+        let mut fps = 0.0f32;
+        if let Some(clip) = pal.anim_clip() {
+            let meta = anims.and_then(|c| c.lookup(clip));
+            fps = pal
+                .anim_fps
+                .filter(|f| *f > 0.0)
+                .or_else(|| meta.map(|m| m.fps))
+                .unwrap_or(10.0);
+            if let Some(meta) = meta {
+                for cell in &meta.cells {
+                    if let Some(tex) = resolve_tile_tex(cell, pack, catalog) {
+                        frames.push(tex);
+                    }
+                    if frames.len() >= WSCN_TILEMAP_MAX_FRAMES {
+                        break;
+                    }
+                }
+            }
+            if frames.is_empty() {
+                if let Some(tex) = base {
+                    frames.push(tex);
+                }
+            } else {
+                base = Some(frames[0]);
+            }
+        }
+        if frames.len() <= 1 {
+            frames.clear();
+            fps = 0.0;
+        }
+
+        let auto_mode = match pal.auto_tile {
+            Some(crate::scene::SceneAutoTile::Id) => WSCN_TILEMAP_AUTO_ID,
+            Some(crate::scene::SceneAutoTile::Solid) => WSCN_TILEMAP_AUTO_SOLID,
+            None => WSCN_TILEMAP_AUTO_OFF,
+        };
+        let mut auto_slots = [(WSCN_TILE_NO_TEX, [0.0, 0.0, 1.0, 1.0]); 16];
+        if auto_mode != WSCN_TILEMAP_AUTO_OFF {
+            let stem = pal
+                .sprite
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            for mask in 0..16 {
+                let named = pal
+                    .auto_sprites
+                    .get(mask)
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .or_else(|| stem.map(|s| format!("{s}_{mask}")));
+                if let Some(name) = named {
+                    if let Some(tex) = resolve_tile_tex(&name, pack, catalog) {
+                        auto_slots[mask] = tex;
+                    }
+                }
+            }
+        }
+
+        write_palette_entry(payload, pal.id, pal.color, base, auto_mode, &auto_slots)?;
+        payload.write_u8(frames.len() as u8)?;
+        payload.write_f32::<LittleEndian>(fps)?;
+        for (tex, uv) in &frames {
+            write_tex_uv(payload, *tex, *uv)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_palette_entry(
+    payload: &mut Vec<u8>,
+    id: u16,
+    color: [u8; 4],
+    base: Option<(u16, [f32; 4])>,
+    auto_mode: u8,
+    auto_slots: &[(u16, [f32; 4])],
+) -> Result<()> {
+    payload.write_u16::<LittleEndian>(id)?;
+    payload.write_all(&color)?;
+    let (tex, uv) = base.unwrap_or((WSCN_TILE_NO_TEX, [0.0, 0.0, 1.0, 1.0]));
+    write_tex_uv(payload, tex, uv)?;
+    payload.write_u8(auto_mode)?;
+    let mut auto_bits: u16 = 0;
+    if auto_mode != WSCN_TILEMAP_AUTO_OFF {
+        for (mask, (atex, _)) in auto_slots.iter().enumerate().take(16) {
+            if *atex != WSCN_TILE_NO_TEX {
+                auto_bits |= 1 << mask;
+            }
+        }
+    }
+    payload.write_u16::<LittleEndian>(auto_bits)?;
+    if auto_mode != WSCN_TILEMAP_AUTO_OFF {
+        for (mask, (atex, auv)) in auto_slots.iter().enumerate().take(16) {
+            if auto_bits & (1 << mask) != 0 {
+                write_tex_uv(payload, *atex, *auv)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -229,6 +435,25 @@ mod tests {
         assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 0);
     }
 
+    fn read_f32(bytes: &[u8], i: &mut usize) -> f32 {
+        let v = f32::from_le_bytes(bytes[*i..*i + 4].try_into().unwrap());
+        *i += 4;
+        v
+    }
+
+    fn read_u16(bytes: &[u8], i: &mut usize) -> u16 {
+        let v = u16::from_le_bytes(bytes[*i..*i + 2].try_into().unwrap());
+        *i += 2;
+        v
+    }
+
+    fn skip_to_kind(bytes: &[u8]) -> usize {
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let i = 8 + 4 + 4;
+        let nlen = u16::from_le_bytes([bytes[i], bytes[i + 1]]) as usize;
+        i + 2 + nlen + 6 * 4
+    }
+
     #[test]
     fn bake_tilemap_kind_and_magic() {
         let mut scene = Scene::new("maze");
@@ -247,15 +472,288 @@ mod tests {
         let pack = WPack::new();
         let bytes = bake_scene_wscn(&scene, &pack).unwrap();
         assert_eq!(&bytes[0..8], b"WSCN0003");
-        // skip magic(8) + clear(4) + count(4) + name_len(2) + "Maze"(4) + xf 6xf32
-        let mut i = 8 + 4 + 4;
-        let nlen = u16::from_le_bytes([bytes[i], bytes[i + 1]]) as usize;
-        i += 2 + nlen + 6 * 4;
+        let mut i = skip_to_kind(&bytes);
         assert_eq!(bytes[i], KIND_TILEMAP);
         i += 1;
         let plen = u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
+        i += 4;
         assert!(plen > 0);
-        assert_eq!(i + 4 + plen, bytes.len());
+        assert_eq!(i + plen, bytes.len());
+
+        let cell = read_f32(&bytes, &mut i);
+        let ox = read_f32(&bytes, &mut i);
+        let oy = read_f32(&bytes, &mut i);
+        let w = read_u16(&bytes, &mut i);
+        let h = read_u16(&bytes, &mut i);
+        let z = read_f32(&bytes, &mut i);
+        let n = u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
+        i += 4;
+        assert!((cell - 16.0).abs() < 1e-4);
+        assert!((ox).abs() < 1e-4 && oy.abs() < 1e-4);
+        assert_eq!((w, h, n), (3, 2, 6));
+        assert!((z + 1.0).abs() < 1e-4);
+        let cells: Vec<u16> = (0..6).map(|_| read_u16(&bytes, &mut i)).collect();
+        assert_eq!(cells, vec![1, 1, 1, 1, 0, 1]);
+        let solid_bytes = (6 + 7) / 8;
+        i += solid_bytes;
+        let pal_n = read_u16(&bytes, &mut i);
+        assert_eq!(pal_n, 1);
+        let pal_id = read_u16(&bytes, &mut i);
+        assert_eq!(pal_id, 1);
+        assert_eq!(&bytes[i..i + 4], &WSCN_TILE_DEFAULT_COLOR);
+        i += 4;
+        let tex = read_u16(&bytes, &mut i);
+        assert_eq!(tex, WSCN_TILE_NO_TEX);
+        i += 16; // uv
+        assert_eq!(bytes[i], WSCN_TILEMAP_AUTO_OFF);
+        i += 1;
+        let auto_bits = read_u16(&bytes, &mut i);
+        assert_eq!(auto_bits, 0);
+        assert_eq!(bytes[i], 0); // frame_n
+    }
+
+    #[test]
+    fn bake_tilemap_palette_sprite_and_autotile() {
+        use crate::tilemap::{tilemap_set_cell, tilemap_set_palette, TilePaletteOpts};
+        use wiimaker_assets::{ResolvedSprite, SpriteCatalog};
+
+        let mut scene = Scene::new("maze");
+        add_entity(
+            &mut scene,
+            "Maze",
+            &MutateOpts {
+                x: Some(8.0),
+                y: Some(16.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_tilemap(&mut scene, "Maze", 2, 1, 16.0).unwrap();
+        tilemap_set_palette(
+            &mut scene,
+            "Maze",
+            2,
+            &TilePaletteOpts {
+                sprite: Some("wall".into()),
+                auto_tile: Some("id".into()),
+                auto_sprites: Some(vec![String::new(), String::new(), "wall_e".into()]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        tilemap_set_cell(&mut scene, "Maze", 0, 0, 2, true).unwrap();
+        tilemap_set_cell(&mut scene, "Maze", 1, 0, 2, true).unwrap();
+
+        let pack = dummy_pack("sheet");
+
+        let mut cat = SpriteCatalog::empty();
+        cat.insert(
+            "wall",
+            ResolvedSprite {
+                sheet_texture: "sheet".into(),
+                uv: [0.0, 0.0, 0.5, 1.0],
+                pivot: [0.5, 0.5],
+                pixel_size: [8.0, 16.0],
+                is_cell: true,
+            },
+        );
+        cat.insert(
+            "wall_e",
+            ResolvedSprite {
+                sheet_texture: "sheet".into(),
+                uv: [0.5, 0.0, 0.5, 1.0],
+                pivot: [0.5, 0.5],
+                pixel_size: [8.0, 16.0],
+                is_cell: true,
+            },
+        );
+
+        let bytes = bake_scene_wscn_with_catalog(&scene, &pack, Some(&cat)).unwrap();
+        let mut i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_TILEMAP);
+        i += 1;
+        let plen = u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
+        i += 4;
+        let end = i + plen;
+        let _cell = read_f32(&bytes, &mut i);
+        let _ox = read_f32(&bytes, &mut i);
+        let _oy = read_f32(&bytes, &mut i);
+        let w = read_u16(&bytes, &mut i);
+        let h = read_u16(&bytes, &mut i);
+        let _z = read_f32(&bytes, &mut i);
+        let n = u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
+        i += 4;
+        assert_eq!((w, h, n), (2, 1, 2));
+        i += 2 * 2; // cells
+        i += (2 + 7) / 8; // solid
+        let pal_n = read_u16(&bytes, &mut i);
+        assert!(pal_n >= 1);
+        // Default id=1 plus painted id=2 (set-palette adds/updates).
+        let mut found_wall = false;
+        for _ in 0..pal_n {
+            let id = read_u16(&bytes, &mut i);
+            i += 4; // color
+            let tex = read_u16(&bytes, &mut i);
+            let u0 = read_f32(&bytes, &mut i);
+            let v0 = read_f32(&bytes, &mut i);
+            let u1 = read_f32(&bytes, &mut i);
+            let v1 = read_f32(&bytes, &mut i);
+            let auto_mode = bytes[i];
+            i += 1;
+            let auto_bits = read_u16(&bytes, &mut i);
+            for mask in 0..16 {
+                if auto_bits & (1 << mask) != 0 {
+                    let atex = read_u16(&bytes, &mut i);
+                    let au0 = read_f32(&bytes, &mut i);
+                    i += 12;
+                    if id == 2 && mask == 2 {
+                        assert_eq!(atex, 0);
+                        assert!((au0 - 0.5).abs() < 1e-4);
+                    }
+                }
+            }
+            let frame_n = bytes[i];
+            i += 1;
+            let _fps = read_f32(&bytes, &mut i);
+            for _ in 0..frame_n {
+                i += 2 + 16;
+            }
+            if id == 2 {
+                found_wall = true;
+                assert_eq!(tex, 0);
+                assert!((u0).abs() < 1e-4 && v0.abs() < 1e-4);
+                assert!((u1 - 0.5).abs() < 1e-4 && (v1 - 1.0).abs() < 1e-4);
+                assert_eq!(auto_mode, WSCN_TILEMAP_AUTO_ID);
+                assert_eq!(auto_bits & (1 << 2), 1 << 2);
+            }
+        }
+        assert!(found_wall);
+        assert_eq!(i, end);
+    }
+
+    #[test]
+    fn bake_tilemap_anim_frames() {
+        use crate::tilemap::{tilemap_set_cell, tilemap_set_palette, TilePaletteOpts};
+        use wiimaker_assets::{write_anim_clip, AnimClipCatalog, ResolvedSprite, SpriteCatalog};
+
+        let dir =
+            std::env::temp_dir().join(format!("wiimaker-wscn-tile-anim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        write_anim_clip(
+            &dir,
+            "water",
+            vec!["water_a".into(), "water_b".into()],
+            8.0,
+            true,
+        )
+        .unwrap();
+        let anims = AnimClipCatalog::load_dir(&dir).unwrap();
+
+        let mut scene = Scene::new("maze");
+        add_entity(
+            &mut scene,
+            "Maze",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_tilemap(&mut scene, "Maze", 1, 1, 16.0).unwrap();
+        tilemap_set_palette(
+            &mut scene,
+            "Maze",
+            3,
+            &TilePaletteOpts {
+                sprite: Some("water_a".into()),
+                anim: Some("water".into()),
+                anim_fps: Some(8.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        tilemap_set_cell(&mut scene, "Maze", 0, 0, 3, false).unwrap();
+
+        let mut pack = WPack::new();
+        pack.textures.push(wiimaker_assets::PackedTexture {
+            name: "atlas".into(),
+            width: 16,
+            height: 8,
+            rgba16: vec![0; 256],
+        });
+        let mut cat = SpriteCatalog::empty();
+        cat.insert(
+            "water_a",
+            ResolvedSprite {
+                sheet_texture: "atlas".into(),
+                uv: [0.0, 0.0, 0.5, 1.0],
+                pivot: [0.5, 0.5],
+                pixel_size: [8.0, 8.0],
+                is_cell: true,
+            },
+        );
+        cat.insert(
+            "water_b",
+            ResolvedSprite {
+                sheet_texture: "atlas".into(),
+                uv: [0.5, 0.0, 0.5, 1.0],
+                pivot: [0.5, 0.5],
+                pixel_size: [8.0, 8.0],
+                is_cell: true,
+            },
+        );
+
+        let bytes = bake_scene_wscn_with_catalogs(&scene, &pack, Some(&cat), Some(&anims)).unwrap();
+        let mut i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_TILEMAP);
+        i += 1;
+        let plen = u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
+        i += 4;
+        let end = i + plen;
+        i += 4 + 4 + 4 + 2 + 2 + 4 + 4; // cell origin w h z n
+        i += 2; // one cell
+        i += 1; // solid
+        let pal_n = read_u16(&bytes, &mut i);
+        let mut found = false;
+        for _ in 0..pal_n {
+            let id = read_u16(&bytes, &mut i);
+            i += 4;
+            let tex = read_u16(&bytes, &mut i);
+            let u0 = read_f32(&bytes, &mut i);
+            i += 12;
+            let _auto_mode = bytes[i];
+            i += 1;
+            let auto_bits = read_u16(&bytes, &mut i);
+            for mask in 0..16 {
+                if auto_bits & (1 << mask) != 0 {
+                    i += 2 + 16;
+                }
+            }
+            let frame_n = bytes[i];
+            i += 1;
+            let fps = read_f32(&bytes, &mut i);
+            let mut frame_u0 = Vec::new();
+            for _ in 0..frame_n {
+                let _ft = read_u16(&bytes, &mut i);
+                frame_u0.push(read_f32(&bytes, &mut i));
+                i += 12;
+            }
+            if id == 3 {
+                found = true;
+                assert_eq!(tex, 0);
+                assert!(u0.abs() < 1e-4);
+                assert_eq!(frame_n, 2);
+                assert!((fps - 8.0).abs() < 1e-4);
+                assert_eq!(frame_u0.len(), 2);
+                assert!(frame_u0[0].abs() < 1e-4);
+                assert!((frame_u0[1] - 0.5).abs() < 1e-4);
+            }
+        }
+        assert!(found);
+        assert_eq!(i, end);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn dummy_pack(name: &str) -> WPack {
@@ -333,13 +831,6 @@ mod tests {
         let p = sprite_pivot_from_wscn(&bytes);
         assert!((p[0] - 0.0).abs() < 1e-4 && (p[1] - 1.0).abs() < 1e-4);
         assert_eq!(&bytes[0..8], b"WSCN0003");
-    }
-
-    fn skip_to_kind(bytes: &[u8]) -> usize {
-        assert_eq!(&bytes[0..8], b"WSCN0003");
-        let i = 8 + 4 + 4;
-        let nlen = u16::from_le_bytes([bytes[i], bytes[i + 1]]) as usize;
-        i + 2 + nlen + 6 * 4
     }
 
     #[test]

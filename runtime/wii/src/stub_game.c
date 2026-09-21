@@ -1,6 +1,6 @@
 /*
  * Scene-driven C game for Wii (until Rust staticlib lands).
- * Loads embedded assets.wpack + scene.wscn, draws sprites/discs/text,
+ * Loads embedded assets.wpack + scene.wscn, draws sprites/discs/text/tilemaps,
  * and keeps hello-orb Player / OrbShadow gameplay.
  */
 
@@ -8,6 +8,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Linked via powerpc-eabi-objcopy -I binary (see Makefile). */
@@ -24,6 +25,41 @@ extern const uint8_t _binary_scene_wscn_end[];
 #define MAX_ENTITIES 64
 #define MAX_NAME 48
 #define MAX_TEXT 256
+#define TILE_NO_TEX 0xFFFFu
+#define TILE_AUTO_OFF 0
+#define TILE_AUTO_ID 1
+#define TILE_AUTO_SOLID 2
+#define MAX_TILE_PAL 32
+#define MAX_TILE_FRAMES 16
+#define MAX_TILE_CELLS 16384
+
+typedef struct {
+    uint16_t id;
+    uint8_t color[4];
+    uint16_t tex;
+    float u0, v0, u1, v1;
+    uint8_t auto_mode;
+    uint16_t auto_tex[16];
+    float auto_u0[16], auto_v0[16], auto_u1[16], auto_v1[16];
+    uint8_t frame_n;
+    float fps;
+    float time;
+    uint16_t frame_tex[MAX_TILE_FRAMES];
+    float frame_u0[MAX_TILE_FRAMES];
+    float frame_v0[MAX_TILE_FRAMES];
+    float frame_u1[MAX_TILE_FRAMES];
+    float frame_v1[MAX_TILE_FRAMES];
+} TilePal;
+
+typedef struct {
+    float cell, ox, oy;
+    uint16_t w, h;
+    uint32_t n;
+    uint16_t *cells;
+    uint8_t *solid;
+    uint16_t pal_n;
+    TilePal pal[MAX_TILE_PAL];
+} WiiTilemap;
 
 typedef struct {
     char name[MAX_NAME];
@@ -41,6 +77,7 @@ typedef struct {
     uint16_t text_len;
     float text_size;
     uint8_t text_align;
+    WiiTilemap *tm;
 } Entity;
 
 static Entity ents[MAX_ENTITIES];
@@ -106,7 +143,234 @@ static float rd_f32(const uint8_t **p, const uint8_t *end) {
     return f;
 }
 
+static void free_tilemap(WiiTilemap *tm) {
+    if (!tm)
+        return;
+    free(tm->cells);
+    free(tm->solid);
+    free(tm);
+}
+
+static void free_all_tilemaps(void) {
+    for (int i = 0; i < ent_count; i++) {
+        free_tilemap(ents[i].tm);
+        ents[i].tm = NULL;
+    }
+}
+
+static int tm_in_bounds(const WiiTilemap *tm, int x, int y) {
+    return tm && x >= 0 && y >= 0 && x < (int)tm->w && y < (int)tm->h;
+}
+
+static uint16_t tm_cell(const WiiTilemap *tm, int x, int y) {
+    if (!tm_in_bounds(tm, x, y) || !tm->cells)
+        return 0;
+    return tm->cells[(uint32_t)y * tm->w + (uint32_t)x];
+}
+
+static int tm_solid_at(const WiiTilemap *tm, int x, int y) {
+    if (!tm_in_bounds(tm, x, y) || !tm->solid)
+        return 0;
+    uint32_t i = (uint32_t)y * tm->w + (uint32_t)x;
+    return (tm->solid[i / 8] >> (i % 8)) & 1;
+}
+
+static uint8_t tm_autotile_mask(const WiiTilemap *tm, int x, int y, uint16_t id, uint8_t mode) {
+    int n, e, s, w;
+    if (mode == TILE_AUTO_SOLID) {
+        n = !tm_in_bounds(tm, x, y - 1) || tm_solid_at(tm, x, y - 1);
+        e = !tm_in_bounds(tm, x + 1, y) || tm_solid_at(tm, x + 1, y);
+        s = !tm_in_bounds(tm, x, y + 1) || tm_solid_at(tm, x, y + 1);
+        w = !tm_in_bounds(tm, x - 1, y) || tm_solid_at(tm, x - 1, y);
+    } else {
+        n = tm_in_bounds(tm, x, y - 1) && id != 0 && tm_cell(tm, x, y - 1) == id;
+        e = tm_in_bounds(tm, x + 1, y) && id != 0 && tm_cell(tm, x + 1, y) == id;
+        s = tm_in_bounds(tm, x, y + 1) && id != 0 && tm_cell(tm, x, y + 1) == id;
+        w = tm_in_bounds(tm, x - 1, y) && id != 0 && tm_cell(tm, x - 1, y) == id;
+    }
+    return (uint8_t)((n ? 1 : 0) | (e ? 2 : 0) | (s ? 4 : 0) | (w ? 8 : 0));
+}
+
+static TilePal *tm_pal_for(WiiTilemap *tm, uint16_t id) {
+    if (!tm)
+        return NULL;
+    for (uint16_t i = 0; i < tm->pal_n; i++) {
+        if (tm->pal[i].id == id)
+            return &tm->pal[i];
+    }
+    if (tm->pal_n > 0)
+        return &tm->pal[0];
+    return NULL;
+}
+
+static void tm_tick(WiiTilemap *tm, float dt) {
+    if (!tm)
+        return;
+    for (uint16_t i = 0; i < tm->pal_n; i++) {
+        TilePal *pal = &tm->pal[i];
+        if (pal->frame_n <= 1 || pal->fps <= 0.0f)
+            continue;
+        pal->time += dt;
+        float dur = 1.0f / pal->fps;
+        int n = pal->frame_n;
+        int idx = (int)(pal->time / dur);
+        if (n > 0)
+            idx %= n;
+        if (idx < 0)
+            idx = 0;
+        float cycle = dur * (float)n;
+        if (cycle > 0.0f && pal->time >= cycle)
+            pal->time = fmodf(pal->time, cycle);
+        pal->tex = pal->frame_tex[idx];
+        pal->u0 = pal->frame_u0[idx];
+        pal->v0 = pal->frame_v0[idx];
+        pal->u1 = pal->frame_u1[idx];
+        pal->v1 = pal->frame_v1[idx];
+    }
+}
+
+static void tm_draw(const Entity *e) {
+    WiiTilemap *tm = e->tm;
+    if (!tm || !tm->cells || tm->w == 0 || tm->h == 0)
+        return;
+    float cell_w = tm->cell * e->sx;
+    float cell_h = tm->cell * e->sy;
+    if (fabsf(cell_w) < 1e-6f || fabsf(cell_h) < 1e-6f)
+        return;
+    float ox = e->x + tm->ox * e->sx;
+    float oy = e->y + tm->oy * e->sy;
+    static const uint8_t k_default[4] = {48, 88, 176, 255};
+
+    for (int y = 0; y < (int)tm->h; y++) {
+        for (int x = 0; x < (int)tm->w; x++) {
+            uint16_t id = tm_cell(tm, x, y);
+            if (id == 0)
+                continue;
+            TilePal *pal = tm_pal_for(tm, id);
+            const uint8_t *col = pal ? pal->color : k_default;
+            uint16_t tex = pal ? pal->tex : TILE_NO_TEX;
+            float u0 = pal ? pal->u0 : 0.0f;
+            float v0 = pal ? pal->v0 : 0.0f;
+            float u1 = pal ? pal->u1 : 1.0f;
+            float v1 = pal ? pal->v1 : 1.0f;
+            if (pal && pal->auto_mode != TILE_AUTO_OFF) {
+                uint8_t mask = tm_autotile_mask(tm, x, y, id, pal->auto_mode);
+                if (pal->auto_tex[mask] != TILE_NO_TEX) {
+                    tex = pal->auto_tex[mask];
+                    u0 = pal->auto_u0[mask];
+                    v0 = pal->auto_v0[mask];
+                    u1 = pal->auto_u1[mask];
+                    v1 = pal->auto_v1[mask];
+                }
+            }
+            float dx = ox + (float)x * cell_w;
+            float dy = oy + (float)y * cell_h;
+            uint32_t rgba = rgba_pack(col);
+            if (tex != TILE_NO_TEX && tex < wiimaker_tex_count()) {
+                wiimaker_gx_draw_sprite(tex, dx, dy, cell_w, cell_h, u0, v0, u1, v1, rgba);
+            } else {
+                wiimaker_gx_draw_quad(dx, dy, cell_w, cell_h, rgba);
+            }
+        }
+    }
+}
+
+static int load_tilemap_payload(Entity *e, const uint8_t *tp, const uint8_t *tend) {
+    WiiTilemap *tm = (WiiTilemap *)calloc(1, sizeof(WiiTilemap));
+    if (!tm)
+        return -1;
+    tm->cell = rd_f32(&tp, tend);
+    tm->ox = rd_f32(&tp, tend);
+    tm->oy = rd_f32(&tp, tend);
+    tm->w = rd_u16(&tp, tend);
+    tm->h = rd_u16(&tp, tend);
+    e->z = rd_f32(&tp, tend);
+    tm->n = rd_u32(&tp, tend);
+    uint32_t expect = (uint32_t)tm->w * (uint32_t)tm->h;
+    if (tm->n != expect || tm->n > MAX_TILE_CELLS) {
+        free(tm);
+        e->kind = KIND_NONE;
+        return 0;
+    }
+    if (tm->n > 0) {
+        tm->cells = (uint16_t *)malloc(tm->n * sizeof(uint16_t));
+        if (!tm->cells) {
+            free(tm);
+            return -1;
+        }
+        for (uint32_t ci = 0; ci < tm->n; ci++)
+            tm->cells[ci] = rd_u16(&tp, tend);
+    }
+    uint32_t sbytes = (tm->n + 7u) / 8u;
+    if (sbytes == 0)
+        sbytes = 1;
+    tm->solid = (uint8_t *)calloc(sbytes, 1);
+    if (!tm->solid) {
+        free(tm->cells);
+        free(tm);
+        return -1;
+    }
+    if (tp + ((tm->n + 7u) / 8u) <= tend) {
+        uint32_t nsolid = (tm->n + 7u) / 8u;
+        memcpy(tm->solid, tp, nsolid);
+        tp += nsolid;
+    }
+
+    if (tp + 2 <= tend) {
+        uint16_t pal_n = rd_u16(&tp, tend);
+        uint16_t want = pal_n;
+        if (want > MAX_TILE_PAL)
+            want = MAX_TILE_PAL;
+        for (uint16_t pi = 0; pi < pal_n && tp < tend; pi++) {
+            TilePal scratch;
+            memset(&scratch, 0, sizeof(scratch));
+            int m;
+            for (m = 0; m < 16; m++)
+                scratch.auto_tex[m] = TILE_NO_TEX;
+            scratch.id = rd_u16(&tp, tend);
+            if (tp + 4 > tend)
+                break;
+            memcpy(scratch.color, tp, 4);
+            tp += 4;
+            scratch.tex = rd_u16(&tp, tend);
+            scratch.u0 = rd_f32(&tp, tend);
+            scratch.v0 = rd_f32(&tp, tend);
+            scratch.u1 = rd_f32(&tp, tend);
+            scratch.v1 = rd_f32(&tp, tend);
+            scratch.auto_mode = (tp < tend) ? *tp++ : 0;
+            uint16_t auto_bits = rd_u16(&tp, tend);
+            for (m = 0; m < 16; m++) {
+                if (auto_bits & (1u << m)) {
+                    scratch.auto_tex[m] = rd_u16(&tp, tend);
+                    scratch.auto_u0[m] = rd_f32(&tp, tend);
+                    scratch.auto_v0[m] = rd_f32(&tp, tend);
+                    scratch.auto_u1[m] = rd_f32(&tp, tend);
+                    scratch.auto_v1[m] = rd_f32(&tp, tend);
+                }
+            }
+            scratch.frame_n = (tp < tend) ? *tp++ : 0;
+            scratch.fps = rd_f32(&tp, tend);
+            if (scratch.frame_n > MAX_TILE_FRAMES)
+                scratch.frame_n = MAX_TILE_FRAMES;
+            for (uint8_t f = 0; f < scratch.frame_n; f++) {
+                scratch.frame_tex[f] = rd_u16(&tp, tend);
+                scratch.frame_u0[f] = rd_f32(&tp, tend);
+                scratch.frame_v0[f] = rd_f32(&tp, tend);
+                scratch.frame_u1[f] = rd_f32(&tp, tend);
+                scratch.frame_v1[f] = rd_f32(&tp, tend);
+            }
+            if (pi < want) {
+                tm->pal[tm->pal_n] = scratch;
+                tm->pal_n++;
+            }
+        }
+    }
+    e->tm = tm;
+    return 0;
+}
+
 static int load_scene(const uint8_t *data, uint32_t size) {
+    free_all_tilemaps();
     ent_count = 0;
     player_i = -1;
     shadow_i = -1;
@@ -181,9 +445,10 @@ static int load_scene(const uint8_t *data, uint32_t size) {
             p += 4;
             e->z = rd_f32(&p, end);
         } else if (e->kind == KIND_TILEMAP) {
-            /* Length-prefixed payload. Host renders tilemaps; skip on Wii for now. */
             uint32_t plen = rd_u32(&p, end);
             if (p + plen > end)
+                return -1;
+            if (load_tilemap_payload(e, p, p + plen) != 0)
                 return -1;
             p += plen;
         } else if (e->kind == KIND_TEXT) {
@@ -191,10 +456,10 @@ static int load_scene(const uint8_t *data, uint32_t size) {
             uint16_t slen = rd_u16(&p, end);
             if (p + slen > end)
                 return -1;
-            uint16_t copy = slen < (MAX_TEXT - 1) ? slen : (MAX_TEXT - 1);
-            memcpy(e->text, p, copy);
-            e->text[copy] = '\0';
-            e->text_len = copy;
+            uint16_t tcopy = slen < (MAX_TEXT - 1) ? slen : (MAX_TEXT - 1);
+            memcpy(e->text, p, tcopy);
+            e->text[tcopy] = '\0';
+            e->text_len = tcopy;
             p += slen;
             e->text_size = rd_f32(&p, end);
             e->text_align = (p < end) ? *p++ : 0;
@@ -272,6 +537,11 @@ int wiimaker_game_frame(const WiimakerInput *input, float dt) {
     if (player_i >= 0)
         ents[player_i].radius = base_radius * (1.0f + pulse * 0.35f);
 
+    for (int i = 0; i < ent_count; i++) {
+        if (ents[i].kind == KIND_TILEMAP)
+            tm_tick(ents[i].tm, dt);
+    }
+
     int order[MAX_ENTITIES];
     for (int i = 0; i < ent_count; i++)
         order[i] = i;
@@ -300,6 +570,8 @@ int wiimaker_game_frame(const WiimakerInput *input, float dt) {
                 col = orb_rgba(hue, pulse);
             float scale = e->sx > e->sy ? e->sx : e->sy;
             wiimaker_gx_draw_disc(e->x, e->y, e->radius * scale, col);
+        } else if (e->kind == KIND_TILEMAP) {
+            tm_draw(e);
         } else if (e->kind == KIND_TEXT) {
             float scale = e->sx > e->sy ? e->sx : e->sy;
             if (scale < 0.0f)
@@ -317,4 +589,8 @@ int wiimaker_game_frame(const WiimakerInput *input, float dt) {
     return 0;
 }
 
-void wiimaker_game_shutdown(void) { wiimaker_tex_shutdown(); }
+void wiimaker_game_shutdown(void) {
+    free_all_tilemaps();
+    ent_count = 0;
+    wiimaker_tex_shutdown();
+}

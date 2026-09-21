@@ -42,6 +42,8 @@ void wiimaker_gx_draw_sprite(uint32_t tex_id, float x, float y, float w, float h
  * `align`: 0 Left, 1 Center, 2 Right relative to (x, y). `size` is glyph cell height in world px. */
 void wiimaker_gx_draw_text(float x, float y, const char *text, uint16_t len, float size,
                            uint8_t align, uint32_t rgba8);
+/* Untextured screen-space quad (tilemap color cells; host white × tint). */
+void wiimaker_gx_draw_quad(float x, float y, float w, float h, uint32_t rgba8);
 
 /* Texture upload from cooked `.wpack` (GX-tiled RGB5A3). */
 int wiimaker_tex_load_wpack(const uint8_t *data, uint32_t size);

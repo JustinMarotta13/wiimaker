@@ -406,6 +406,7 @@ fn wall_color() -> [u8; 4] {
 
 /// Authoring tilemap (Unity Tilemap analogue). `cells` / `solid` are row-major.
 /// `solid` is 0/1 per cell (JSON-friendly); packed to bits at hydrate time.
+/// WSCN0003 `KIND_TILEMAP` bakes the grid plus a resolved palette for GX.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SceneTilemap {
     #[serde(default = "default_cell")]
