@@ -130,8 +130,7 @@ impl WPack {
     pub fn add_wav(&mut self, name: impl Into<String>, path: impl AsRef<Path>) -> Result<()> {
         let name = name.into();
         let path = path.as_ref();
-        let (info, pcm) = load_pcm16_wav(path)
-            .with_context(|| format!("cook wav {path:?}"))?;
+        let (info, pcm) = load_pcm16_wav(path).with_context(|| format!("cook wav {path:?}"))?;
         self.audio.push(PackedAudio {
             name,
             sample_rate: info.sample_rate,

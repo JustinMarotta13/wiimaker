@@ -161,12 +161,7 @@ pub fn bake_scene_wscn_with_catalogs(
                 write_text_payload(&mut buf, t)?;
             }
             _ => {
-                if let Some(a) = ent
-                    .components
-                    .audio_source
-                    .as_ref()
-                    .filter(|a| a.enabled)
-                {
+                if let Some(a) = ent.components.audio_source.as_ref().filter(|a| a.enabled) {
                     buf.write_u8(KIND_AUDIO)?;
                     write_audio_payload(&mut buf, a, pack)?;
                 } else {
@@ -1195,7 +1190,12 @@ mod tests {
         )
         .unwrap();
         add_component_audio_source(&mut scene, "Quiet", "beep", 1.0, true).unwrap();
-        scene.entities[0].components.audio_source.as_mut().unwrap().enabled = false;
+        scene.entities[0]
+            .components
+            .audio_source
+            .as_mut()
+            .unwrap()
+            .enabled = false;
         let bytes = bake_scene_wscn(&scene, &pack_with_beep()).unwrap();
         let i = skip_to_kind(&bytes);
         assert_eq!(bytes[i], KIND_NONE);

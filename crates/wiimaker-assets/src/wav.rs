@@ -37,7 +37,11 @@ pub fn list_wav_clips(assets_dir: &Path) -> Result<Vec<String>> {
     }
     for entry in fs::read_dir(assets_dir)? {
         let path = entry?.path();
-        if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("wav")) != Some(true)
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("wav"))
+            != Some(true)
         {
             continue;
         }
@@ -80,7 +84,10 @@ pub fn resolve_wav(assets_dir: &Path, name: &str) -> Result<PathBuf> {
         .and_then(|s| s.to_str())
         .unwrap_or(name)
         .trim_end_matches(".wav");
-    bail!("audio clip '{name}' missing (expected {})", assets_dir.join(format!("{stem}.wav")).display());
+    bail!(
+        "audio clip '{name}' missing (expected {})",
+        assets_dir.join(format!("{stem}.wav")).display()
+    );
 }
 
 /// Inspect a WAV; require PCM16 mono or stereo.
@@ -265,7 +272,9 @@ pub fn spawn_wav_player(path: &Path) -> Result<Option<std::process::Child>> {
     let path_env = std::env::var("PATH").unwrap_or_default();
     let mut chosen = None;
     for (bin, args) in CANDIDATES {
-        let found = path_env.split(':').any(|dir| Path::new(dir).join(bin).is_file());
+        let found = path_env
+            .split(':')
+            .any(|dir| Path::new(dir).join(bin).is_file());
         if found {
             chosen = Some((*bin, *args));
             break;
