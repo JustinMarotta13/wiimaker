@@ -20,7 +20,7 @@ USE_STUB  := $(if $(wildcard $(RUSTLIB)),0,1)
 
 CFLAGS    := -g -O2 -Wall $(MACHDEP) -I$(CURDIR)/include -I$(LIBOGC_INC)
 LDFLAGS   := -g $(MACHDEP) -Wl,-Map,$(BUILD)/$(TARGET).map
-LIBS      := -lwiiuse -lbte -logc -lm
+LIBS      := -lwiiuse -lbte -lasnd -logc -lm
 LIBPATHS  := -L$(LIBOGC_LIB)
 
 ifeq ($(USE_STUB),0)
@@ -32,7 +32,7 @@ GAME_OBJ  := $(BUILD)/stub_game.o
 EMBED_OBJ := $(BUILD)/assets_wpack.o $(BUILD)/scene_wscn.o
 endif
 
-OFILES    := $(BUILD)/bootstrap.o $(BUILD)/gx_draw.o $(GAME_OBJ) $(EMBED_OBJ)
+OFILES    := $(BUILD)/bootstrap.o $(BUILD)/gx_draw.o $(BUILD)/asnd_audio.o $(GAME_OBJ) $(EMBED_OBJ)
 
 .PHONY: all clean
 
@@ -49,6 +49,9 @@ $(BUILD)/bootstrap.o: src/bootstrap.c include/wiimaker_abi.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/gx_draw.o: src/gx_draw.c include/wiimaker_abi.h include/font8x8.h | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/asnd_audio.o: src/asnd_audio.c include/wiimaker_abi.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/stub_game.o: src/stub_game.c include/wiimaker_abi.h | $(BUILD)

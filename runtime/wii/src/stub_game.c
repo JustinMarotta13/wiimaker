@@ -1,7 +1,8 @@
 /*
  * Scene-driven C game for Wii (until Rust staticlib lands).
  * Loads embedded assets.wpack + scene.wscn, draws sprites/discs/text/tilemaps,
- * and keeps hello-orb Player / OrbShadow gameplay.
+ * plays AudioSource oneshots via ASND, and keeps hello-orb Player / OrbShadow
+ * gameplay.
  */
 
 #include "wiimaker_abi.h"
@@ -22,6 +23,7 @@ extern const uint8_t _binary_scene_wscn_end[];
 #define KIND_DISC 2
 #define KIND_TILEMAP 3
 #define KIND_TEXT 4
+#define KIND_AUDIO 5
 #define MAX_ENTITIES 64
 #define MAX_NAME 48
 #define MAX_TEXT 256
@@ -78,6 +80,10 @@ typedef struct {
     float text_size;
     uint8_t text_align;
     WiiTilemap *tm;
+    uint8_t has_audio;
+    uint16_t audio_clip;
+    float audio_volume;
+    uint8_t audio_awake;
 } Entity;
 
 static Entity ents[MAX_ENTITIES];
@@ -468,6 +474,12 @@ static int load_scene(const uint8_t *data, uint32_t size) {
             memcpy(e->color, p, 4);
             p += 4;
             e->z = rd_f32(&p, end);
+        } else if (e->kind == KIND_AUDIO) {
+            /* u16 clip, f32 volume, u8 play_on_awake */
+            e->has_audio = 1;
+            e->audio_clip = rd_u16(&p, end);
+            e->audio_volume = rd_f32(&p, end);
+            e->audio_awake = (p < end) ? *p++ : 0;
         }
 
         if (strcmp(e->name, "Player") == 0) {
@@ -478,7 +490,34 @@ static int load_scene(const uint8_t *data, uint32_t size) {
         }
         ent_count++;
     }
+
+    /* Additive AudioSource table (WSCN0003 tail; omitted on older bakes). */
+    if (p + 2 <= end) {
+        uint16_t n = rd_u16(&p, end);
+        uint16_t ai;
+        for (ai = 0; ai < n && p < end; ai++) {
+            uint16_t ei = rd_u16(&p, end);
+            uint16_t clip = rd_u16(&p, end);
+            float vol = rd_f32(&p, end);
+            uint8_t awake = (p < end) ? *p++ : 0;
+            if (ei < (uint16_t)ent_count) {
+                ents[ei].has_audio = 1;
+                ents[ei].audio_clip = clip;
+                ents[ei].audio_volume = vol;
+                ents[ei].audio_awake = awake;
+            }
+        }
+    }
     return 0;
+}
+
+static void queue_awake_audio(void) {
+    int i;
+    for (i = 0; i < ent_count; i++) {
+        if (ents[i].has_audio && ents[i].audio_awake)
+            wiimaker_audio_queue(ents[i].audio_clip, ents[i].audio_volume);
+    }
+    wiimaker_audio_flush();
 }
 
 void wiimaker_game_init(uint32_t fb_w, uint32_t fb_h) {
@@ -492,7 +531,9 @@ void wiimaker_game_init(uint32_t fb_w, uint32_t fb_h) {
         (uint32_t)(_binary_assets_wpack_end - _binary_assets_wpack_start);
     uint32_t wscn_size = (uint32_t)(_binary_scene_wscn_end - _binary_scene_wscn_start);
     wiimaker_tex_load_wpack(_binary_assets_wpack_start, wpack_size);
+    wiimaker_audio_load_wpack(_binary_assets_wpack_start, wpack_size);
     load_scene(_binary_scene_wscn_start, wscn_size);
+    queue_awake_audio();
 }
 
 int wiimaker_game_frame(const WiimakerInput *input, float dt) {
@@ -592,5 +633,6 @@ int wiimaker_game_frame(const WiimakerInput *input, float dt) {
 void wiimaker_game_shutdown(void) {
     free_all_tilemaps();
     ent_count = 0;
+    wiimaker_audio_shutdown();
     wiimaker_tex_shutdown();
 }

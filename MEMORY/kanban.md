@@ -21,21 +21,21 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local transforms, sprite UV/pivot, `.wpack` cook, WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT`), GX C player draws sprites/discs/text/tilemap cells, `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host cpal). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local transforms, sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C player draws sprites/discs/text/tilemap cells + ASND oneshots, `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** nested prefabs / prefab variants, Wii ASND / Wiimote.
+**Not present:** nested prefabs / prefab variants, Wiimote.
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-09-21):** Wii ASND audio oneshots — host `AudioSource` already plays PCM16 WAV; C runtime comments only.
+**Recommended next morning (2026-09-22):** Wiimote — GCN/classic pad already works; ASND oneshots shipped.
 
 ---
 
 ## Later
 
-- **Wiimote** — after Wii audio; GCN/classic pad already works.
+- **Wiimote** — GCN/classic pad already works.
 - **Rust staticlib** — share host `App` / `World` instead of the C scene player.
 
 ---
@@ -74,7 +74,9 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Gizmo handles** (2026-09-09) — Scene Move tool: Unity-like 2D handles at the selected origin (Inspector red X / green Y, XY free square). Drag X locks Y; drag Y locks X; entity-body drag stays free. **Gizmos** on: collider AABB/circle fill + ticks (seafoam / amber triggers); tilemap bounds + cell grid. Hit-test in `wiimaker-scene` `gizmo.rs`. CLI n/a (no new prefs flag). Host-first.
 
-- **Audio oneshots** (2026-09-10) — `AudioSource` (`clip`, `volume`, `play_on_awake`) on scene JSON; `World::play_oneshot` queue; host plays `assets/*.wav` (PCM16 mono/stereo) via `aplay`/`paplay` when present. Missing clip errors; no player / `WIIMAKER_AUDIO=0` skips. Inspector foldout + Project play / double-click; CLI `asset import` `.wav`, `asset play --name`, `asset list-wavs`, `entity add-component … AudioSource`, `entity set --audio-clip --volume --play-on-awake`. Cook still PNG-only (WAV stay on disk). WSCN unchanged. Wii ASND stub comments only. Fixture: `crates/wiimaker-assets/fixtures/beep.wav`.
+- **Audio oneshots** (2026-09-10) — `AudioSource` (`clip`, `volume`, `play_on_awake`) on scene JSON; `World::play_oneshot` queue; host plays `assets/*.wav` (PCM16 mono/stereo) via `aplay`/`paplay` when present. Missing clip errors; no player / `WIIMAKER_AUDIO=0` skips. Inspector foldout + Project play / double-click; CLI `asset import` `.wav`, `asset play --name`, `asset list-wavs`, `entity add-component … AudioSource`, `entity set --audio-clip --volume --play-on-awake`. Fixture: `crates/wiimaker-assets/fixtures/beep.wav`.
+
+- **Wii ASND oneshots** (2026-09-22) — `WPACK001` audio TOC after meshes (`u32` count; old packs omit → 0): stem, rate, channels, LE PCM16. WSCN0003 `KIND_AUDIO=5` for audio-only entities; additive trailing table (entity index + clip + volume + play_on_awake) for AudioSource on Sprite/Disc/Tilemap/Text. C: `ASND_Init`, load TOC, 32-byte-aligned BE buffers, `ASND_SetVoice` at clip rate, volume 0..1, play-on-awake after load. Missing clip / empty TOC must not crash. Inspector subtitle no longer says ASND is unwired.
 
 - **Sorting layers** (2026-09-11) — Unity Sorting Layer + Order in Layer. `game.toml` `sorting_layers` (default Background / Default / Foreground). Sprite/Disc/Tilemap `sorting_layer` name + `z` as order-in-layer. `render_world` sorts (layer, then z) across kinds; missing/unknown → Default. Inspector combo + Order in Layer; Project `game.toml` list (↑↓ – Add Rename). CLI `sorting-layer list|add|rename|move|remove` (`--json`); `entity set --sorting-layer --order-in-layer` (alias `--z`). Doctor warns unknown names. Host-first; WSCN0003 unchanged (C still sorts by raw z).
 
@@ -147,5 +149,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Ship Wii ASND audio oneshots.** Host `AudioSource` + WAV playback already exist; the C runtime is comment-only. Later: Wiimote, then Rust staticlib.
+**Ship Wiimote.** GCN/classic pad already works; ASND oneshots are in. Later: Rust staticlib.
 

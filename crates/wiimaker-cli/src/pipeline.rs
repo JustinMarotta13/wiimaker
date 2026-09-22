@@ -18,6 +18,7 @@ use wiimaker_scene::{
 pub struct PrepareAssetsOut {
     pub output: String,
     pub textures: usize,
+    pub audio: usize,
     pub warnings: Vec<String>,
 }
 
@@ -26,6 +27,7 @@ pub struct BakeWiiOut {
     pub output: String,
     pub entities: usize,
     pub textures: usize,
+    pub audio: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -34,7 +36,7 @@ pub struct BuildDolOut {
     pub hbc: String,
 }
 
-/// Cook PNGs → `.wpack` for a game (project paths from `game.toml`).
+/// Cook PNGs + PCM16 WAVs → `.wpack` for a game (project paths from `game.toml`).
 pub fn prepare_assets(
     root: &Path,
     name: &str,
@@ -66,6 +68,7 @@ fn cook_dir(input: &Path, output: &Path) -> Result<PrepareAssetsOut> {
     Ok(PrepareAssetsOut {
         output: output.display().to_string(),
         textures: pack.textures.len(),
+        audio: pack.audio.len(),
         warnings: warning_msgs(&warnings),
     })
 }
@@ -104,6 +107,7 @@ pub fn bake_wii(root: &Path, name: &str) -> Result<BakeWiiOut> {
         output: out.display().to_string(),
         entities: scene.entities.len(),
         textures: pack.textures.len(),
+        audio: pack.audio.len(),
     })
 }
 

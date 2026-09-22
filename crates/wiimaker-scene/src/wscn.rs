@@ -7,10 +7,19 @@
 //! (order-in-layer). The C player sorts by `z` only. Do not bump the magic for
 //! this feature.
 //!
-//! `KIND_TEXT = 4` and `KIND_TILEMAP = 3` share this magic (sprite / disc /
-//! tilemap still win when those components are enabled). Tilemap payloads stay
-//! length-prefixed: grid + solid bits, then a resolved palette the GX player
-//! draws as textured or untextured quads.
+//! `KIND_TEXT = 4`, `KIND_TILEMAP = 3`, and `KIND_AUDIO = 5` share this magic
+//! (sprite / disc / tilemap still win over text; those plus text win over
+//! audio-only). Tilemap payloads stay length-prefixed: grid + solid bits, then
+//! a resolved palette the GX player draws as textured or untextured quads.
+//!
+//! AudioSource is a component, not a exclusive draw kind:
+//! - **KIND_AUDIO=5** — audio-only entities (no enabled Sprite/Disc/Tilemap/Text).
+//!   Payload: `u16` wpack clip index ([`WSCN_AUDIO_NO_CLIP`] if missing), `f32`
+//!   volume 0..1, `u8` play_on_awake.
+//! - **Trailing table** (after the entity list, only when ≥1 enabled AudioSource):
+//!   `u16` n, then n × (`u16` entity index, same clip/volume/awake payload).
+//!   Covers Sprite/Disc/Tilemap/Text + AudioSource. C applies the table after
+//!   kinds (idempotent if KIND_AUDIO is also listed). Old bakes omit the tail.
 
 use std::fs::File;
 use std::io::Write;
@@ -31,6 +40,11 @@ pub const KIND_DISC: u8 = 2;
 pub const KIND_TILEMAP: u8 = 3;
 /// HUD bitmap string (same 8×8 bits as `wiimaker-assets` font.rs). Magic stays WSCN0003.
 pub const KIND_TEXT: u8 = 4;
+/// Audio-only entity (no enabled Sprite/Disc/Tilemap/Text). Magic stays WSCN0003.
+pub const KIND_AUDIO: u8 = 5;
+
+/// Wpack audio TOC index meaning “missing / empty clip” — C must not play.
+pub const WSCN_AUDIO_NO_CLIP: u16 = 0xFFFF;
 
 /// Reasonable UTF-8 byte cap for Wii C `Entity.text` (loader still skips a longer bake).
 pub const WSCN_TEXT_MAX_BYTES: usize = 255;
@@ -146,12 +160,18 @@ pub fn bake_scene_wscn_with_catalogs(
                 buf.write_u8(KIND_TEXT)?;
                 write_text_payload(&mut buf, t)?;
             }
-            // Animation / AudioSource / GridMover / Camera-only: host-first.
             _ => {
-                buf.write_u8(KIND_NONE)?;
+                if let Some(a) = ent.components.audio_source.as_ref().filter(|a| a.enabled) {
+                    buf.write_u8(KIND_AUDIO)?;
+                    write_audio_payload(&mut buf, a, pack)?;
+                } else {
+                    // Animation / GridMover / Camera-only / disabled audio.
+                    buf.write_u8(KIND_NONE)?;
+                }
             }
         }
     }
+    write_audio_table(&mut buf, scene, pack)?;
     Ok(buf)
 }
 
@@ -205,6 +225,64 @@ pub fn write_scene_wscn_with_catalogs(
 /// - `u8` align (`0` Left, `1` Center, `2` Right — [`crate::scene::SceneTextAlign`])
 /// - `u8[4]` color RGBA
 /// - `f32` z (order-in-layer)
+/// KIND_AUDIO payload and each trailing-table entry body (little-endian):
+/// - `u16` wpack audio TOC index ([`WSCN_AUDIO_NO_CLIP`] if empty/missing)
+/// - `f32` volume (clamped 0..1)
+/// - `u8` play_on_awake (0/1)
+fn write_audio_payload(
+    buf: &mut Vec<u8>,
+    a: &crate::scene::SceneAudioSource,
+    pack: &WPack,
+) -> Result<()> {
+    let idx = resolve_audio_clip(&a.clip, pack);
+    buf.write_u16::<LittleEndian>(idx)?;
+    buf.write_f32::<LittleEndian>(a.volume.clamp(0.0, 1.0))?;
+    buf.write_u8(if a.play_on_awake { 1 } else { 0 })?;
+    Ok(())
+}
+
+fn resolve_audio_clip(clip: &str, pack: &WPack) -> u16 {
+    if clip.trim().is_empty() {
+        return WSCN_AUDIO_NO_CLIP;
+    }
+    pack.audio_index(clip)
+        .filter(|&i| i <= u16::MAX as usize)
+        .map(|i| i as u16)
+        .unwrap_or(WSCN_AUDIO_NO_CLIP)
+}
+
+/// Additive scene tail: every enabled AudioSource (including KIND_AUDIO entities).
+/// Omitted entirely when the scene has none so existing length-exact tests stay valid.
+fn write_audio_table(buf: &mut Vec<u8>, scene: &Scene, pack: &WPack) -> Result<()> {
+    let entries: Vec<(usize, &crate::scene::SceneAudioSource)> = scene
+        .entities
+        .iter()
+        .enumerate()
+        .filter_map(|(i, ent)| {
+            ent.components
+                .audio_source
+                .as_ref()
+                .filter(|a| a.enabled)
+                .map(|a| (i, a))
+        })
+        .collect();
+    if entries.is_empty() {
+        return Ok(());
+    }
+    if entries.len() > u16::MAX as usize {
+        bail!("too many AudioSource components for WSCN");
+    }
+    buf.write_u16::<LittleEndian>(entries.len() as u16)?;
+    for (i, a) in entries {
+        if i > u16::MAX as usize {
+            bail!("entity index overflow in audio table");
+        }
+        buf.write_u16::<LittleEndian>(i as u16)?;
+        write_audio_payload(buf, a, pack)?;
+    }
+    Ok(())
+}
+
 fn write_text_payload(buf: &mut Vec<u8>, t: &crate::scene::SceneText) -> Result<()> {
     let bytes = t.text.as_bytes();
     let n = bytes.len().min(WSCN_TEXT_MAX_BYTES);
@@ -970,5 +1048,157 @@ mod tests {
         let slen = u16::from_le_bytes(bytes[i + 1..i + 3].try_into().unwrap()) as usize;
         assert_eq!(&bytes[i + 3..i + 3 + slen], b"GO");
         assert_eq!(bytes[i + 3 + slen + 4], 2); // Right after size f32
+    }
+
+    fn pack_with_beep() -> WPack {
+        let mut pack = WPack::new();
+        pack.audio.push(wiimaker_assets::PackedAudio {
+            name: "beep".into(),
+            sample_rate: 22050,
+            channels: 1,
+            pcm: vec![0, 1, -1],
+        });
+        pack
+    }
+
+    fn read_audio_payload(bytes: &[u8], i: &mut usize) -> (u16, f32, u8) {
+        let clip = read_u16(bytes, i);
+        let vol = read_f32(bytes, i);
+        let awake = bytes[*i];
+        *i += 1;
+        (clip, vol, awake)
+    }
+
+    #[test]
+    fn bake_audio_kind_and_payload() {
+        use crate::mutate::add_component_audio_source;
+
+        let mut scene = Scene::new("sfx");
+        add_entity(
+            &mut scene,
+            "Beep",
+            &MutateOpts {
+                x: Some(10.0),
+                y: Some(20.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_audio_source(&mut scene, "Beep", "beep", 0.5, true).unwrap();
+
+        let pack = pack_with_beep();
+        let bytes = bake_scene_wscn(&scene, &pack).unwrap();
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let mut i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_AUDIO);
+        i += 1;
+        let (clip, vol, awake) = read_audio_payload(&bytes, &mut i);
+        assert_eq!(clip, 0);
+        assert!((vol - 0.5).abs() < 1e-4);
+        assert_eq!(awake, 1);
+
+        // Trailing table also lists this entity (C applies after kinds).
+        let n = read_u16(&bytes, &mut i);
+        assert_eq!(n, 1);
+        let ei = read_u16(&bytes, &mut i);
+        assert_eq!(ei, 0);
+        let (tclip, tvol, tawake) = read_audio_payload(&bytes, &mut i);
+        assert_eq!((tclip, tawake), (clip, awake));
+        assert!((tvol - vol).abs() < 1e-4);
+        assert_eq!(i, bytes.len());
+    }
+
+    #[test]
+    fn bake_missing_audio_clip_is_no_clip() {
+        use crate::mutate::add_component_audio_source;
+
+        let mut scene = Scene::new("sfx");
+        add_entity(
+            &mut scene,
+            "Ghost",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_audio_source(&mut scene, "Ghost", "nope", 1.0, false).unwrap();
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        let mut i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_AUDIO);
+        i += 1;
+        let (clip, vol, awake) = read_audio_payload(&bytes, &mut i);
+        assert_eq!(clip, WSCN_AUDIO_NO_CLIP);
+        assert!((vol - 1.0).abs() < 1e-4);
+        assert_eq!(awake, 0);
+        assert_eq!(read_u16(&bytes, &mut i), 1); // table n
+    }
+
+    #[test]
+    fn bake_sprite_wins_over_audio_table() {
+        use crate::mutate::add_component_audio_source;
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Hero",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_sprite(&mut scene, "Hero", "sheet", [16.0, 16.0]).unwrap();
+        add_component_audio_source(&mut scene, "Hero", "beep", 0.25, true).unwrap();
+        let mut pack = dummy_pack("sheet");
+        pack.audio.push(wiimaker_assets::PackedAudio {
+            name: "beep".into(),
+            sample_rate: 22050,
+            channels: 1,
+            pcm: vec![0],
+        });
+        let bytes = bake_scene_wscn(&scene, &pack).unwrap();
+        let mut i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_SPRITE);
+        i += 1;
+        i += 2 + 8 + 16 + 8 + 4 + 4; // tex size uv pivot color z
+        let n = read_u16(&bytes, &mut i);
+        assert_eq!(n, 1);
+        assert_eq!(read_u16(&bytes, &mut i), 0);
+        let (clip, vol, awake) = read_audio_payload(&bytes, &mut i);
+        assert_eq!(clip, 0);
+        assert!((vol - 0.25).abs() < 1e-4);
+        assert_eq!(awake, 1);
+        assert_eq!(i, bytes.len());
+    }
+
+    #[test]
+    fn bake_disabled_audio_omits_kind_and_table() {
+        use crate::mutate::add_component_audio_source;
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Quiet",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_audio_source(&mut scene, "Quiet", "beep", 1.0, true).unwrap();
+        scene.entities[0]
+            .components
+            .audio_source
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        let bytes = bake_scene_wscn(&scene, &pack_with_beep()).unwrap();
+        let i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_NONE);
+        assert_eq!(i + 1, bytes.len());
     }
 }

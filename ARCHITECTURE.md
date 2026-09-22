@@ -75,6 +75,9 @@ Wii maps each command onto GX immediate / display-list calls.
 raster samples an atlas, and the Wii C player draws the same bits as untextured
 GX quads (`KIND_TEXT` in WSCN0003). Tilemaps bake as `KIND_TILEMAP` (length-prefixed
 grid + palette); GX draws occupied cells as textured quads or untextured tints.
+AudioSource bakes as `KIND_AUDIO=5` when it is the only enabled draw-like
+component, plus an additive trailing table (entity index + clip + volume +
+play-on-awake) so Sprite/Disc/Tilemap/Text entities can still carry a clip.
 
 ### Wii runtime (C)
 
@@ -86,9 +89,10 @@ The previous project's pure-Rust `Video::configure` path leaked a heap
 1. `VIDEO_Init` / preferred mode / double framebuffer
 2. `GX_Init` FIFO in MEM1
 3. `PAD_Init` (+ later `WPAD_Init`)
-4. Call into Rust `wiimaker_game_frame(input, dt)` each VI
+4. `ASND_Init` / `ASND_Pause(0)` — PCM16 oneshots from the `.wpack` audio TOC
+5. Call into Rust `wiimaker_game_frame(input, dt)` each VI
 
-Rust builds as `staticlib`; the Makefile links it with `-lwiiuse -lbte -logc -lm`.
+Rust builds as `staticlib`; the Makefile links it with `-lwiiuse -lbte -lasnd -logc -lm`.
 
 ### Asset pipeline (`.wpack`)
 
@@ -98,7 +102,7 @@ Offline (`wiimaker-assets` + CLI):
 |---|---|
 | PNG/TGA | RGB5A3 or CMPR tiles, 32-byte aligned |
 | OBJ/glTF | Interleaved POS/NRM/UV as f32 or s16, 32-byte aligned |
-| WAV | Mono/stereo PCM16 (ASND-friendly). **Host** plays `assets/*.wav` (validated PCM16; `aplay`/`paplay` when present). `.wpack` audio TOC / Wii ASND is not packed yet. |
+| WAV | Mono/stereo PCM16. **Host** plays `assets/*.wav` (`aplay`/`paplay` when present). Cook appends a `WPACK001` audio TOC after meshes (`u32` count; omitted on old packs → 0). Each clip is stem + rate + channels + LE PCM16. Wii C byteswaps to BE and plays via ASND. |
 
 A `.wpack` is a tiny TOC + blobs — no runtime parsing of PNG on console.
 

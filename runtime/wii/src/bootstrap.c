@@ -8,6 +8,7 @@
  * Build: see Makefile (devkitPro) or ../../tools/wii-build.sh (Docker).
  */
 
+#include <asndlib.h>
 #include <gccore.h>
 #include <malloc.h>
 #include <ogc/lwp_watchdog.h>
@@ -68,8 +69,9 @@ static void init_video(void) {
     GX_CopyDisp(xfb[fbi], GX_TRUE);
     GX_SetDispCopyGamma(GX_GM_1_0);
 
-    /* Audio oneshots: host plays PCM16 WAV (ARCHITECTURE M3).
-     * Wii ASND / AESND is not wired yet — do not call ASND_Init here. */
+    /* PCM16 oneshots: host plays assets/*.wav; Wii plays the .wpack audio TOC. */
+    ASND_Init();
+    ASND_Pause(0);
 
     SYS_SetResetCallback(reset_cb);
     SYS_SetPowerCallback(power_cb);
@@ -185,5 +187,6 @@ int main(int argc, char **argv) {
     }
 
     wiimaker_game_shutdown();
+    ASND_End();
     return 0;
 }

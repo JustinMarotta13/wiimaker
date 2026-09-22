@@ -1049,7 +1049,7 @@ impl EditorApp {
                         preview_audio = true;
                     }
                     ui.label(
-                        RichText::new("Host PCM16 WAV · Wii ASND not wired")
+                        RichText::new("Host + Wii ASND PCM16 oneshot")
                             .size(11.0)
                             .color(theme::TEXT_DIM),
                     );
@@ -1798,7 +1798,7 @@ impl EditorApp {
                         self.preview_wav_clip(stem, 1.0);
                     }
                 }
-                theme::muted(ui, "PCM16 mono/stereo oneshot · not packed into .wpack yet");
+                theme::muted(ui, "PCM16 mono/stereo oneshot · cooked into .wpack for Wii ASND");
             } else if ext == "txt" {
                 theme::muted(ui, "# wall · . / space / 0 empty · 1-9 palette id");
                 ui.add_space(4.0);
