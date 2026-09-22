@@ -2,7 +2,9 @@
 
 ## `beep.wav`
 
-PCM16 mono 22050 Hz beep (~80 ms). Copy into a game `assets/` folder:
+PCM16 mono 22050 Hz beep (~80 ms). Copy into a game `assets/` folder; `cook` /
+`prepare` packs it into the `.wpack` audio TOC for Wii ASND (host still plays
+the WAV on disk):
 
 ```bash
 wiimaker asset import <game> crates/wiimaker-assets/fixtures/beep.wav

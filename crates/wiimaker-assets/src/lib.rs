@@ -6,7 +6,7 @@
 //! - TOC small enough to mmap from DVD / SD
 
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -39,6 +39,8 @@ pub const MAGIC: &[u8; 8] = b"WPACK001";
 pub struct WPack {
     pub textures: Vec<PackedTexture>,
     pub meshes: Vec<PackedMesh>,
+    /// PCM16 oneshots (LE interleaved). Absent on pre-audio packs (`audio_n` missing → empty).
+    pub audio: Vec<PackedAudio>,
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +75,29 @@ pub struct PackedMesh {
     pub indices: Vec<u16>,
 }
 
+/// PCM16 clip in the `WPACK001` audio TOC (after meshes).
+///
+/// On-disk: `u16` name + `u32` rate + `u16` channels + `u32` byte_len + LE i16 samples.
+/// Wii C copies into a 32-byte-aligned buffer and byteswaps to BE for ASND.
+#[derive(Clone, Debug)]
+pub struct PackedAudio {
+    pub name: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    /// Interleaved little-endian PCM16 samples (mono or stereo).
+    pub pcm: Vec<i16>,
+}
+
+impl PackedAudio {
+    pub fn pcm_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.pcm.len() * 2);
+        for s in &self.pcm {
+            out.extend_from_slice(&s.to_le_bytes());
+        }
+        out
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CookWarning {
     pub texture: String,
@@ -84,11 +109,36 @@ impl WPack {
         Self {
             textures: Vec::new(),
             meshes: Vec::new(),
+            audio: Vec::new(),
         }
     }
 
     pub fn texture_index(&self, name: &str) -> Option<usize> {
         self.textures.iter().position(|t| t.name == name)
+    }
+
+    /// Resolve a clip stem / `*.wav` path to a TOC index.
+    pub fn audio_index(&self, name: &str) -> Option<usize> {
+        let want = clip_stem(name);
+        if want.is_empty() {
+            return None;
+        }
+        self.audio.iter().position(|a| clip_stem(&a.name) == want)
+    }
+
+    /// Cook a validated PCM16 WAV into the audio TOC (name = stem).
+    pub fn add_wav(&mut self, name: impl Into<String>, path: impl AsRef<Path>) -> Result<()> {
+        let name = name.into();
+        let path = path.as_ref();
+        let (info, pcm) = load_pcm16_wav(path)
+            .with_context(|| format!("cook wav {path:?}"))?;
+        self.audio.push(PackedAudio {
+            name,
+            sample_rate: info.sample_rate,
+            channels: info.channels,
+            pcm,
+        });
+        Ok(())
     }
 
     /// Cook a PNG. Non-power-of-two images are padded up (original top-left).
@@ -136,10 +186,10 @@ impl WPack {
         Ok(warning)
     }
 
-    /// Cook every PNG in a directory into this pack.
+    /// Cook every PNG and PCM16 WAV in a directory into this pack.
     ///
-    /// WAV files are left as `assets/*.wav` for host playback (ARCHITECTURE M3).
-    /// They must not be treated as textures. A Wii/ASND audio TOC is not packed yet.
+    /// WAVs are packed into the `WPACK001` audio TOC (stem, rate, channels, LE PCM16).
+    /// Host preview still plays `assets/*.wav` from disk. Invalid WAVs fail cook.
     pub fn cook_dir(&mut self, dir: &Path) -> Result<Vec<CookWarning>> {
         let mut warnings = Vec::new();
         let mut entries: Vec<_> = fs::read_dir(dir)
@@ -159,15 +209,11 @@ impl WPack {
                 warnings.push(w);
             }
         }
-        let wavs = crate::list_wav_clips(dir).unwrap_or_default();
-        if !wavs.is_empty() {
-            warnings.push(CookWarning {
-                texture: "audio".into(),
-                message: format!(
-                    "{} wav clip(s) stay in assets/ for host playback (Wii ASND TOC not packed yet)",
-                    wavs.len()
-                ),
-            });
+        let mut wavs = crate::list_wav_clips(dir).unwrap_or_default();
+        wavs.sort();
+        for stem in wavs {
+            let path = crate::resolve_wav(dir, &stem)?;
+            self.add_wav(stem, &path)?;
         }
         Ok(warnings)
     }
@@ -196,6 +242,19 @@ impl WPack {
                 f.write_u16::<LittleEndian>(*i)?;
             }
             pad32(&mut f)?;
+        }
+        // Audio TOC (additive). Old readers stop after meshes; old packs omit this
+        // u32 and `read_from` treats EOF as audio_n = 0.
+        f.write_u32::<LittleEndian>(self.audio.len() as u32)?;
+        for clip in &self.audio {
+            write_str(&mut f, &clip.name)?;
+            f.write_u32::<LittleEndian>(clip.sample_rate)?;
+            f.write_u16::<LittleEndian>(clip.channels)?;
+            let nbytes = (clip.pcm.len() * 2) as u32;
+            f.write_u32::<LittleEndian>(nbytes)?;
+            for s in &clip.pcm {
+                f.write_i16::<LittleEndian>(*s)?;
+            }
         }
         Ok(())
     }
@@ -244,8 +303,60 @@ impl WPack {
                 indices,
             });
         }
+        pack.audio = match read_audio_toc(&mut f) {
+            Ok(clips) => clips,
+            Err(e) => {
+                let io_err = e.downcast_ref::<io::Error>();
+                if io_err.is_some_and(|e| e.kind() == io::ErrorKind::UnexpectedEof) {
+                    Vec::new()
+                } else {
+                    return Err(e);
+                }
+            }
+        };
         Ok(pack)
     }
+}
+
+fn read_audio_toc(f: &mut impl Read) -> Result<Vec<PackedAudio>> {
+    let audio_n = match f.read_u32::<LittleEndian>() {
+        Ok(n) => n as usize,
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut clips = Vec::with_capacity(audio_n);
+    for _ in 0..audio_n {
+        let name = read_str(f)?;
+        let sample_rate = f.read_u32::<LittleEndian>()?;
+        let channels = f.read_u16::<LittleEndian>()?;
+        let nbytes = f.read_u32::<LittleEndian>()? as usize;
+        let mut bytes = vec![0u8; nbytes];
+        f.read_exact(&mut bytes)?;
+        let mut pcm = Vec::with_capacity(bytes.len() / 2);
+        for chunk in bytes.chunks_exact(2) {
+            pcm.push(i16::from_le_bytes([chunk[0], chunk[1]]));
+        }
+        clips.push(PackedAudio {
+            name,
+            sample_rate,
+            channels,
+            pcm,
+        });
+    }
+    Ok(clips)
+}
+
+/// Stem used for TOC lookup (`beep`, `beep.wav`, `assets/beep.wav` → `beep`).
+pub fn clip_stem(name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        return String::new();
+    }
+    Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name)
+        .to_string()
 }
 
 impl Default for WPack {
@@ -370,5 +481,71 @@ mod tests {
         let tiled = tile_rgb5a3(w, h, &linear);
         assert_eq!(tiled.len(), linear.len());
         assert_eq!(untile_rgb5a3(w, h, &tiled), linear);
+    }
+
+    #[test]
+    fn cook_wav_roundtrip_beep_fixture() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/beep.wav");
+        let (info, samples) = load_pcm16_wav(&fixture).unwrap();
+        assert_eq!(info.channels, 1);
+        assert_eq!(info.bits_per_sample, 16);
+        assert!(info.sample_rate > 0);
+        assert!(!samples.is_empty());
+
+        let dir = std::env::temp_dir().join(format!("wiimaker-wpack-wav-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::copy(&fixture, dir.join("beep.wav")).unwrap();
+
+        let mut pack = WPack::new();
+        let warnings = pack.cook_dir(&dir).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(pack.audio.len(), 1);
+        assert_eq!(pack.audio_index("beep"), Some(0));
+        assert_eq!(pack.audio_index("beep.wav"), Some(0));
+        assert_eq!(pack.audio_index("assets/beep.wav"), Some(0));
+        assert_eq!(pack.audio[0].sample_rate, info.sample_rate);
+        assert_eq!(pack.audio[0].channels, info.channels);
+        assert_eq!(pack.audio[0].pcm, samples);
+
+        let out = dir.join("assets.wpack");
+        pack.write_to(&out).unwrap();
+        let loaded = WPack::read_from(&out).unwrap();
+        assert_eq!(loaded.audio.len(), 1);
+        assert_eq!(loaded.audio[0].name, "beep");
+        assert_eq!(loaded.audio[0].sample_rate, info.sample_rate);
+        assert_eq!(loaded.audio[0].channels, 1);
+        assert_eq!(loaded.audio[0].pcm, samples);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_old_wpack_without_audio_toc() {
+        // MAGIC + tex_n=0 + mesh_n=0 and no trailing audio_n (pre-TOC packs).
+        let dir = std::env::temp_dir().join(format!("wiimaker-wpack-old-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.wpack");
+        let mut bytes = Vec::from(*MAGIC);
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        fs::write(&path, &bytes).unwrap();
+        let pack = WPack::read_from(&path).unwrap();
+        assert!(pack.textures.is_empty());
+        assert!(pack.meshes.is_empty());
+        assert!(pack.audio.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_empty_audio_toc_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("wiimaker-wpack-empty-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("empty.wpack");
+        WPack::new().write_to(&path).unwrap();
+        let pack = WPack::read_from(&path).unwrap();
+        assert!(pack.audio.is_empty());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

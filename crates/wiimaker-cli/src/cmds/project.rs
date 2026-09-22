@@ -129,7 +129,10 @@ pub fn cook(
         for w in &out.warnings {
             println!("warn {w}");
         }
-        println!("wrote {} ({} textures)", out.output, out.textures);
+        println!(
+            "wrote {} ({} textures, {} audio)",
+            out.output, out.textures, out.audio
+        );
     }
     Ok(())
 }
@@ -140,8 +143,8 @@ pub fn bake_wii(root: &Path, name: &str, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
         println!(
-            "wrote {} ({} entities, {} textures)",
-            out.output, out.entities, out.textures
+            "wrote {} ({} entities, {} textures, {} audio)",
+            out.output, out.entities, out.textures, out.audio
         );
     }
     Ok(())

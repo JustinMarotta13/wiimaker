@@ -86,8 +86,8 @@ pub use undo::UndoStack;
 pub use wiimaker_core::{DEFAULT_SORTING_LAYER, DEFAULT_SORTING_LAYERS};
 pub use wscn::{
     bake_scene_wscn, bake_scene_wscn_with_catalog, bake_scene_wscn_with_catalogs, write_scene_wscn,
-    write_scene_wscn_with_catalog, write_scene_wscn_with_catalogs, KIND_DISC, KIND_NONE,
-    KIND_SPRITE, KIND_TEXT, KIND_TILEMAP, WSCN_MAGIC, WSCN_TEXT_MAX_BYTES, WSCN_TILEMAP_AUTO_ID,
-    WSCN_TILEMAP_AUTO_OFF, WSCN_TILEMAP_AUTO_SOLID, WSCN_TILEMAP_MAX_FRAMES,
+    write_scene_wscn_with_catalog, write_scene_wscn_with_catalogs, KIND_AUDIO, KIND_DISC, KIND_NONE,
+    KIND_SPRITE, KIND_TEXT, KIND_TILEMAP, WSCN_AUDIO_NO_CLIP, WSCN_MAGIC, WSCN_TEXT_MAX_BYTES,
+    WSCN_TILEMAP_AUTO_ID, WSCN_TILEMAP_AUTO_OFF, WSCN_TILEMAP_AUTO_SOLID, WSCN_TILEMAP_MAX_FRAMES,
     WSCN_TILE_DEFAULT_COLOR, WSCN_TILE_NO_TEX,
 };

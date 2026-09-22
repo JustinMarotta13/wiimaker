@@ -52,7 +52,19 @@ uint16_t wiimaker_tex_height(uint32_t tex_id);
 uint32_t wiimaker_tex_count(void);
 void wiimaker_tex_shutdown(void);
 
-/* Audio oneshots are host-only. Wii ASND playback is not implemented. */
+/* PCM16 oneshots from the `.wpack` audio TOC (ASND). Missing clip / empty TOC is a no-op. */
+#define WIIMAKER_AUDIO_NO_CLIP 0xFFFFu
+
+int wiimaker_audio_load_wpack(const uint8_t *data, uint32_t size);
+uint32_t wiimaker_audio_clip_count(void);
+/* Stem lookup (`beep` / `beep.wav`). Returns clip id or -1. */
+int wiimaker_audio_find(const char *name);
+/* Play immediately. `clip_id` is a TOC index; `volume` is 0..1. Returns 0 or -1. */
+int wiimaker_audio_play(uint32_t clip_id, float volume);
+/* Queue a oneshot (play-on-awake / game). `wiimaker_audio_flush` plays the queue. */
+int wiimaker_audio_queue(uint32_t clip_id, float volume);
+void wiimaker_audio_flush(void);
+void wiimaker_audio_shutdown(void);
 
 #ifdef __cplusplus
 }

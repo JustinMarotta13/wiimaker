@@ -1,7 +1,7 @@
-//! PCM16 WAV helpers for host oneshots (ASND-friendly: mono/stereo 16-bit).
+//! PCM16 WAV helpers for host oneshots and the `.wpack` audio TOC.
 //!
-//! Clips live as `assets/<stem>.wav`. They are **not** packed into `WPACK001`
-//! yet (Wii ASND TOC is a follow-up).
+//! Clips live as `assets/<stem>.wav` on disk (host `aplay` / editor preview)
+//! and cook into `WPACK001` as LE PCM16 (name, rate, channels, blob) for Wii ASND.
 
 use std::fs::{self, File};
 use std::io::{Read, Write};

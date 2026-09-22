@@ -30,7 +30,7 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | Tilemap / TilemapCollider2D | `Tilemap` component (cell ids + solid bits) |
 | AnimatedTile / RuleTile | Tilemap palette `anim` + `auto_tile` (`id` / `solid`, NESW bitmask) |
 | BoxCollider2D / CircleCollider2D | `Collider` (`Aabb` / `Circle`, `solid`) |
-| AudioSource | `AudioSource` (`clip`, `volume`, `play_on_awake`) + host oneshots |
+| AudioSource | `AudioSource` (`clip`, `volume`, `play_on_awake`) + host / Wii ASND oneshots |
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
 | Play | Editor Play ticks the game `App` (cdylib plugin) · `wiimaker run` / File → Run external |
 | Scenes in Build / LoadScene | `game.toml` `scenes = [...]` · `load_scene_into_world` · File → Build Settings… |
@@ -107,11 +107,13 @@ Editor Scene/Game/Project chrome (zoom, grid, gizmos, Game aspect, Project colla
 
 Sprite sheets keep one PNG; cells live in `assets/<stem>.sprites.json` (Grid By Cell Count + normalized pivot). Scenes reference cell names like `hero_2`.
 
-A tiny PCM16 beep lives at `crates/wiimaker-assets/fixtures/beep.wav` (also copied into `templates/basic-game/assets/` for new games). Host-only; not packed into `.wpack` yet.
+A tiny PCM16 beep lives at `crates/wiimaker-assets/fixtures/beep.wav` (also copied into `templates/basic-game/assets/` for new games). Cook packs it into the `.wpack` audio TOC; host still previews the WAV on disk.
 
 HUD text uses a built-in 8×8 bitmap font (`DrawCmd::DrawText` on host; WSCN0003 `KIND_TEXT` + GX quads on Wii). The visual fixture is `crates/wiimaker-assets/fixtures/hud_font.png`; it is **not** cooked into `.wpack`. Missing glyphs draw as `?`.
 
 Tilemaps bake into the same `WSCN0003` blob (`KIND_TILEMAP=3`, length-prefixed grid + palette). The Wii C player draws occupied cells as GX textured quads (palette sprite / auto-tile variant / anim frame 0+) or untextured tinted quads when the palette has no texture — matching host `render_world`. Editor/CLI tilemap tools are unchanged.
+
+AudioSource bakes under the same `WSCN0003` magic: `KIND_AUDIO=5` for audio-only entities, plus a trailing table (entity index, wpack clip, volume, play-on-awake) so a Sprite/Disc/Tilemap/Text can still fire a oneshot. Missing clips are `0xFFFF` and must not crash. The C player inits ASND, loads the TOC, and plays play-on-awake after scene load.
 
 ## Quick start (Wii)
 
@@ -124,9 +126,9 @@ wiimaker dolphin hello-orb     # or: ./tools/run-dolphin.sh target/wii/hello-orb
 wiimaker play-wii hello-orb
 ```
 
-`build` prepares `.wpack`, bakes `scene.wscn` (WSCN0003 with UV + pivot + Tilemap palette + `KIND_TEXT`), and embeds both into the `.dol`. Editor toolbar: **Build** · **Play in Dolphin** · **Build & Run** (Cook is under ⋯).
+`build` prepares `.wpack` (PNG + PCM16 WAV TOC), bakes `scene.wscn` (WSCN0003 with UV + pivot + Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), and embeds both into the `.dol`. Editor toolbar: **Build** · **Play in Dolphin** · **Build & Run** (Cook is under ⋯).
 
-**Dolphin check (tilemaps):** `wiimaker build <game>` then `wiimaker dolphin <game>` (or File → Open `target/wii/<game>/boot.dol`). Occupied tile cells should match host `wiimaker run` / editor Game view (colored walls, sprite tiles, auto-tile variants). Animated palette clips tick on GX when the bake includes 2+ frames. This environment cannot run Dolphin; use that path on a machine with it.
+**Dolphin check (tilemaps / audio):** `wiimaker build <game>` then `wiimaker dolphin <game>` (or File → Open `target/wii/<game>/boot.dol`). Occupied tile cells should match host `wiimaker run` / editor Game view (colored walls, sprite tiles, auto-tile variants). Animated palette clips tick on GX when the bake includes 2+ frames. AudioSource play-on-awake should fire once after load (PCM16 from the wpack TOC). This environment cannot run Dolphin; use that path on a machine with it.
 
 ## Workspace layout
 
@@ -136,11 +138,11 @@ wiimaker/
 │   ├── wiimaker-core/     # engine: World, components, DrawList IR, input
 │   ├── wiimaker-host/     # desktop backend (minifb + texture atlas)
 │   ├── wiimaker-scene/    # game.toml / .scene.json + mutate helpers
-│   ├── wiimaker-assets/   # PNG → .wpack cooker
+│   ├── wiimaker-assets/   # PNG + PCM16 WAV → .wpack cooker
 │   ├── wiimaker-play/     # host/editor App tick + optional game cdylib
 │   ├── wiimaker-cli/      # `wiimaker` agent + human CLI
 │   └── wiimaker-editor/   # egui Hierarchy / Inspector / Scene / Project
-├── runtime/wii/           # C Broadway bootstrap (VI/GX/PAD)
+├── runtime/wii/           # C Broadway bootstrap (VI/GX/PAD/ASND)
 ├── games/hello-orb/       # reference game (scene + sample sprites)
 ├── templates/basic-game/  # scaffold for `wiimaker new`
 ├── docker/                # reproducible PowerPC builds

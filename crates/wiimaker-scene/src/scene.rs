@@ -767,7 +767,8 @@ impl SceneGridMover {
     }
 }
 
-/// Host-first oneshot clip (Unity AudioSource analogue). Not in WSCN.
+/// Oneshot clip (Unity AudioSource analogue). Host plays `assets/*.wav`;
+/// WSCN0003 bakes `KIND_AUDIO` and/or a trailing AudioSource table.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SceneAudioSource {
     /// `assets/<clip>.wav` stem (or `name.wav`).

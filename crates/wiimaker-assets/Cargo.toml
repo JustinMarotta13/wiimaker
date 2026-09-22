@@ -3,7 +3,7 @@ name = "wiimaker-assets"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Asset cooker — PNG/OBJ to .wpack for Broadway"
+description = "Asset cooker — PNG/WAV/OBJ to .wpack for Broadway"
 
 [dependencies]
 anyhow = { workspace = true }
