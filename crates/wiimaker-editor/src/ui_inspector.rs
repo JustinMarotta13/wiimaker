@@ -2062,5 +2062,6 @@ mod tests {
         assert!(status.contains("Start"));
         assert!(INPUT_LEGEND.contains("Classic"));
         assert!(INPUT_LEGEND.contains("Wiimote"));
+        assert!(INPUT_LEGEND.contains("Nunchuk"));
     }
 }

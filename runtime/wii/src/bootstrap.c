@@ -173,61 +173,73 @@ static void fill_input(WiimakerInput *out) {
     if (wii & WPAD_BUTTON_RIGHT)
         out->buttons |= WIIMAKER_BTN_RIGHT;
 
-    /* Classic bits live in the high word of WPAD_ButtonsHeld when attached.
-     * OR always — EXP_NONE leaves those bits 0. */
-    if (wii & WPAD_CLASSIC_BUTTON_A)
-        out->buttons |= WIIMAKER_BTN_A;
-    if (wii & WPAD_CLASSIC_BUTTON_B)
-        out->buttons |= WIIMAKER_BTN_B;
-    if (wii & WPAD_CLASSIC_BUTTON_X)
-        out->buttons |= WIIMAKER_BTN_X;
-    if (wii & WPAD_CLASSIC_BUTTON_Y)
-        out->buttons |= WIIMAKER_BTN_Y;
-    if (wii & WPAD_CLASSIC_BUTTON_PLUS)
-        out->buttons |= WIIMAKER_BTN_START;
-    if (wii & WPAD_CLASSIC_BUTTON_HOME)
-        out->buttons |= WIIMAKER_BTN_START;
-    if (wii & WPAD_CLASSIC_BUTTON_MINUS)
-        out->buttons |= WIIMAKER_BTN_Z;
-    if ((wii & WPAD_CLASSIC_BUTTON_FULL_L) || (wii & WPAD_CLASSIC_BUTTON_ZL))
-        out->buttons |= WIIMAKER_BTN_L;
-    if ((wii & WPAD_CLASSIC_BUTTON_FULL_R) || (wii & WPAD_CLASSIC_BUTTON_ZR))
-        out->buttons |= WIIMAKER_BTN_R;
-    if (wii & WPAD_CLASSIC_BUTTON_UP)
-        out->buttons |= WIIMAKER_BTN_UP;
-    if (wii & WPAD_CLASSIC_BUTTON_DOWN)
-        out->buttons |= WIIMAKER_BTN_DOWN;
-    if (wii & WPAD_CLASSIC_BUTTON_LEFT)
-        out->buttons |= WIIMAKER_BTN_LEFT;
-    if (wii & WPAD_CLASSIC_BUTTON_RIGHT)
-        out->buttons |= WIIMAKER_BTN_RIGHT;
-
-    /* Analog expansions: Probe so a missing Wiimote / EXP_NONE is a no-op. */
+    /* Expansion high-word bits collide: Nunchuk Z == Classic UP, C == LEFT
+     * (`wpad.h`). Probe first; OR Classic digital only when EXP_CLASSIC.
+     * EXP_NONE / EXP_NUNCHUK must not treat those bits as D-pad (idle analog
+     * would synthesize +Y and GridMover prefers D-pad over stick). */
     u32 exp_type = WPAD_EXP_NONE;
-    if (WPAD_Probe(0, &exp_type) == WPAD_ERR_NONE) {
-        WPADData *wd = WPAD_Data(0);
-        if (wd && wd->err == WPAD_ERR_NONE) {
-            int have_exp = (wd->data_present & WPAD_DATA_EXPANSION) != 0;
-            int kind = have_exp ? wd->exp.type : (int)exp_type;
-            if (kind == WPAD_EXP_CLASSIC) {
-                f32 lx, ly, rx, ry;
-                joy_xy(&wd->exp.classic.ljs, &lx, &ly);
-                joy_xy(&wd->exp.classic.rjs, &rx, &ry);
-                if (stick_idle(out->main_x, out->main_y)) {
-                    out->main_x = lx;
-                    out->main_y = ly;
-                }
-                if (stick_idle(out->c_x, out->c_y)) {
-                    out->c_x = rx;
-                    out->c_y = ry;
-                }
-            } else if (kind == WPAD_EXP_NUNCHUK) {
-                f32 nx, ny;
-                joy_xy(&wd->exp.nunchuk.js, &nx, &ny);
-                if (stick_idle(out->main_x, out->main_y)) {
-                    out->main_x = nx;
-                    out->main_y = ny;
-                }
+    WPADData *wd = NULL;
+    if (WPAD_Probe(0, &exp_type) == WPAD_ERR_NONE)
+        wd = WPAD_Data(0);
+    int kind = (int)exp_type;
+    if (wd && wd->err == WPAD_ERR_NONE &&
+        (wd->data_present & WPAD_DATA_EXPANSION) != 0)
+        kind = wd->exp.type;
+
+    if (kind == WPAD_EXP_CLASSIC) {
+        /* Classic digital sits in WPAD_ButtonsHeld even if analog is missing. */
+        if (wii & WPAD_CLASSIC_BUTTON_A)
+            out->buttons |= WIIMAKER_BTN_A;
+        if (wii & WPAD_CLASSIC_BUTTON_B)
+            out->buttons |= WIIMAKER_BTN_B;
+        if (wii & WPAD_CLASSIC_BUTTON_X)
+            out->buttons |= WIIMAKER_BTN_X;
+        if (wii & WPAD_CLASSIC_BUTTON_Y)
+            out->buttons |= WIIMAKER_BTN_Y;
+        if (wii & WPAD_CLASSIC_BUTTON_PLUS)
+            out->buttons |= WIIMAKER_BTN_START;
+        if (wii & WPAD_CLASSIC_BUTTON_HOME)
+            out->buttons |= WIIMAKER_BTN_START;
+        if (wii & WPAD_CLASSIC_BUTTON_MINUS)
+            out->buttons |= WIIMAKER_BTN_Z;
+        if ((wii & WPAD_CLASSIC_BUTTON_FULL_L) || (wii & WPAD_CLASSIC_BUTTON_ZL))
+            out->buttons |= WIIMAKER_BTN_L;
+        if ((wii & WPAD_CLASSIC_BUTTON_FULL_R) || (wii & WPAD_CLASSIC_BUTTON_ZR))
+            out->buttons |= WIIMAKER_BTN_R;
+        if (wii & WPAD_CLASSIC_BUTTON_UP)
+            out->buttons |= WIIMAKER_BTN_UP;
+        if (wii & WPAD_CLASSIC_BUTTON_DOWN)
+            out->buttons |= WIIMAKER_BTN_DOWN;
+        if (wii & WPAD_CLASSIC_BUTTON_LEFT)
+            out->buttons |= WIIMAKER_BTN_LEFT;
+        if (wii & WPAD_CLASSIC_BUTTON_RIGHT)
+            out->buttons |= WIIMAKER_BTN_RIGHT;
+    } else if (kind == WPAD_EXP_NUNCHUK) {
+        /* Same bit as CLASSIC_UP. C (CLASSIC_LEFT) is unmapped. */
+        if (wii & WPAD_NUNCHUK_BUTTON_Z)
+            out->buttons |= WIIMAKER_BTN_Z;
+    }
+
+    /* Analog expansions: missing Wiimote / EXP_NONE is a no-op. */
+    if (wd && wd->err == WPAD_ERR_NONE) {
+        if (kind == WPAD_EXP_CLASSIC) {
+            f32 lx, ly, rx, ry;
+            joy_xy(&wd->exp.classic.ljs, &lx, &ly);
+            joy_xy(&wd->exp.classic.rjs, &rx, &ry);
+            if (stick_idle(out->main_x, out->main_y)) {
+                out->main_x = lx;
+                out->main_y = ly;
+            }
+            if (stick_idle(out->c_x, out->c_y)) {
+                out->c_x = rx;
+                out->c_y = ry;
+            }
+        } else if (kind == WPAD_EXP_NUNCHUK) {
+            f32 nx, ny;
+            joy_xy(&wd->exp.nunchuk.js, &nx, &ny);
+            if (stick_idle(out->main_x, out->main_y)) {
+                out->main_x = nx;
+                out->main_y = ny;
             }
         }
     }

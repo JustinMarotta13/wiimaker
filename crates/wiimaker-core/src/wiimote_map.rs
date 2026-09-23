@@ -1,8 +1,11 @@
 //! Host-testable GCN-layout merge used by Wii `fill_input` and the CLI/editor.
 //!
 //! Button bits match `runtime/wii/include/wiimaker_abi.h`. WPAD constants match
-//! libogc `wiiuse/wpad.h` (`WPAD_BUTTON_*`, `WPAD_CLASSIC_BUTTON_*`).
-//! Merges are additive (`OR`); analog sources never clear an already-live GCN stick.
+//! libogc `wiiuse/wpad.h` (`WPAD_BUTTON_*`, `WPAD_CLASSIC_BUTTON_*`,
+//! `WPAD_NUNCHUK_BUTTON_*`). Classic digital is applied only when expansion is
+//! Classic — Nunchuk Z/C share Classic UP/LEFT in the high word of
+//! `WPAD_ButtonsHeld`. Merges are additive (`OR`); analog sources never clear
+//! an already-live GCN stick.
 
 use crate::input::{Button, Input, Stick};
 
@@ -11,7 +14,7 @@ use crate::input::{Button, Input, Stick};
 pub const STICK_IDLE_DEADZONE: f32 = 0.20;
 
 /// One-line legend for Game view / Inspector / `wiimaker input map`.
-pub const INPUT_LEGEND: &str = "Keyboard · Wiimote D-pad/A/B/1/2 · Classic · GCN";
+pub const INPUT_LEGEND: &str = "Keyboard · Wiimote D-pad/A/B/1/2 · Classic · Nunchuk Z · GCN";
 
 /// `WIIMAKER_BTN_A`
 pub const BTN_A: u32 = 1 << 0;
@@ -51,7 +54,13 @@ pub const WPAD_BUTTON_DOWN: u32 = 0x0400;
 pub const WPAD_BUTTON_UP: u32 = 0x0800;
 pub const WPAD_BUTTON_PLUS: u32 = 0x1000;
 
+/// Nunchuk bits in `WPAD_ButtonsHeld` (high word). Same values as Classic
+/// UP / LEFT — interpret only when expansion is Nunchuk.
+pub const WPAD_NUNCHUK_BUTTON_Z: u32 = 0x0001 << 16;
+pub const WPAD_NUNCHUK_BUTTON_C: u32 = 0x0002 << 16;
+
 /// Classic Controller bits in `WPAD_ButtonsHeld` (high word).
+/// `UP`/`LEFT` collide with Nunchuk Z/C — interpret only when Classic.
 pub const WPAD_CLASSIC_BUTTON_UP: u32 = 0x0001 << 16;
 pub const WPAD_CLASSIC_BUTTON_LEFT: u32 = 0x0002 << 16;
 pub const WPAD_CLASSIC_BUTTON_ZR: u32 = 0x0004 << 16;
@@ -169,6 +178,11 @@ pub const MAP_ROWS: &[MapRow] = &[
         target: "main (if GCN idle)",
     },
     MapRow {
+        source: "Nunchuk",
+        control: "Z",
+        target: "Z",
+    },
+    MapRow {
         source: "Classic",
         control: "Left stick",
         target: "main (if GCN idle)",
@@ -210,14 +224,25 @@ pub const MAP_ROWS: &[MapRow] = &[
     },
 ];
 
+/// libogc `WPAD_EXP_*` subset used by [`merge_pad`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WpadExpansion {
+    #[default]
+    None,
+    Nunchuk,
+    Classic,
+}
+
 /// Analog sources the Wii bootstrap merges after GCN.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PadSources {
     pub gcn_main: Stick,
     pub gcn_c: Stick,
     pub gcn_buttons: u32,
-    /// `WPAD_ButtonsHeld` (core + Classic high word when attached).
+    /// `WPAD_ButtonsHeld` (core + expansion high word).
     pub wpad_held: u32,
+    /// Attached expansion. Classic digital is applied only for [`WpadExpansion::Classic`].
+    pub expansion: WpadExpansion,
     pub nunchuk: Option<Stick>,
     pub classic_l: Option<Stick>,
     pub classic_r: Option<Stick>,
@@ -281,8 +306,25 @@ pub fn wiimote_core_to_gcn(held: u32) -> u32 {
     out
 }
 
+/// Nunchuk high-word bits → GCN-layout. Returns 0 unless `nunchuk` is true.
+/// Z → GCN Z. C is unmapped (same bit as Classic LEFT).
+pub fn nunchuk_to_gcn(held: u32, nunchuk: bool) -> u32 {
+    if !nunchuk {
+        return 0;
+    }
+    let mut out = 0u32;
+    if held & WPAD_NUNCHUK_BUTTON_Z != 0 {
+        out |= BTN_Z;
+    }
+    out
+}
+
 /// Classic Controller bits in `WPAD_ButtonsHeld` → GCN-layout (OR-only).
-pub fn classic_to_gcn(held: u32) -> u32 {
+/// Returns 0 unless `classic` is true — Nunchuk Z/C reuse UP/LEFT bits.
+pub fn classic_to_gcn(held: u32, classic: bool) -> u32 {
+    if !classic {
+        return 0;
+    }
     let mut out = 0u32;
     if held & WPAD_CLASSIC_BUTTON_A != 0 {
         out |= BTN_A;
@@ -358,11 +400,16 @@ pub fn synthesize_main_from_dpad(main: Stick, buttons: u32, zone: f32) -> Stick 
 
 /// Same merge order as `runtime/wii/src/bootstrap.c` `fill_input`.
 pub fn merge_pad(src: &PadSources) -> MergedPad {
+    let classic = src.expansion == WpadExpansion::Classic;
+    let nunchuk = src.expansion == WpadExpansion::Nunchuk;
     let buttons = or_buttons(
         src.gcn_buttons,
         or_buttons(
             wiimote_core_to_gcn(src.wpad_held),
-            classic_to_gcn(src.wpad_held),
+            or_buttons(
+                classic_to_gcn(src.wpad_held, classic),
+                nunchuk_to_gcn(src.wpad_held, nunchuk),
+            ),
         ),
     );
     let mut main = src.gcn_main;
@@ -440,11 +487,12 @@ mod tests {
     fn classic_or_keeps_gcn_bits() {
         let gcn = BTN_A | BTN_START;
         let held = WPAD_CLASSIC_BUTTON_B | WPAD_CLASSIC_BUTTON_X;
-        let merged = or_buttons(gcn, classic_to_gcn(held));
+        let merged = or_buttons(gcn, classic_to_gcn(held, true));
         assert_ne!(merged & BTN_A, 0);
         assert_ne!(merged & BTN_START, 0);
         assert_ne!(merged & BTN_B, 0);
         assert_ne!(merged & BTN_X, 0);
+        assert_eq!(classic_to_gcn(held, false), 0);
     }
 
     #[test]
@@ -498,6 +546,7 @@ mod tests {
             gcn_c: Stick::default(),
             gcn_buttons: BTN_A,
             wpad_held: WPAD_CLASSIC_BUTTON_B | WPAD_BUTTON_UP,
+            expansion: WpadExpansion::Classic,
             nunchuk: Some(Stick { x: -1.0, y: 0.0 }),
             classic_l: Some(Stick { x: 0.0, y: 1.0 }),
             classic_r: Some(Stick { x: 0.5, y: 0.0 }),
@@ -507,6 +556,61 @@ mod tests {
         assert_ne!(merged.buttons & BTN_A, 0);
         assert_ne!(merged.buttons & BTN_B, 0);
         assert_ne!(merged.buttons & BTN_UP, 0);
+    }
+
+    #[test]
+    fn nunchuk_z_is_not_classic_up() {
+        // Same WPAD bit as CLASSIC_UP. Without Classic, must not set D-pad or
+        // synthesize +Y (idle analog fill / GridMover prefers D-pad).
+        assert_eq!(WPAD_NUNCHUK_BUTTON_Z, WPAD_CLASSIC_BUTTON_UP);
+        assert_eq!(WPAD_NUNCHUK_BUTTON_C, WPAD_CLASSIC_BUTTON_LEFT);
+
+        let held = WPAD_NUNCHUK_BUTTON_Z;
+        let merged = merge_pad(&PadSources {
+            wpad_held: held,
+            expansion: WpadExpansion::Nunchuk,
+            nunchuk: Some(Stick { x: 0.9, y: 0.0 }),
+            ..Default::default()
+        });
+        assert_eq!(
+            merged.buttons & (BTN_UP | BTN_DOWN | BTN_LEFT | BTN_RIGHT),
+            0
+        );
+        assert_ne!(merged.buttons & BTN_Z, 0);
+        assert!((merged.main.x - 0.9).abs() < 1e-5);
+        assert!(
+            merged.main.y.abs() < 1e-5,
+            "must not synthesize +Y from Classic UP bit"
+        );
+
+        let idle = merge_pad(&PadSources {
+            wpad_held: held,
+            expansion: WpadExpansion::Nunchuk,
+            ..Default::default()
+        });
+        assert_eq!(idle.buttons & BTN_UP, 0);
+        assert_ne!(idle.buttons & BTN_Z, 0);
+        assert!(idle.main.x.abs() < 1e-5 && idle.main.y.abs() < 1e-5);
+
+        let c = merge_pad(&PadSources {
+            wpad_held: WPAD_NUNCHUK_BUTTON_C,
+            expansion: WpadExpansion::Nunchuk,
+            ..Default::default()
+        });
+        assert_eq!(c.buttons & BTN_LEFT, 0);
+        assert!(c.main.x.abs() < 1e-5);
+    }
+
+    #[test]
+    fn classic_up_works_when_classic_present() {
+        let merged = merge_pad(&PadSources {
+            wpad_held: WPAD_CLASSIC_BUTTON_UP,
+            expansion: WpadExpansion::Classic,
+            ..Default::default()
+        });
+        assert_ne!(merged.buttons & BTN_UP, 0);
+        assert!((merged.main.y - 1.0).abs() < 1e-5);
+        assert_eq!(merged.buttons & BTN_Z, 0);
     }
 
     #[test]
@@ -545,6 +649,14 @@ mod tests {
         assert!(INPUT_LEGEND.contains("Keyboard"));
         assert!(INPUT_LEGEND.contains("Wiimote"));
         assert!(INPUT_LEGEND.contains("Classic"));
+        assert!(INPUT_LEGEND.contains("Nunchuk"));
         assert!(INPUT_LEGEND.contains("GCN"));
+    }
+
+    #[test]
+    fn map_rows_include_nunchuk_z() {
+        assert!(MAP_ROWS
+            .iter()
+            .any(|r| r.source == "Nunchuk" && r.control == "Z" && r.target == "Z"));
     }
 }

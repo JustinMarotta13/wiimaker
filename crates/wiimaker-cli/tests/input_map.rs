@@ -20,7 +20,9 @@ fn input_map_json_lists_sources() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let v: serde_json::Value = serde_json::from_str(&stdout).expect(&stdout);
     assert_eq!(v["ok"], true);
-    assert!(v["legend"].as_str().unwrap_or("").contains("Wiimote"));
+    let legend = v["legend"].as_str().unwrap_or("");
+    assert!(legend.contains("Wiimote"));
+    assert!(legend.contains("Nunchuk"));
     assert!(v["deadzone"].as_f64().unwrap() > 0.0);
     let map = v["map"].as_array().expect("map array");
     let mut sources = Vec::new();
@@ -33,6 +35,11 @@ fn input_map_json_lists_sources() {
             "missing {need} in {stdout}"
         );
     }
+    assert!(
+        map.iter()
+            .any(|r| r["source"] == "Nunchuk" && r["control"] == "Z" && r["target"] == "Z"),
+        "Nunchuk Z → Z missing in {stdout}"
+    );
     assert_eq!(v["buttons"]["a"], 1);
     assert_eq!(v["buttons"]["right"], 1 << 11);
 }
@@ -47,5 +54,6 @@ fn input_map_text_prints_legend() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("GCN-layout"));
     assert!(stdout.contains("Classic"));
+    assert!(stdout.contains("Nunchuk"));
     assert!(stdout.contains("1"));
 }

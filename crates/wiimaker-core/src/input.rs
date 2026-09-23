@@ -1,7 +1,7 @@
 //! Normalized input — GameCube pad layout as the lingua franca.
 //!
 //! HorrorDash lesson: Wiimote IR/sensor bar is fiddly. Pads stay the map:
-//! keyboard, Wiimote D-pad/A/B/1/2, Classic, and Nunchuk all merge onto
+//! keyboard, Wiimote D-pad/A/B/1/2, Classic, and Nunchuk (stick + Z) all merge onto
 //! these bits (see [`crate::wiimote_map`]).
 
 /// Digital buttons shared across GCN / Classic / emulated keyboard.
