@@ -27,10 +27,12 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - `editor play-status <game> [--build] [--json]` reports whether in-editor Play will load the game `App` cdylib or the WASD fallback. No new prefs — CLI `run` remains the external host twin.
 - `entity list` prints an indented tree (non-json); JSON still dumps flat entity array with `parent` fields.
 - Tilemap: `tilemap set|fill|stamp|from-ascii|get|set-palette|mask`. `from-ascii FILE --name Maze` resolves FILE as cwd, then game dir, then `assets/`. Default `--resize true` (unlike inline `stamp --ascii`, which clips). Quote `--map '#=1,P=2:0'` because `#` is a shell comment.
+- `input map` has no game argument (static table). `--json` includes `ok`, `legend`, `deadzone`, `buttons` bitmasks, `map[]`.
 
 ## Decisions
 
-- CLI sources are modular: `main.rs` dispatch · `args.rs` (clap) · `cmds/{project,scene,entity,asset,editor}.rs` · `util.rs` · `pipeline.rs` (ship helpers).
+- CLI sources are modular: `main.rs` dispatch · `args.rs` (clap) · `cmds/{project,scene,entity,asset,editor,input}.rs` · `util.rs` · `pipeline.rs` (ship helpers).
+- `input map` / `input map --json` prints the static GCN-layout table (Keyboard / Wiimote / Classic / Nunchuk). No game name. Doctor text adds one `input:` legend line (JSON diagnose unchanged). Table rows live in `wiimaker-core::wiimote_map::MAP_ROWS`.
 - Wii embed uses `scene.wscn` **WSCN0003** (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / trailing AudioSource table) rather than parsing JSON on console. `.wpack` is `WPACK001` textures + meshes + optional audio TOC.
 - Tilemap: `tilemap set|fill|stamp|from-ascii|get|set-palette|mask` (`--name --x --y --id`, `--ascii` or `--cells --width`, `from-ascii FILE` with optional `--map '#=1,P=2:0'` and `--resize` default true, palette `--sprite --color --anim --fps --auto-tile id|solid|off --auto-sprites`). Auto-creates a default Tilemap on the named entity if missing. `from-ascii` resizes the grid to the file (stamp `--ascii` stays inline and clips). `entity add-component … Tilemap --cols --rows --cell`. `get --json` includes NESW `mask`. WSCN bake packs resolved palette (tex/UV, auto-tile variants, anim frames) for GX.
 - Collider / Trigger: `entity add-component … Collider|--trigger|--filter` or kind `Trigger`; `entity triggers <game> <name>`; `entity despawn <game> <name>`; `entity set --tag N`.

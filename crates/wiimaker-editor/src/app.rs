@@ -183,6 +183,8 @@ pub(crate) struct EditorApp {
     pub(crate) pending_focus: Option<EditorTab>,
     pub(crate) console: Vec<ConsoleLine>,
     pub(crate) last_play_hit: Option<String>,
+    /// Host keyboard → GCN-layout `Input` (Inspector + Game overlay + Play tick).
+    pub(crate) live_input: Input,
 }
 
 #[derive(Clone)]
@@ -258,6 +260,7 @@ impl EditorApp {
             pending_focus: None,
             console: Vec::new(),
             last_play_hit: None,
+            live_input: Input::new(),
         };
         app.reload_assets()?;
         app.refresh_scenes();
@@ -1216,6 +1219,24 @@ impl EditorApp {
         }
     }
 
+    pub(crate) fn sample_pad_keys(ctx: &egui::Context) -> PadKeys {
+        ctx.input(|i| PadKeys {
+            left: i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft),
+            right: i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight),
+            up: i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp),
+            down: i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown),
+            a: i.key_down(egui::Key::Z) || i.key_down(egui::Key::Space),
+            b: i.key_down(egui::Key::X),
+            start: i.key_down(egui::Key::Enter),
+        })
+    }
+
+    /// Keyboard → GCN-layout snapshot for Inspector / Game overlay / Play.
+    pub(crate) fn sample_live_input(&mut self, ctx: &egui::Context) {
+        self.live_input.begin_frame();
+        apply_pad_keys(&mut self.live_input, Self::sample_pad_keys(ctx));
+    }
+
     /// In-editor play tick: game `App` plugin when present, else WASD `Player`.
     pub(crate) fn tick_play_mode(&mut self, ctx: &egui::Context) {
         if self.play_mode != PlayMode::Playing {
@@ -1226,18 +1247,7 @@ impl EditorApp {
             return;
         }
         let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
-        let keys = ctx.input(|i| PadKeys {
-            left: i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft),
-            right: i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight),
-            up: i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp),
-            down: i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown),
-            a: i.key_down(egui::Key::Z) || i.key_down(egui::Key::Space),
-            b: i.key_down(egui::Key::X),
-            start: i.key_down(egui::Key::Enter),
-        });
-        let mut play_input = Input::new();
-        play_input.begin_frame();
-        apply_pad_keys(&mut play_input, keys);
+        let play_input = self.live_input.clone();
 
         let Some(session) = self.play_session.as_mut() else {
             return;
@@ -1440,6 +1450,7 @@ impl eframe::App for EditorApp {
             self.nudge_selected(nudge[0], nudge[1]);
         }
 
+        self.sample_live_input(ctx);
         self.tick_play_mode(ctx);
         if self.play_mode == PlayMode::Playing {
             ctx.request_repaint();

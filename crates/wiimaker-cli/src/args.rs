@@ -72,6 +72,17 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: SortingLayerCmd,
     },
+    /// GCN-layout pad map (keyboard / Wiimote / Classic / Nunchuk)
+    Input {
+        #[command(subcommand)]
+        cmd: InputCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum InputCmd {
+    /// Print the GCN-layout mapping table (`--json` for agents)
+    Map,
 }
 
 #[derive(Subcommand, Debug)]

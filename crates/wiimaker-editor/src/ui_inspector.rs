@@ -44,6 +44,8 @@ impl EditorApp {
             theme::muted(ui, "No GameObject selected");
             ui.add_space(8.0);
             self.ui_inspector_environment(ui);
+            ui.add_space(8.0);
+            self.ui_inspector_input(ui);
             return;
         };
         if self.selected.len() > 1 {
@@ -1637,6 +1639,46 @@ impl EditorApp {
         }
     }
 
+    /// Live GCN-layout pad (host keyboard) — empty Inspector + open `.scene.json`.
+    fn ui_inspector_input(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            RichText::new("Input")
+                .strong()
+                .size(12.0)
+                .color(theme::TEXT_MUTED),
+        );
+        ui.add_space(4.0);
+        let input = &self.live_input;
+        let status = wiimaker_core::format_input_status(input);
+        theme::card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Stick").size(12.0).color(theme::TEXT_MUTED));
+                ui.label(
+                    RichText::new(format!("{:+.2}  {:+.2}", input.main.x, input.main.y))
+                        .size(12.0)
+                        .color(theme::TEXT)
+                        .monospace(),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("C").size(12.0).color(theme::TEXT_MUTED));
+                ui.label(
+                    RichText::new(format!("{:+.2}  {:+.2}", input.c.x, input.c.y))
+                        .size(12.0)
+                        .color(theme::TEXT)
+                        .monospace(),
+                );
+            });
+            ui.label(
+                RichText::new(&status)
+                    .size(11.0)
+                    .color(theme::TEXT)
+                    .monospace(),
+            );
+            theme::muted(ui, wiimaker_core::INPUT_LEGEND);
+        });
+    }
+
     fn ui_inspector_file(&mut self, ui: &mut egui::Ui) {
         let Some(rel) = self.selected_file.clone() else {
             return;
@@ -1689,6 +1731,8 @@ impl EditorApp {
         if is_open_scene {
             ui.add_space(8.0);
             self.ui_inspector_environment(ui);
+            ui.add_space(8.0);
+            self.ui_inspector_input(ui);
         }
 
         ui.add_space(8.0);
@@ -1999,4 +2043,24 @@ fn paint_autotile_badge(ui: &mut egui::Ui, on: bool) {
     draw(1, 1, true); // center
     draw(2, 1, on); // E
     draw(1, 2, on); // S
+}
+
+#[cfg(test)]
+mod tests {
+    use wiimaker_core::input::{Button, Input};
+    use wiimaker_core::{format_input_status, INPUT_LEGEND};
+
+    #[test]
+    fn inspector_input_status_shows_stick_and_face() {
+        let mut input = Input::new();
+        input.main.x = 1.0;
+        input.set_down(Button::A, true);
+        input.set_down(Button::Start, true);
+        let status = format_input_status(&input);
+        assert!(status.contains("stick"));
+        assert!(status.contains('A'));
+        assert!(status.contains("Start"));
+        assert!(INPUT_LEGEND.contains("Classic"));
+        assert!(INPUT_LEGEND.contains("Wiimote"));
+    }
 }

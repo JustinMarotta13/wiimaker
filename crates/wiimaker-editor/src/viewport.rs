@@ -1,6 +1,7 @@
 use eframe::egui;
 use wiimaker_assets::SpriteCatalog;
 use wiimaker_core::draw::DrawList;
+use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
@@ -336,6 +337,8 @@ impl EditorApp {
                 egui::FontId::proportional(13.0),
                 theme::TEXT_DIM,
             );
+        } else {
+            paint_game_input_overlay(ui, image_rect, &self.live_input);
         }
     }
 
@@ -1230,6 +1233,41 @@ fn paint_one_outline(
             painter.rect_stroke(r, 0.0, stroke);
         }
     }
+}
+
+/// Compact Game-view pad readout while Playing / Paused (host keyboard).
+fn paint_game_input_overlay(ui: &mut egui::Ui, image_rect: egui::Rect, input: &Input) {
+    let status = wiimaker_core::format_input_status(input);
+    let legend = wiimaker_core::INPUT_LEGEND;
+    let pad = 6.0;
+    let line_h = 14.0;
+    let box_h = pad * 2.0 + line_h * 2.0 + 2.0;
+    let box_w = (image_rect.width() - 12.0).clamp(180.0, 420.0);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(image_rect.min.x + 6.0, image_rect.max.y - box_h - 6.0),
+        egui::vec2(box_w, box_h),
+    );
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        3.0,
+        egui::Color32::from_rgba_unmultiplied(18, 18, 18, 210),
+    );
+    painter.rect_stroke(rect, 3.0, egui::Stroke::new(1.0_f32, theme::BORDER));
+    painter.text(
+        egui::pos2(rect.min.x + pad, rect.min.y + pad),
+        egui::Align2::LEFT_TOP,
+        status,
+        egui::FontId::monospace(11.0),
+        theme::TEXT,
+    );
+    painter.text(
+        egui::pos2(rect.min.x + pad, rect.min.y + pad + line_h + 1.0),
+        egui::Align2::LEFT_TOP,
+        legend,
+        egui::FontId::proportional(10.0),
+        theme::TEXT_DIM,
+    );
 }
 
 fn fb_to_rgb(fb: &Framebuffer) -> Vec<u8> {

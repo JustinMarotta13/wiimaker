@@ -17,6 +17,7 @@ pub mod sorting;
 pub mod text;
 pub mod tilemap;
 pub mod time;
+pub mod wiimote_map;
 pub mod world;
 
 pub use app::{App, FrameCtx};
@@ -40,6 +41,11 @@ pub use tilemap::{
     AutoTileMatch, TileVisual, Tilemap, AUTOTILE_E, AUTOTILE_N, AUTOTILE_S, AUTOTILE_W,
 };
 pub use time::Clock;
+#[cfg(feature = "std")]
+pub use wiimote_map::format_input_status;
+pub use wiimote_map::{
+    merge_pad, MapRow, MergedPad, PadSources, INPUT_LEGEND, MAP_ROWS, STICK_IDLE_DEADZONE,
+};
 pub use world::{
     Animation, Camera, Disc, EntityId, Follow, Sprite, Transform, World, SCREEN_H, SCREEN_W,
 };

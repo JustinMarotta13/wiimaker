@@ -15,6 +15,7 @@ clap binary in `crates/wiimaker-cli`. Agents build games as: `new` → `asset im
 | Area | Commands |
 |---|---|
 | Project | `new`, `run`, `edit`, `cook`, `doctor`, `build`, `dolphin`, `play-wii` |
+| Input | `input map` (GCN-layout Keyboard / Wiimote / Classic / Nunchuk) |
 | Scene | `scene list\|show\|new\|set-default\|build-list\|build-add\|build-remove\|set-clear\|set-game-view` |
 | Editor prefs | `editor prefs` · `editor set-scene-view` · `editor set-project-view` · `editor play-status` |
 | Entity | `entity list\|add\|set\|add-component\|remove\|duplicate\|rename\|set-parent` · prefab `create-prefab\|instantiate-prefab\|apply-prefab\|revert-prefab\|unpack-prefab\|prefab-status` |

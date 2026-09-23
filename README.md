@@ -93,6 +93,7 @@ wiimaker entity add-component my-game --name Hud Text --text "Score: 0" --size 1
 # or: wiimaker entity set my-game --name Hud --text "Score: 1" --size 16 --align center
 wiimaker entity overlaps my-game --name Player --other Wall
 wiimaker cook my-game          # advanced / agents
+wiimaker input map --json     # GCN-layout Keyboard / Wiimote / Classic / Nunchuk
 wiimaker doctor my-game
 wiimaker run my-game
 wiimaker edit my-game
