@@ -21,6 +21,7 @@ pub use session::{step_app, PlayKind, PlaySession, PlayStart};
 pub use status::{
     build_play_plugin, inspect_play_plugin, package_has_cdylib, PlayStatus, FORCE_FALLBACK_ENV,
 };
+pub use wiimaker_core::wiimote_map;
 
 pub use wiimaker_core;
 pub use wiimaker_core::app::{App, FrameCtx};

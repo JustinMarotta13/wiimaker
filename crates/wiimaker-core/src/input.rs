@@ -1,7 +1,8 @@
 //! Normalized input — GameCube pad layout as the lingua franca.
 //!
-//! HorrorDash lesson: Wiimote IR/sensor bar is fiddly. Start with pads;
-//! map Wiimote D-pad / classic controller onto the same buttons later.
+//! HorrorDash lesson: Wiimote IR/sensor bar is fiddly. Pads stay the map:
+//! keyboard, Wiimote D-pad/A/B/1/2, Classic, and Nunchuk (stick + Z) all merge onto
+//! these bits (see [`crate::wiimote_map`]).
 
 /// Digital buttons shared across GCN / Classic / emulated keyboard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -103,6 +104,27 @@ impl Input {
 
     pub fn down_bits(&self) -> u32 {
         self.down
+    }
+
+    /// Apply a GCN-layout held mask (`WIIMAKER_BTN_*` / [`crate::wiimote_map`]).
+    pub fn apply_down_bits(&mut self, bits: u32) {
+        const ALL: [Button; 12] = [
+            Button::A,
+            Button::B,
+            Button::X,
+            Button::Y,
+            Button::Start,
+            Button::Z,
+            Button::L,
+            Button::R,
+            Button::DPadUp,
+            Button::DPadDown,
+            Button::DPadLeft,
+            Button::DPadRight,
+        ];
+        for b in ALL {
+            self.set_down(b, bits & Self::mask(b) != 0);
+        }
     }
 
     pub fn pressed_bits(&self) -> u32 {

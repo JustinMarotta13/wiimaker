@@ -17,3 +17,4 @@ serde_json = { workspace = true }
 wiimaker-assets = { workspace = true }
 wiimaker-scene = { workspace = true }
 wiimaker-play = { workspace = true }
+wiimaker-core = { workspace = true }

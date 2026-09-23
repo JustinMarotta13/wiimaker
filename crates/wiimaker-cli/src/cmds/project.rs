@@ -86,6 +86,7 @@ pub fn doctor_game(root: &Path, name: &str, json: bool) -> Result<()> {
         for issue in &diag.issues {
             println!("  [{:?}] {}", issue.severity, issue.message);
         }
+        println!("  input: GCN-layout · {}", wiimaker_core::INPUT_LEGEND);
     }
     if !diag.ok {
         bail!("doctor found errors");
