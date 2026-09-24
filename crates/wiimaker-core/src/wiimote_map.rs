@@ -7,6 +7,7 @@
 //! `WPAD_ButtonsHeld`. Merges are additive (`OR`); analog sources never clear
 //! an already-live GCN stick.
 
+#[allow(unused_imports)] // Input/Button used by host helpers; Stick always
 use crate::input::{Button, Input, Stick};
 
 /// Idle analog threshold. GCN stick above this is left alone; D-pad fills main
@@ -391,7 +392,7 @@ pub fn synthesize_main_from_dpad(main: Stick, buttons: u32, zone: f32) -> Stick 
     }
     let mag2 = x * x + y * y;
     if mag2 > 1.0 {
-        let inv = 1.0 / mag2.sqrt();
+        let inv = 1.0 / crate::float::sqrt(mag2);
         x *= inv;
         y *= inv;
     }

@@ -8,7 +8,7 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 
 - Non-PoT PNGs are padded at cook time; doctor warns (see `cyber_rover` in hello-orb).
 - `.wpack` RGB5A3 is **GX 4×4 tiled** (cook tiles; host `to_rgba8` untiles). Re-cook after cooker changes.
-- Wii C path embeds `assets.wpack` + `scene.wscn` (from prepare/`cook` + `bake-wii`). `wii-build.sh` / `wiimaker build` run both before Docker make. No Rust staticlib yet — `stub_game.c` is the scene player.
+- Wii path embeds `assets.wpack` + `scene.wscn` (from prepare/`cook` + `bake-wii`). `wii-build.sh` / `wiimaker build` run both before Docker make. Prefer `crates/wiimaker-wii` staticlib (`libwiimaker_wii.a`) when present (`USE_STUB=0`); else `stub_game.c`. **Always** link `EMBED_OBJ` — Rust `extern`s `_binary_assets_wpack_*` / `_binary_scene_wscn_*` like the C stub.
 - Objcopy embed: copy bins into `runtime/wii/build/` first so symbols are `_binary_assets_wpack_*` / `_binary_scene_wscn_*` (path-mangled names break the C externs).
 - Sprite sheets: sidecar `assets/<stem>.sprites.json`; cook still packs the whole PNG once. Catalog resolves cell name → sheet texture + UV (in **packed** PoT space) + pivot.
 - Core `Sprite` has `pivot` (default `0.5,0.5`) and `uv`; optional `lock_pivot` keeps a scene component override across animation frame swaps. Render/pick/outline must share the same pivot math.
@@ -24,7 +24,7 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 - `World::follow_cameras` after play movement / game `update`. `World::step_grid_movers(&input, dt)` in the same tick (before follow). Diagonals: horizontal wins; reverse is immediate; 90° waits for cell center. Stick +Y (host Up) = `Dir::Up` = −Y.
 - GridMover is host-first (JSON hydrate); WSCN bake skips it like Animation / Camera-only.
 - Host audio: `HostAudio` plays validated PCM16 `assets/*.wav` via `aplay`/`paplay`/`pw-play` when present. `WIIMAKER_AUDIO=0` skips. In-crate `rodio`/`cpal` was not locked on Cargo 1.83 (bindgen → hashbrown 0.17 / edition 2024). Cook also packs those WAVs into the `WPACK001` audio TOC (after meshes; old packs with no `audio_n` read as 0 clips). Wii C: `ASND_Init` in bootstrap, `wiimaker_audio_load_wpack` copies LE PCM16 to 32-byte-aligned BE buffers, `ASND_SetVoice` at clip rate, volume 0..1 → 0..255. Missing clip / empty TOC / no free voice is a no-op. Play-on-awake queues after `load_scene`. ABI: `wiimaker_audio_play` / `queue` / `flush` / `find`.
-- Until Rust `staticlib` lands, Dolphin play uses the C scene player + GX textured quads (sprites + tilemap cells) / untextured discs, text, and color tiles + ASND oneshots; host keeps `wiimaker-scene` JSON hydrate + `SpriteCatalog`. WSCN/stub_game still skip cameras.
+- Dolphin play: C `stub_game` **or** Rust `wiimaker-wii` WSCN subset player + GX textured quads (sprites + tilemap cells) / untextured discs, text, color tiles + ASND oneshots. Host keeps `wiimaker-scene` JSON hydrate + `SpriteCatalog`. Neither Wii path hydrates full `World` yet (cameras / GridMover / sorting layers stay host-first). Build rustlib: `./tools/wii-rustlib.sh` (nightly + `build-std=core,alloc` for `powerpc-unknown-eabi`).
 - After `WPAD_Init`, call `WPAD_SetDataFormat(WPAD_CHAN_ALL, WPAD_FMT_BTNS_ACC_IR)` so Classic `ljs`/`rjs` and Nunchuk `js` arrive. `WPAD_Probe` + `wd->err` before `exp.classic` / `exp.nunchuk`; `EXP_NONE` must not dereference analog. Classic digital bits sit in `WPAD_ButtonsHeld` high word (OR even if analog is missing) **only when** `WPAD_EXP_CLASSIC`. Nunchuk Z/C reuse Classic UP/LEFT (`0x0001<<16` / `0x0002<<16`); ungated Classic OR made Nunchuk Z walk +Y and steal `grid_mover` heading.
 - `games/` is gitignored (local projects only); workspace still lists `games/hello-orb` for local cook/run.
 - Optional `SceneSprite.pivot: [f32; 2]` overrides the catalog cell pivot per entity (omit = catalog). Hydrate writes runtime `Sprite.pivot` + `lock_pivot`; `animate_world` keeps the override when locked.
@@ -36,6 +36,6 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 
 ## Open follow-ups
 
-- Rust staticlib for Wii sharing host `App` / `World` (replace C scene player).
+- Wii `World` + `render_world` (replace WSCN subset player) once PowerPC staticlib CI is green.
 - Sprite sheet offset/padding, Grid By Cell Size.
 - IR pointer / sensor-bar aiming and motion gestures (digital Wiimote / Classic / Nunchuk merge shipped 2026-09-23).

@@ -269,8 +269,8 @@ impl Tilemap {
         let cell_y = (self.cell * xf.scale.y).abs().max(1e-6);
         let ox = xf.translation.x + self.origin.x * xf.scale.x;
         let oy = xf.translation.y + self.origin.y * xf.scale.y;
-        let cx = ((wx - ox) / cell_x).floor() as i32;
-        let cy = ((wy - oy) / cell_y).floor() as i32;
+        let cx = crate::float::floor((wx - ox) / cell_x) as i32;
+        let cy = crate::float::floor((wy - oy) / cell_y) as i32;
         (cx, cy)
     }
 

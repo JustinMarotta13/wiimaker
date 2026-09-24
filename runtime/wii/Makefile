@@ -14,8 +14,9 @@ GAME_DIR  := ../../games/$(GAME)
 WPACK     := $(GAME_DIR)/assets.wpack
 WSCN      := $(GAME_DIR)/scene.wscn
 
-# Prefer a Rust staticlib when present; otherwise link the C scene player.
-RUSTLIB   := ../../target/powerpc-unknown-eabi/release/lib$(subst -,_,$(GAME)).a
+# Prefer the shared Rust WSCN player staticlib when present; otherwise C stub_game.
+# Build with: ./tools/wii-rustlib.sh  → target/powerpc-unknown-eabi/release/libwiimaker_wii.a
+RUSTLIB   := ../../target/powerpc-unknown-eabi/release/libwiimaker_wii.a
 USE_STUB  := $(if $(wildcard $(RUSTLIB)),0,1)
 
 CFLAGS    := -g -O2 -Wall $(MACHDEP) -I$(CURDIR)/include -I$(LIBOGC_INC)
@@ -23,13 +24,15 @@ LDFLAGS   := -g $(MACHDEP) -Wl,-Map,$(BUILD)/$(TARGET).map
 LIBS      := -lwiiuse -lbte -lasnd -logc -lm
 LIBPATHS  := -L$(LIBOGC_LIB)
 
+# Embeds are always linked — Rust externs `_binary_assets_wpack_*` / `_binary_scene_wscn_*`
+# the same way stub_game.c does. Do not drop EMBED_OBJ when USE_STUB=0.
+EMBED_OBJ := $(BUILD)/assets_wpack.o $(BUILD)/scene_wscn.o
+
 ifeq ($(USE_STUB),0)
-LIBS      := -L$(dir $(RUSTLIB)) -l$(subst -,_,$(GAME)) $(LIBS)
+LIBS      := -L$(dir $(RUSTLIB)) -lwiimaker_wii $(LIBS)
 GAME_OBJ  :=
-EMBED_OBJ :=
 else
 GAME_OBJ  := $(BUILD)/stub_game.o
-EMBED_OBJ := $(BUILD)/assets_wpack.o $(BUILD)/scene_wscn.o
 endif
 
 OFILES    := $(BUILD)/bootstrap.o $(BUILD)/gx_draw.o $(BUILD)/asnd_audio.o $(GAME_OBJ) $(EMBED_OBJ)

@@ -11,6 +11,17 @@ echo "==> cook + bake-wii for $GAME"
 cargo run -q -p wiimaker-cli -- cook "$GAME"
 cargo run -q -p wiimaker-cli -- bake-wii "$GAME"
 
+echo "==> optional Rust staticlib (powerpc-unknown-eabi)"
+# Best-effort: produces libwiimaker_wii.a when nightly/build-std work.
+# Missing .a → Makefile USE_STUB=1 (C stub_game). Embeds always link either way.
+"$ROOT/tools/wii-rustlib.sh" || true
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "wii-build: docker not found — cook/bake/rustlib done; skip .dol link" >&2
+  echo "    Install Docker + run again, or make inside a devkitPPC container." >&2
+  exit 0
+fi
+
 echo "==> building docker image $IMAGE"
 docker build -t "$IMAGE" "$ROOT/docker"
 

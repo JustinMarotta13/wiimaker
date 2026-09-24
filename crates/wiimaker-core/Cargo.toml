@@ -11,3 +11,4 @@ std = ["glam/std"]
 
 [dependencies]
 glam = { workspace = true }
+libm = "0.2"
