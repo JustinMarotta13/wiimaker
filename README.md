@@ -14,7 +14,7 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
          │
          │ same IR                         ┌────────────────────┐
          └───────────────────────────────► │  wii (Broadway)    │  ← ship
-                                           │  C runtime + GX    │
+                                           │  C + Rustlib / GX  │
                                            └────────────────────┘
 ```
 
@@ -34,7 +34,7 @@ cross-compile the same project into a `.dol` / Homebrew Channel app / disc image
 | Hierarchy / Inspector | `wiimaker edit` panels (or CLI) |
 | Play | Editor Play ticks the game `App` (cdylib plugin) · `wiimaker run` / File → Run external |
 | Scenes in Build / LoadScene | `game.toml` `scenes = [...]` · `load_scene_into_world` · File → Build Settings… |
-| Build / Dolphin | `wiimaker build` · `wiimaker play-wii` |
+| Build / Dolphin | `wiimaker build` · `wiimaker play-wii` (Rust `wiimaker-wii` staticlib when `.a` present; else C stub) |
 | Sprite Editor | `assets/<name>.sprites.json` + editor / `wiimaker asset slice` |
 
 Gameplay scripts stay as Rust `App` (like MonoBehaviour code): `load_scene_into_world` (keeps the atlas), then mutate entities in `update`.

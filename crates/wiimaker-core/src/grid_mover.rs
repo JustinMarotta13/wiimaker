@@ -138,7 +138,7 @@ impl GridMover {
             }
 
             if self.current_dir.is_none() && !on_center {
-                let dist = ((*x - cx).powi(2) + (*y - cy).powi(2)).sqrt();
+                let dist = crate::float::sqrt(crate::float::powi2(*x - cx) + crate::float::powi2(*y - cy));
                 if dist <= remaining {
                     *x = cx;
                     *y = cy;
@@ -163,7 +163,7 @@ impl GridMover {
                 self.current_dir = None;
                 break;
             }
-            let dist = ((*x - tx).powi(2) + (*y - ty).powi(2)).sqrt();
+            let dist = crate::float::sqrt(crate::float::powi2(*x - tx) + crate::float::powi2(*y - ty));
             if dist <= remaining {
                 *x = tx;
                 *y = ty;
@@ -229,7 +229,7 @@ fn dir_from_axes(x: i32, y: i32) -> Option<Dir> {
 /// Cell-center coordinate on one axis (grid origin at 0).
 pub fn cell_center(p: f32, cell: f32) -> f32 {
     let cell = cell.max(1e-4);
-    (p / cell).floor() * cell + cell * 0.5
+    crate::float::floor(p / cell) * cell + cell * 0.5
 }
 
 fn next_center(x: f32, y: f32, dir: Dir, cell: f32) -> (f32, f32) {

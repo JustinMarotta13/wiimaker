@@ -1,0 +1,23 @@
+[package]
+name = "wiimaker-wii"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Wii Rust staticlib — WSCN subset player + GX FFI (replaces stub_game when linked)"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+name = "wiimaker_wii"
+
+[features]
+default = ["std"]
+# Host / unit tests. PowerPC staticlib builds with `--no-default-features`.
+std = ["wiimaker-core/std"]
+
+[dependencies]
+wiimaker-core = { path = "../wiimaker-core", default-features = false }
+
+[dev-dependencies]
+wiimaker-core = { path = "../wiimaker-core" }
+wiimaker-scene = { path = "../wiimaker-scene" }
+wiimaker-assets = { path = "../wiimaker-assets" }

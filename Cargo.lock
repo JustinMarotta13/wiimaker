@@ -3953,6 +3953,7 @@ name = "wiimaker-core"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "libm",
 ]
 
 [[package]]
@@ -4008,6 +4009,15 @@ dependencies = [
  "toml",
  "wiimaker-assets",
  "wiimaker-core",
+]
+
+[[package]]
+name = "wiimaker-wii"
+version = "0.1.0"
+dependencies = [
+ "wiimaker-assets",
+ "wiimaker-core",
+ "wiimaker-scene",
 ]
 
 [[package]]

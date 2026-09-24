@@ -10,6 +10,7 @@ pub mod audio;
 pub mod collider;
 pub mod color;
 pub mod draw;
+pub mod float;
 pub mod grid_mover;
 pub mod input;
 pub mod math;

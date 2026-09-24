@@ -79,7 +79,7 @@ AudioSource bakes as `KIND_AUDIO=5` when it is the only enabled draw-like
 component, plus an additive trailing table (entity index + clip + volume +
 play-on-awake) so Sprite/Disc/Tilemap/Text entities can still carry a clip.
 
-### Wii runtime (C)
+### Wii runtime (C bootstrap + Rust staticlib)
 
 The previous project's pure-Rust `Video::configure` path leaked a heap
 `GXRModeObj` into the VI ISR and crashed at `PC=0x80030100`. We do not repeat that.
@@ -90,9 +90,13 @@ The previous project's pure-Rust `Video::configure` path leaked a heap
 2. `GX_Init` FIFO in MEM1
 3. `PAD_Init` (+ later `WPAD_Init`)
 4. `ASND_Init` / `ASND_Pause(0)` — PCM16 oneshots from the `.wpack` audio TOC
-5. Call into Rust `wiimaker_game_frame(input, dt)` each VI
+5. Call into `wiimaker_game_frame(input, dt)` each VI
 
-Rust builds as `staticlib`; the Makefile links it with `-lwiiuse -lbte -lasnd -logc -lm`.
+Game logic is either `crates/wiimaker-wii` (`libwiimaker_wii.a` — WSCN subset
+player calling `wiimaker_gx_*` / ASND) or the C fallback `stub_game.c` when the
+`.a` is missing. Objcopy embeds (`assets_wpack.o` / `scene_wscn.o`) always link;
+Rust `extern`s `_binary_*` like the C stub. Makefile: `-lwiimaker_wii -lwiiuse -lbte -lasnd -logc -lm`.
+Cross-build helper: `tools/wii-rustlib.sh` (nightly `build-std`).
 
 ### Asset pipeline (`.wpack`)
 
@@ -130,8 +134,8 @@ target/wii/<game>/
 - **Scene file / prefab + egui editor + agent CLI** (pulled forward from M3)
 
 ### Milestone 2 — First Dolphin boot
-- Rust staticlib linked through C bootstrap
-- Clear screen + spinning cube via GX
+- Rust staticlib linked through C bootstrap (`wiimaker-wii` WSCN player; stub fallback)
+- Clear screen + scene draw via GX
 - HBC pack script
 
 ### Milestone 3 — Real game shape

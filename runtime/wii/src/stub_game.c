@@ -1,5 +1,5 @@
 /*
- * Scene-driven C game for Wii (until Rust staticlib lands).
+ * Scene-driven C game for Wii (fallback when libwiimaker_wii.a is absent).
  * Loads embedded assets.wpack + scene.wscn, draws sprites/discs/text/tilemaps,
  * plays AudioSource oneshots via ASND, and keeps hello-orb Player / OrbShadow
  * gameplay.

@@ -9,11 +9,15 @@ use crate::text::TextAlign;
 
 #[cfg(feature = "std")]
 use std::string::String;
+#[cfg(feature = "std")]
+use std::vec::Vec;
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Handle into a packed mesh inside a `.wpack` (or host cache).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -89,14 +93,6 @@ pub enum DrawCmd {
         z: f32,
     },
 }
-
-#[cfg(feature = "std")]
-use std::vec::Vec;
-
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Ordered command buffer for one frame.
 #[derive(Default, Clone, Debug)]

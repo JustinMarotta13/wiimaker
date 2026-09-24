@@ -8,6 +8,7 @@ members = [
     "crates/wiimaker-play",
     "crates/wiimaker-cli",
     "crates/wiimaker-editor",
+    "crates/wiimaker-wii",
     "games/hello-orb",
 ]
 default-members = ["games/hello-orb"]

@@ -32,7 +32,7 @@ pub struct Stick {
 
 impl Stick {
     pub fn deadzone(self, zone: f32) -> Self {
-        let mag = (self.x * self.x + self.y * self.y).sqrt();
+        let mag = crate::float::sqrt(self.x * self.x + self.y * self.y);
         if mag < zone {
             Self { x: 0.0, y: 0.0 }
         } else {
