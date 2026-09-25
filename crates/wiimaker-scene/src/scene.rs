@@ -128,49 +128,24 @@ impl SceneTransform {
         }
     }
 
-    /// Compose `local` under `parent` (translation × parent scale; scales multiply).
+    /// 2D Z angle in radians (same formula as the editor Rotate tool).
+    pub fn rotation_z(&self) -> f32 {
+        self.to_runtime().rotation_z()
+    }
+
+    /// Compose `local` under `parent`.
+    ///
+    /// Delegates to [`Transform::compose_child`]: scale local translation by
+    /// parent scale, rotate that offset by the parent quaternion, then add
+    /// parent translation. Rotations multiply (`parent * local`). +90° Z takes
+    /// local +X to world +Y.
     pub fn compose_child(parent: &Self, local: &Self) -> Self {
-        Self {
-            translation: [
-                parent.translation[0] + local.translation[0] * parent.scale[0],
-                parent.translation[1] + local.translation[1] * parent.scale[1],
-                parent.translation[2] + local.translation[2] * parent.scale[2],
-            ],
-            rotation: local.rotation,
-            scale: [
-                parent.scale[0] * local.scale[0],
-                parent.scale[1] * local.scale[1],
-                parent.scale[2] * local.scale[2],
-            ],
-        }
+        Self::from_runtime(&parent.to_runtime().compose_child(&local.to_runtime()))
     }
 
     /// Inverse of [`compose_child`]: world pose → local under `parent_world`.
     pub fn to_local(parent_world: &Self, world: &Self) -> Self {
-        let sx = safe_div_scale(parent_world.scale[0]);
-        let sy = safe_div_scale(parent_world.scale[1]);
-        let sz = safe_div_scale(parent_world.scale[2]);
-        Self {
-            translation: [
-                (world.translation[0] - parent_world.translation[0]) / sx,
-                (world.translation[1] - parent_world.translation[1]) / sy,
-                (world.translation[2] - parent_world.translation[2]) / sz,
-            ],
-            rotation: world.rotation,
-            scale: [
-                world.scale[0] / sx,
-                world.scale[1] / sy,
-                world.scale[2] / sz,
-            ],
-        }
-    }
-}
-
-fn safe_div_scale(s: f32) -> f32 {
-    if s.abs() < 1e-8 {
-        1.0
-    } else {
-        s
+        Self::from_runtime(&parent_world.to_runtime().to_local(&world.to_runtime()))
     }
 }
 
@@ -179,7 +154,9 @@ impl Scene {
         self.entities.iter().find(|e| e.name == name)
     }
 
-    /// World-space transform (local composed through parents). `None` if missing or cyclic.
+    /// World-space transform (local composed through parents, including 2D rotation).
+    /// `None` if missing or cyclic. Hydrate, pick, outline, gizmos, and WSCN bake
+    /// all use this so host Play and the editor Scene view share one pose.
     pub fn world_transform(&self, name: &str) -> Option<SceneTransform> {
         let mut locals = Vec::new();
         let mut current = name.to_string();

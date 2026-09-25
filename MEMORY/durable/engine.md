@@ -16,6 +16,7 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 
 ## Decisions
 
+- Parent/world compose lives on `wiimaker_core::Transform::compose_child` / `to_local` (scale local XY by parent scale, rotate by parent quat, add parent T; `world.R = parent.R * local.R`). +90° Z takes +X → +Y — same quat as `set_entity_rotation_z`. `SceneTransform` delegates; hydrate writes that world pose onto `World` so host Play matches the editor. WSCN bake still has no rotation field; it writes the composed world translation.
 - `load_scene_into_world` (`wiimaker-scene`, thin `wiimaker-host` wrapper taking `&TextureAtlas`) resolves stem/path, `hydrate_into_with_catalogs` (clears World), returns clear color. Keep the atlas; do not recook on switch.
 - Active Camera: dests in `render_world` are world − (cam − 320,240). Camera at default spawn is identity. Camera offset is applied in `render_world` dests; `SetCamera` is reserved for a future backend that transforms at flush time (do not emit both).
 - Sorting layers: `game.toml` `sorting_layers = ["Background", "Default", "Foreground"]` (omitted → those defaults). Sprite/Disc/Tilemap/Text keep `z` as Order in Layer and optional `sorting_layer` name (empty/`Default` omitted on save). Runtime stores `sorting_layer: u16` index; unknown names hydrate to Default. `render_world` stable-sorts all drawable kinds by (layer index, then z). `load_scene_into_world` copies the project list onto `World` before hydrate. WSCN0003 unchanged (C still sorts by raw `z`).

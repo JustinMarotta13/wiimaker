@@ -21,7 +21,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local transforms, sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib draws sprites/discs/text/tilemap cells + ASND oneshots, `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local transforms (full 2D rotation compose: scale local offset, rotate by parent Z, then translate; world R = parent R × local R), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib draws sprites/discs/text/tilemap cells + ASND oneshots, `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
 **Not present:** nested prefabs / prefab variants, IR pointer / sensor-bar aiming, motion gestures.
 
@@ -29,7 +29,7 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-24):** Wire PowerPC cross-compile in CI / finish `World` + `render_world` on Wii (today shipped WSCN Rust player + Makefile embed fix).
+**Recommended next morning (2026-09-25):** Wire PowerPC cross-compile in CI / finish `World` + `render_world` on Wii (or IR pointer). Parent/world rotation compose shipped today.
 
 ---
 
@@ -59,7 +59,7 @@ Shipped. Keep here so we do not rebuild them.
 - Prefab create / instantiate / apply / unpack (link + overrides shipped 2026-09-12)
 - Agent CLI twin of mutations (`--json`): see command list below
 - Doctor (project/scene/assets)
-- Parent local transforms (translate×scale; full rotation compose still open)
+- **Parent/world rotation compose** (2026-09-25) — `Transform::compose_child` / `to_local` in `wiimaker-core` (scale local XY, rotate by parent Z quat, then translate; `world.R = parent.R * local.R`). `Scene::world_transform` + hydrate / pick / outline / gizmos / WSCN bake / `set_entity_world_xy` / `set_entity_parent` share it. CLI twins unchanged (`entity set-parent`, `entity set --rotation-deg` / `--x --y`). Sprite dests stay AABB (host raster has no rotated quads). WSCN0003 still omits rotation; bake writes composed world XY. Dark Pro only.
 - Tilemap + solid cells (scene `Tilemap`, viewport Paint/Erase/Pick, Inspector grid+palette + **Import ASCII**, CLI `tilemap set|fill|stamp|from-ascii|get`, `tile_solid` / `world_to_cell`, WSCN0003 bake)
 - AABB/Circle collider + overlap (scene `Collider`, Inspector kind/size/solid, viewport seafoam outline gizmo, CLI `entity add-component … Collider --w --h`, `entity overlaps`, `overlaps` / `move_and_collide`; host-first, WSCN0003 unchanged)
 - Unity 6 editor chrome (dark Pro docks: Hierarchy left, Scene/Game center, Inspector right, Project/Console bottom; Play/Pause/Stop centered; component foldout cards). CLI `scene new` · `scene set-default`
@@ -155,5 +155,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Wii `World` + `render_world` (or green PowerPC CI).** Rust WSCN staticlib shipped 2026-09-24 (`wiimaker-wii`); next is share host World once cross-compile is reliable, or IR pointer.
+**Wii `World` + `render_world` (or green PowerPC CI).** Rust WSCN staticlib shipped 2026-09-24 (`wiimaker-wii`); parent/world rotation compose shipped 2026-09-25. Next is share host World once cross-compile is reliable, or IR pointer.
 

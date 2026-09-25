@@ -46,12 +46,82 @@ impl Transform {
         Self::from_translation(Vec3::new(x, y, 0.0))
     }
 
+    /// Local 2D Z rotation. Same XYZW as Inspector / `set_entity_rotation_z`
+    /// (`[0, 0, sin(θ/2), cos(θ/2)]`).
+    pub fn from_xy_rotation_z(x: f32, y: f32, radians: f32) -> Self {
+        Self {
+            translation: Vec3::new(x, y, 0.0),
+            rotation: Quat::from_rotation_z(radians),
+            scale: Vec3::ONE,
+        }
+    }
+
     pub fn matrix(&self) -> crate::math::Mat4 {
         crate::math::Mat4::from_scale_rotation_translation(
             self.scale,
             self.rotation,
             self.translation,
         )
+    }
+
+    /// 2D Z angle in radians from an authored Z-axis quaternion.
+    ///
+    /// Formula matches the editor Rotate tool: `atan2(2zw, w²−z²)`.
+    pub fn rotation_z(self) -> f32 {
+        let q = self.rotation;
+        (2.0 * q.z * q.w).atan2(q.w * q.w - q.z * q.z)
+    }
+
+    /// Compose `local` under this parent (Unity-style TRS, 2D Z rotation).
+    ///
+    /// Convention (documented for tests + hydrate / WSCN / pick):
+    /// 1. Scale local translation by parent scale (component-wise).
+    /// 2. Rotate that offset by the parent quaternion (`parent.R * scaled`).
+    ///    For Z-only quats, +90° takes +X → +Y (`x' = −y`, `y' = x` at 90°).
+    /// 3. Add parent translation.
+    /// 4. Multiply rotations: `world.R = parent.R * local.R` (glam / Hamilton:
+    ///    apply local first, then parent).
+    /// 5. Multiply scales component-wise.
+    ///
+    /// This is rotate-then-translate of the scaled local offset — not
+    /// translation×scale only.
+    pub fn compose_child(&self, local: &Self) -> Self {
+        let scaled = Vec3::new(
+            local.translation.x * self.scale.x,
+            local.translation.y * self.scale.y,
+            local.translation.z * self.scale.z,
+        );
+        Self {
+            translation: self.translation + self.rotation * scaled,
+            rotation: (self.rotation * local.rotation).normalize(),
+            scale: Vec3::new(
+                self.scale.x * local.scale.x,
+                self.scale.y * local.scale.y,
+                self.scale.z * local.scale.z,
+            ),
+        }
+    }
+
+    /// Inverse of [`compose_child`]: world pose → local under this parent world.
+    pub fn to_local(&self, world: &Self) -> Self {
+        let inv_rot = self.rotation.inverse();
+        let unrotated = inv_rot * (world.translation - self.translation);
+        let sx = safe_div_scale(self.scale.x);
+        let sy = safe_div_scale(self.scale.y);
+        let sz = safe_div_scale(self.scale.z);
+        Self {
+            translation: Vec3::new(unrotated.x / sx, unrotated.y / sy, unrotated.z / sz),
+            rotation: (inv_rot * world.rotation).normalize(),
+            scale: Vec3::new(world.scale.x / sx, world.scale.y / sy, world.scale.z / sz),
+        }
+    }
+}
+
+fn safe_div_scale(s: f32) -> f32 {
+    if s.abs() < 1e-8 {
+        1.0
+    } else {
+        s
     }
 }
 
@@ -699,5 +769,72 @@ mod tests {
         let t = world.transform(cam).unwrap().translation;
         assert_eq!(t.x, 320.0);
         assert_eq!(t.y, 240.0);
+    }
+
+    fn near(a: f32, b: f32) {
+        assert!((a - b).abs() < 1e-5, "{a} != {b}");
+    }
+
+    #[test]
+    fn compose_child_rotates_then_translates() {
+        // Parent at (100, 200), +90° Z, scale 1. Child local +X 10.
+        // Scale, then rotate (+X → +Y), then add parent: (100, 210).
+        let parent = Transform::from_xy_rotation_z(100.0, 200.0, core::f32::consts::FRAC_PI_2);
+        let local = Transform::from_xy(10.0, 0.0);
+        let world = parent.compose_child(&local);
+        near(world.translation.x, 100.0);
+        near(world.translation.y, 210.0);
+        near(world.rotation_z(), core::f32::consts::FRAC_PI_2);
+
+        // Child local +Y 10 under the same parent: +90° takes +Y → −X → (90, 200).
+        let local_y = Transform::from_xy(0.0, 10.0);
+        let world_y = parent.compose_child(&local_y);
+        near(world_y.translation.x, 90.0);
+        near(world_y.translation.y, 200.0);
+    }
+
+    #[test]
+    fn compose_child_adds_z_rotations_and_scales() {
+        let parent = {
+            let mut t = Transform::from_xy_rotation_z(0.0, 0.0, 30.0_f32.to_radians());
+            t.scale = Vec3::new(2.0, 3.0, 1.0);
+            t
+        };
+        let local = Transform::from_xy_rotation_z(5.0, 0.0, 15.0_f32.to_radians());
+        let world = parent.compose_child(&local);
+        // scaled (10, 0) then rotate 30°: (10 cos 30, 10 sin 30)
+        let rad = 30.0_f32.to_radians();
+        near(world.translation.x, 10.0 * rad.cos());
+        near(world.translation.y, 10.0 * rad.sin());
+        near(world.rotation_z(), 45.0_f32.to_radians());
+        near(world.scale.x, 2.0);
+        near(world.scale.y, 3.0);
+    }
+
+    #[test]
+    fn to_local_inverts_compose_under_rotated_parent() {
+        let parent = Transform::from_xy_rotation_z(80.0, 40.0, 40.0_f32.to_radians());
+        let local = {
+            let mut t = Transform::from_xy_rotation_z(12.0, -8.0, -25.0_f32.to_radians());
+            t.scale = Vec3::new(0.5, 2.0, 1.0);
+            t
+        };
+        let world = parent.compose_child(&local);
+        let back = parent.to_local(&world);
+        near(back.translation.x, local.translation.x);
+        near(back.translation.y, local.translation.y);
+        near(back.rotation_z(), local.rotation_z());
+        near(back.scale.x, local.scale.x);
+        near(back.scale.y, local.scale.y);
+    }
+
+    #[test]
+    fn identity_parent_compose_is_local() {
+        let parent = Transform::default();
+        let local = Transform::from_xy_rotation_z(3.0, 4.0, 0.25);
+        let world = parent.compose_child(&local);
+        near(world.translation.x, 3.0);
+        near(world.translation.y, 4.0);
+        near(world.rotation_z(), 0.25);
     }
 }

@@ -497,7 +497,7 @@ fn write_palette_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mutate::{add_component_sprite, add_entity, MutateOpts};
+    use crate::mutate::{add_component_sprite, add_entity, set_entity_rotation_z, MutateOpts};
     use crate::scene::{Scene, SceneTextAlign};
     use crate::tilemap::{add_component_tilemap, tilemap_stamp_ascii};
 
@@ -1200,5 +1200,66 @@ mod tests {
         let i = skip_to_kind(&bytes);
         assert_eq!(bytes[i], KIND_NONE);
         assert_eq!(i + 1, bytes.len());
+    }
+
+    #[test]
+    fn bake_world_xy_rotates_child_under_parent() {
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "P",
+            &MutateOpts {
+                x: Some(100.0),
+                y: Some(200.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "C",
+            &MutateOpts {
+                x: Some(10.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "P", 90.0_f32.to_radians()).unwrap();
+        scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == "C")
+            .unwrap()
+            .parent = Some("P".into());
+
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let n = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+        assert_eq!(n, 2);
+        let mut i = 16usize;
+        let mut poses = Vec::new();
+        for _ in 0..n {
+            let nlen = read_u16(&bytes, &mut i) as usize;
+            let name = String::from_utf8(bytes[i..i + nlen].to_vec()).unwrap();
+            i += nlen;
+            let tx = read_f32(&bytes, &mut i);
+            let ty = read_f32(&bytes, &mut i);
+            let _tz = read_f32(&bytes, &mut i);
+            i += 12; // scale
+            let kind = bytes[i];
+            i += 1;
+            assert_eq!(kind, KIND_NONE);
+            poses.push((name, tx, ty));
+        }
+        assert!((poses[0].1 - 100.0).abs() < 1e-4 && (poses[0].2 - 200.0).abs() < 1e-4);
+        assert_eq!(poses[1].0, "C");
+        // Local +X 10 under +90° → baked world (100, 210). Format still has no rotation field.
+        assert!(
+            (poses[1].1 - 100.0).abs() < 1e-4 && (poses[1].2 - 210.0).abs() < 1e-4,
+            "baked child {:?}, expected (100, 210)",
+            poses[1]
+        );
+        assert_eq!(i, bytes.len());
     }
 }
