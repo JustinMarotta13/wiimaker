@@ -1164,7 +1164,13 @@ mod tests {
         .unwrap();
         set_entity_rotation_z(&mut scene, "p", 90.0_f32.to_radians()).unwrap();
         set_entity_rotation_z(&mut scene, "c", 15.0_f32.to_radians()).unwrap();
-        set_entity_parent(&mut scene, "c", Some("p")).unwrap();
+        // Local (10, 0) under the parent — not pose-preserving reparent.
+        scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == "c")
+            .unwrap()
+            .parent = Some("p".into());
 
         let world = hydrate_lenient(&scene, &TextureMap::new());
         let id = world.find_by_name("c").unwrap();
