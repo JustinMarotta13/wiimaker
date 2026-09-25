@@ -333,6 +333,22 @@ mod tests {
     }
 
     #[test]
+    fn pick_child_under_rotated_parent_uses_composed_world() {
+        let mut scene = Scene::new("t");
+        let mut p = sprite_ent("P", 100.0, 100.0, 8.0, 8.0, 0.0);
+        let half = 90.0_f32.to_radians() * 0.5;
+        p.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
+        scene.entities.push(p);
+        let mut c = sprite_ent("C", 40.0, 0.0, 20.0, 20.0, 1.0);
+        c.parent = Some("P".into());
+        scene.entities.push(c);
+        // Local +X 40 under +90° parent → world (100, 140), 20×20 centered AABB.
+        assert_eq!(pick_entity_at(&scene, 100.0, 140.0).as_deref(), Some("C"));
+        // Old translate×scale pose would have been (140, 100).
+        assert_eq!(pick_entity_at(&scene, 140.0, 100.0), None);
+    }
+
+    #[test]
     fn empty_space_returns_none() {
         let mut scene = Scene::new("t");
         scene.entities.push(disc_ent("D", 10.0, 10.0, 5.0, 0.0));

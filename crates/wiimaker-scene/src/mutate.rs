@@ -294,7 +294,8 @@ pub fn set_entity_transform(
     Ok(())
 }
 
-/// Set world-space XY while keeping local scale/rotation; converts through parent if any.
+/// Set world-space XY while keeping local scale/rotation; converts through parent if any
+/// (inverse-rotates the delta when the parent’s world rotation is non-zero).
 pub fn set_entity_world_xy(scene: &mut Scene, name: &str, x: f32, y: f32) -> Result<()> {
     let parent = scene
         .find_entity(name)
@@ -1004,6 +1005,179 @@ mod tests {
         let w = scene.world_transform("c").unwrap();
         assert_eq!(w.translation[0], 150.0);
         assert_eq!(w.translation[1], 120.0);
+    }
+
+    fn near(a: f32, b: f32) {
+        assert!((a - b).abs() < 1e-4, "{a} != {b}");
+    }
+
+    #[test]
+    fn world_transform_rotates_child_offset_then_translates() {
+        // Parent (100, 200) +90° Z; child local (10, 0) → world (100, 210).
+        // World rotation = parent 90° + local 15° = 105°.
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "p",
+            &MutateOpts {
+                x: Some(100.0),
+                y: Some(200.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "c",
+            &MutateOpts {
+                x: Some(10.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "p", 90.0_f32.to_radians()).unwrap();
+        set_entity_rotation_z(&mut scene, "c", 15.0_f32.to_radians()).unwrap();
+        scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == "c")
+            .unwrap()
+            .parent = Some("p".into());
+
+        let world = scene.world_transform("c").unwrap();
+        near(world.translation[0], 100.0);
+        near(world.translation[1], 210.0);
+        near(world.rotation_z(), 105.0_f32.to_radians());
+    }
+
+    #[test]
+    fn set_parent_under_rotated_parent_preserves_world_pose() {
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "p",
+            &MutateOpts {
+                x: Some(100.0),
+                y: Some(50.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "c",
+            &MutateOpts {
+                x: Some(130.0),
+                y: Some(70.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "p", 90.0_f32.to_radians()).unwrap();
+        set_entity_rotation_z(&mut scene, "c", 20.0_f32.to_radians()).unwrap();
+
+        set_entity_parent(&mut scene, "c", Some("p")).unwrap();
+        let world = scene.world_transform("c").unwrap();
+        near(world.translation[0], 130.0);
+        near(world.translation[1], 70.0);
+        near(world.rotation_z(), 20.0_f32.to_radians());
+
+        // Inverse-rotate (30, 20) by −90°: (x,y) → (y, −x) → (20, −30).
+        let local = &scene.find_entity("c").unwrap().transform;
+        near(local.translation[0], 20.0);
+        near(local.translation[1], -30.0);
+        near(local.rotation_z(), (20.0 - 90.0_f32).to_radians());
+
+        set_entity_parent(&mut scene, "c", None).unwrap();
+        let root = scene.find_entity("c").unwrap();
+        assert!(root.parent.is_none());
+        near(root.transform.translation[0], 130.0);
+        near(root.transform.translation[1], 70.0);
+        near(root.transform.rotation_z(), 20.0_f32.to_radians());
+    }
+
+    #[test]
+    fn set_entity_world_xy_under_rotated_parent_keeps_local_rotation() {
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "p",
+            &MutateOpts {
+                x: Some(100.0),
+                y: Some(100.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "c",
+            &MutateOpts {
+                x: Some(140.0),
+                y: Some(100.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "p", 90.0_f32.to_radians()).unwrap();
+        set_entity_rotation_z(&mut scene, "c", -10.0_f32.to_radians()).unwrap();
+        set_entity_parent(&mut scene, "c", Some("p")).unwrap();
+
+        // Drag child to (100, 150): +90° of local +X 50. Local rotation stays.
+        let local_rot_before = scene.find_entity("c").unwrap().transform.rotation_z();
+        set_entity_world_xy(&mut scene, "c", 100.0, 150.0).unwrap();
+        let local = &scene.find_entity("c").unwrap().transform;
+        near(local.translation[0], 50.0);
+        near(local.translation[1], 0.0);
+        near(local.rotation_z(), local_rot_before);
+        let w = scene.world_transform("c").unwrap();
+        near(w.translation[0], 100.0);
+        near(w.translation[1], 150.0);
+        near(w.rotation_z(), -10.0_f32.to_radians());
+    }
+
+    #[test]
+    fn hydrate_writes_composed_world_rotation() {
+        use crate::hydrate::{hydrate_lenient, TextureMap};
+
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "p",
+            &MutateOpts {
+                x: Some(80.0),
+                y: Some(40.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "c",
+            &MutateOpts {
+                x: Some(10.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "p", 90.0_f32.to_radians()).unwrap();
+        set_entity_rotation_z(&mut scene, "c", 15.0_f32.to_radians()).unwrap();
+        // Local (10, 0) under the parent — not pose-preserving reparent.
+        scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == "c")
+            .unwrap()
+            .parent = Some("p".into());
+
+        let world = hydrate_lenient(&scene, &TextureMap::new());
+        let id = world.find_by_name("c").unwrap();
+        let xf = world.transform(id).unwrap();
+        near(xf.translation.x, 80.0);
+        near(xf.translation.y, 50.0);
+        near(xf.rotation_z(), 105.0_f32.to_radians());
     }
 
     #[test]

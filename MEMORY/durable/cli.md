@@ -10,7 +10,7 @@ Canonical rules: `.cursor/rules/wiimaker-cli.mdc`.
 - `bake-wii` needs a prepared `.wpack` first; `wiimaker build` / `wii-build.sh` run prepare then bake automatically.
 - Ship verbs: `build` (alias `build-wii`), `dolphin`, `play-wii`. Shared helpers in `pipeline.rs`.
 - `entity duplicate <game> <name>` / `entity rename <game> <old> <new>` return new/renamed name in `--json`.
-- `entity set-parent <game> --name Child [--parent Parent]` — omit `--parent` to unparent; preserves world pose.
+- `entity set-parent <game> --name Child [--parent Parent]` — omit `--parent` to unparent; preserves world pose including rotation (inverse-rotates local XY under a rotated parent). `entity set --rotation-deg` is still **local** Z; rotating a parent after parenting orbits children via `world_transform`.
 - `entity remove-component` / `set-component-enabled --enabled true|false` (clap `ArgAction::Set`).
 - Prefabs: `entity create-prefab` (writes asset + links the source entity) · `instantiate-prefab` (records `prefab` link) · `apply-prefab` (Unity Apply: push instance → asset; prefab arg optional when linked) · `revert-prefab` · `unpack-prefab` (clears link) · `prefab-status` (`--json`: `instance`, `prefab`, `overrides`). Files under `assets/prefabs/`.
 - `entity set --name X [--x --y --sx --sy --rotation-deg --tag --follow --lerp]` — scale/rotate via `set_entity_scale` / `set_entity_rotation_z` (degrees → radians). `--follow` creates Camera if missing.
