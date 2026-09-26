@@ -128,15 +128,29 @@ impl SceneTransform {
         }
     }
 
-    /// Compose `local` under `parent` (translation × parent scale; scales multiply).
+    /// Quaternion stored as scene `[x, y, z, w]`. Degenerate → identity.
+    pub fn as_quat(&self) -> Quat {
+        quat_from_xyzw(self.rotation)
+    }
+
+    /// Unity-like 2D TRS: scale multiplies component-wise (axis-aligned; non-uniform
+    /// scale + rotation does **not** introduce shear), rotation is `parent * local`,
+    /// and the local offset is scaled by the parent then rotated by the parent quat.
     pub fn compose_child(parent: &Self, local: &Self) -> Self {
+        let parent_rot = parent.as_quat();
+        let scaled_offset = Vec3::new(
+            local.translation[0] * parent.scale[0],
+            local.translation[1] * parent.scale[1],
+            local.translation[2] * parent.scale[2],
+        );
+        let rotated = parent_rot * scaled_offset;
         Self {
             translation: [
-                parent.translation[0] + local.translation[0] * parent.scale[0],
-                parent.translation[1] + local.translation[1] * parent.scale[1],
-                parent.translation[2] + local.translation[2] * parent.scale[2],
+                parent.translation[0] + rotated.x,
+                parent.translation[1] + rotated.y,
+                parent.translation[2] + rotated.z,
             ],
-            rotation: local.rotation,
+            rotation: quat_to_xyzw(parent_rot * local.as_quat()),
             scale: [
                 parent.scale[0] * local.scale[0],
                 parent.scale[1] * local.scale[1],
@@ -150,13 +164,16 @@ impl SceneTransform {
         let sx = safe_div_scale(parent_world.scale[0]);
         let sy = safe_div_scale(parent_world.scale[1]);
         let sz = safe_div_scale(parent_world.scale[2]);
+        let inv_rot = parent_world.as_quat().inverse();
+        let delta = Vec3::new(
+            world.translation[0] - parent_world.translation[0],
+            world.translation[1] - parent_world.translation[1],
+            world.translation[2] - parent_world.translation[2],
+        );
+        let unrotated = inv_rot * delta;
         Self {
-            translation: [
-                (world.translation[0] - parent_world.translation[0]) / sx,
-                (world.translation[1] - parent_world.translation[1]) / sy,
-                (world.translation[2] - parent_world.translation[2]) / sz,
-            ],
-            rotation: world.rotation,
+            translation: [unrotated.x / sx, unrotated.y / sy, unrotated.z / sz],
+            rotation: quat_to_xyzw(inv_rot * world.as_quat()),
             scale: [
                 world.scale[0] / sx,
                 world.scale[1] / sy,
@@ -164,6 +181,24 @@ impl SceneTransform {
             ],
         }
     }
+}
+
+fn quat_from_xyzw(q: [f32; 4]) -> Quat {
+    let q = Quat::from_xyzw(q[0], q[1], q[2], q[3]);
+    if q.length_squared() < 1e-12 {
+        Quat::IDENTITY
+    } else {
+        q.normalize()
+    }
+}
+
+fn quat_to_xyzw(q: Quat) -> [f32; 4] {
+    let q = if q.length_squared() < 1e-12 {
+        Quat::IDENTITY
+    } else {
+        q.normalize()
+    };
+    [q.x, q.y, q.z, q.w]
 }
 
 fn safe_div_scale(s: f32) -> f32 {
@@ -1127,4 +1162,183 @@ pub fn save_prefab(path: &Path, prefab: &Prefab) -> Result<()> {
     let text = serde_json::to_string_pretty(prefab)?;
     fs::write(path, text + "\n")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rot_z_deg(deg: f32) -> [f32; 4] {
+        let half = deg.to_radians() * 0.5;
+        [0.0, 0.0, half.sin(), half.cos()]
+    }
+
+    fn xf(x: f32, y: f32, rot_deg: f32, sx: f32, sy: f32) -> SceneTransform {
+        SceneTransform {
+            translation: [x, y, 0.0],
+            rotation: rot_z_deg(rot_deg),
+            scale: [sx, sy, 1.0],
+        }
+    }
+
+    fn near(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    fn near3(a: [f32; 3], b: [f32; 3]) -> bool {
+        near(a[0], b[0]) && near(a[1], b[1]) && near(a[2], b[2])
+    }
+
+    /// Quaternions q and −q are the same rotation.
+    fn near_quat(a: [f32; 4], b: [f32; 4]) -> bool {
+        let d =
+            (a[0] - b[0]).abs() + (a[1] - b[1]).abs() + (a[2] - b[2]).abs() + (a[3] - b[3]).abs();
+        let opp =
+            (a[0] + b[0]).abs() + (a[1] + b[1]).abs() + (a[2] + b[2]).abs() + (a[3] + b[3]).abs();
+        d < 1e-4 || opp < 1e-4
+    }
+
+    fn assert_xf_eq(got: &SceneTransform, want: &SceneTransform) {
+        assert!(
+            near3(got.translation, want.translation),
+            "translation {:?} != {:?}",
+            got.translation,
+            want.translation
+        );
+        assert!(
+            near_quat(got.rotation, want.rotation),
+            "rotation {:?} != {:?}",
+            got.rotation,
+            want.rotation
+        );
+        assert!(
+            near3(got.scale, want.scale),
+            "scale {:?} != {:?}",
+            got.scale,
+            want.scale
+        );
+    }
+
+    #[test]
+    fn compose_identity_rotation_is_translate_times_scale() {
+        let parent = xf(100.0, 50.0, 0.0, 2.0, 3.0);
+        let local = xf(10.0, 20.0, 0.0, 0.5, 2.0);
+        let world = SceneTransform::compose_child(&parent, &local);
+        assert!(near3(world.translation, [120.0, 110.0, 0.0]));
+        assert!(near_quat(world.rotation, rot_z_deg(0.0)));
+        assert!(near3(world.scale, [1.0, 6.0, 1.0]));
+    }
+
+    #[test]
+    fn compose_parent_45_child_plus_x() {
+        let parent = xf(320.0, 240.0, 45.0, 1.0, 1.0);
+        let local = xf(80.0, 0.0, 0.0, 1.0, 1.0);
+        let world = SceneTransform::compose_child(&parent, &local);
+        let s = 45f32.to_radians().sin();
+        let c = 45f32.to_radians().cos();
+        assert!(near3(
+            world.translation,
+            [320.0 + 80.0 * c, 240.0 + 80.0 * s, 0.0]
+        ));
+        assert!(near_quat(world.rotation, rot_z_deg(45.0)));
+        assert!(near3(world.scale, [1.0, 1.0, 1.0]));
+    }
+
+    #[test]
+    fn compose_parent_90_child_plus_x() {
+        let parent = xf(0.0, 0.0, 90.0, 1.0, 1.0);
+        let local = xf(80.0, 0.0, 0.0, 1.0, 1.0);
+        let world = SceneTransform::compose_child(&parent, &local);
+        assert!(near3(world.translation, [0.0, 80.0, 0.0]));
+        assert!(near_quat(world.rotation, rot_z_deg(90.0)));
+    }
+
+    #[test]
+    fn compose_nested_grandparent_rotation() {
+        let mut scene = Scene::new("orbit");
+        scene.entities.push(EntityData {
+            name: "gp".into(),
+            parent: None,
+            transform: xf(10.0, 20.0, 90.0, 1.0, 1.0),
+            components: SceneComponents::default(),
+            tag: 0,
+            prefab: None,
+        });
+        scene.entities.push(EntityData {
+            name: "p".into(),
+            parent: Some("gp".into()),
+            transform: xf(10.0, 0.0, 90.0, 1.0, 1.0),
+            components: SceneComponents::default(),
+            tag: 0,
+            prefab: None,
+        });
+        scene.entities.push(EntityData {
+            name: "c".into(),
+            parent: Some("p".into()),
+            transform: xf(10.0, 0.0, 0.0, 1.0, 1.0),
+            components: SceneComponents::default(),
+            tag: 0,
+            prefab: None,
+        });
+        // parent world: (10,20) + rot90(10,0) = (10,30), rot 180°
+        // child world: (10,30) + rot180(10,0) = (0,30), rot 180°
+        let child = scene.world_transform("c").unwrap();
+        assert!(near3(child.translation, [0.0, 30.0, 0.0]));
+        assert!(near_quat(child.rotation, rot_z_deg(180.0)));
+        let parent = scene.world_transform("p").unwrap();
+        assert!(near3(parent.translation, [10.0, 30.0, 0.0]));
+        assert!(near_quat(parent.rotation, rot_z_deg(180.0)));
+    }
+
+    #[test]
+    fn compose_child_to_local_roundtrip() {
+        let cases = [
+            xf(320.0, 240.0, 45.0, 1.0, 1.0),
+            xf(100.0, 50.0, 90.0, 2.0, 0.5),
+            xf(-8.0, 12.0, -30.0, 1.5, 1.5),
+            xf(0.0, 0.0, 0.0, 1.0, 1.0),
+        ];
+        let locals = [
+            xf(80.0, 0.0, 0.0, 1.0, 1.0),
+            xf(10.0, 20.0, 15.0, 0.5, 2.0),
+            xf(-4.0, 7.0, -90.0, 1.0, 1.0),
+        ];
+        for parent in &cases {
+            for local in &locals {
+                let world = SceneTransform::compose_child(parent, local);
+                let back = SceneTransform::to_local(parent, &world);
+                assert_xf_eq(&back, local);
+                let again = SceneTransform::compose_child(parent, &back);
+                assert_xf_eq(&again, &world);
+            }
+        }
+    }
+
+    #[test]
+    fn world_transform_rotparent_hello_orb() {
+        let mut scene = Scene::new("hello");
+        scene.entities.push(EntityData {
+            name: "RotParent".into(),
+            parent: None,
+            transform: xf(320.0, 240.0, 45.0, 1.0, 1.0),
+            components: SceneComponents::default(),
+            tag: 0,
+            prefab: None,
+        });
+        scene.entities.push(EntityData {
+            name: "RotChild".into(),
+            parent: Some("RotParent".into()),
+            transform: xf(80.0, 0.0, 0.0, 1.0, 1.0),
+            components: SceneComponents::default(),
+            tag: 0,
+            prefab: None,
+        });
+        let child = scene.world_transform("RotChild").unwrap();
+        let s = 45f32.to_radians().sin();
+        let c = 45f32.to_radians().cos();
+        assert!(near3(
+            child.translation,
+            [320.0 + 80.0 * c, 240.0 + 80.0 * s, 0.0]
+        ));
+    }
 }

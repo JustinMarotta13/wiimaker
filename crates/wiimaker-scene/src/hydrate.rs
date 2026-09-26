@@ -605,3 +605,91 @@ fn scene_text_to_runtime(world: &World, t: &crate::scene::SceneText) -> Text {
     text.sorting_layer = world.sorting_layer_index(&t.sorting_layer);
     text
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mutate::{add_entity, set_entity_parent, set_entity_rotation_z, MutateOpts};
+    use crate::scene::Scene;
+
+    fn rot_parent_scene() -> Scene {
+        let mut scene = Scene::new("orbit");
+        add_entity(
+            &mut scene,
+            "RotParent",
+            &MutateOpts {
+                x: Some(320.0),
+                y: Some(240.0),
+                radius: Some(28.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "RotParent", 45f32.to_radians()).unwrap();
+        add_entity(
+            &mut scene,
+            "RotChild",
+            &MutateOpts {
+                x: Some(80.0),
+                y: Some(0.0),
+                radius: Some(16.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // add_entity writes world-ish defaults; force local (80,0) then parent without
+        // preserving that authored local via set_entity_parent (which remaps pose).
+        let child = scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == "RotChild")
+            .unwrap();
+        child.transform.translation = [80.0, 0.0, 0.0];
+        child.parent = Some("RotParent".into());
+        scene
+    }
+
+    #[test]
+    fn hydrate_flattens_rotated_parent_world_pose() {
+        let scene = rot_parent_scene();
+        let world = hydrate_lenient(&scene, &TextureMap::new());
+        let id = world.find_by_name("RotChild").expect("child");
+        let xf = world.transform(id).unwrap();
+        let s = 45f32.to_radians().sin();
+        let c = 45f32.to_radians().cos();
+        assert!((xf.translation.x - (320.0 + 80.0 * c)).abs() < 1e-4);
+        assert!((xf.translation.y - (240.0 + 80.0 * s)).abs() < 1e-4);
+        // World has no parent links — pose is already composed.
+        assert!(world.find_by_name("RotParent").is_some());
+    }
+
+    #[test]
+    fn hydrate_identity_parent_still_translates() {
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "p",
+            &MutateOpts {
+                x: Some(100.0),
+                y: Some(50.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "c",
+            &MutateOpts {
+                x: Some(130.0),
+                y: Some(70.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_parent(&mut scene, "c", Some("p")).unwrap();
+        let world = hydrate_lenient(&scene, &TextureMap::new());
+        let xf = world.transform(world.find_by_name("c").unwrap()).unwrap();
+        assert!((xf.translation.x - 130.0).abs() < 1e-4);
+        assert!((xf.translation.y - 70.0).abs() < 1e-4);
+    }
+}

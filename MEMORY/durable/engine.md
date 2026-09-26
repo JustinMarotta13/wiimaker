@@ -34,6 +34,8 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 - Primary ship verbs are Build / Play in Dolphin / Build & Run; `cook` is advanced/agent-only.
 - Wii input merge (`runtime/wii/src/bootstrap.c` `fill_input` + `wiimaker-core::wiimote_map`): GCN first, then OR Wiimote bits (`1→X`, `2→Y`, Minus→Z, Home/Plus→Start). Classic digital (`WPAD_CLASSIC_BUTTON_*`) only when expansion is Classic. Nunchuk Z→GCN Z; C unmapped. Classic `ljs`/`rjs` and Nunchuk `js` fill sticks only when GCN is inside `STICK_IDLE_DEADZONE` (0.20). D-pad synthesizes `main` if still idle. `WPAD_Probe` + `EXP_NONE` is a no-op. No IR / motion. Host WASD stays in `apply_pad_keys`.
 
+- Scene hierarchy TRS: `SceneTransform::compose_child` / `to_local` are the single source of truth. `world.scale = parent.scale * local.scale` (component-wise, no shear), `world.rotation = parent.rotation * local.rotation` (glam `Quat`, scene stores `[x,y,z,w]`), `world.t = parent.t + rotate(parent.r, local.t * parent.s)`. Hydrate writes flattened world pose onto `World` (no parent links at runtime). WSCN bake writes composed translation+scale only. Identity rotation still matches the old translate×scale path.
+
 ## Open follow-ups
 
 - Wii `World` + `render_world` (replace WSCN subset player) once PowerPC staticlib CI is green.

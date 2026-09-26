@@ -1108,6 +1108,91 @@ mod tests {
         assert_eq!(i, bytes.len());
     }
 
+    fn read_entity_poses(bytes: &[u8]) -> Vec<(String, [f32; 3], [f32; 3])> {
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let mut i = 12;
+        let n = u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
+        i += 4;
+        let mut out = Vec::new();
+        for _ in 0..n {
+            let nlen = read_u16(&bytes, &mut i) as usize;
+            let name = String::from_utf8(bytes[i..i + nlen].to_vec()).unwrap();
+            i += nlen;
+            let t = [
+                read_f32(&bytes, &mut i),
+                read_f32(&bytes, &mut i),
+                read_f32(&bytes, &mut i),
+            ];
+            let s = [
+                read_f32(&bytes, &mut i),
+                read_f32(&bytes, &mut i),
+                read_f32(&bytes, &mut i),
+            ];
+            let kind = bytes[i];
+            i += 1;
+            match kind {
+                KIND_DISC => {
+                    let _ = read_f32(&bytes, &mut i);
+                    i += 4; // color
+                    let _ = read_f32(&bytes, &mut i);
+                }
+                KIND_NONE => {}
+                other => panic!("unexpected kind {other}"),
+            }
+            out.push((name, t, s));
+        }
+        out
+    }
+
+    #[test]
+    fn bake_parented_disc_uses_composed_world_translation() {
+        use crate::mutate::set_entity_rotation_z;
+
+        let mut scene = Scene::new("orbit");
+        add_entity(
+            &mut scene,
+            "RotParent",
+            &MutateOpts {
+                x: Some(320.0),
+                y: Some(240.0),
+                radius: Some(28.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "RotParent", 90f32.to_radians()).unwrap();
+        add_entity(
+            &mut scene,
+            "RotChild",
+            &MutateOpts {
+                x: Some(400.0),
+                y: Some(240.0),
+                radius: Some(16.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let child = scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == "RotChild")
+            .unwrap();
+        child.transform.translation = [80.0, 0.0, 0.0];
+        child.parent = Some("RotParent".into());
+
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        let poses = read_entity_poses(&bytes);
+        assert_eq!(poses.len(), 2);
+        let parent = poses.iter().find(|(n, _, _)| n == "RotParent").unwrap();
+        let child = poses.iter().find(|(n, _, _)| n == "RotChild").unwrap();
+        assert!((parent.1[0] - 320.0).abs() < 1e-4);
+        assert!((parent.1[1] - 240.0).abs() < 1e-4);
+        // rot90 * (80, 0) = (0, 80)
+        assert!((child.1[0] - 320.0).abs() < 1e-4);
+        assert!((child.1[1] - 320.0).abs() < 1e-4);
+        assert!((child.2[0] - 1.0).abs() < 1e-4);
+    }
+
     #[test]
     fn bake_missing_audio_clip_is_no_clip() {
         use crate::mutate::add_component_audio_source;

@@ -1006,6 +1006,86 @@ mod tests {
         assert_eq!(w.translation[1], 120.0);
     }
 
+    fn near(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn set_parent_under_rotated_parent_preserves_world() {
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "parent",
+            &MutateOpts {
+                x: Some(100.0),
+                y: Some(50.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "parent", 90f32.to_radians()).unwrap();
+        add_entity(
+            &mut scene,
+            "child",
+            &MutateOpts {
+                x: Some(130.0),
+                y: Some(50.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        set_entity_parent(&mut scene, "child", Some("parent")).unwrap();
+        let child = scene.find_entity("child").unwrap();
+        // rot90 * (0, -30) = (30, 0); inverse of world offset (30, 0)
+        assert!(near(child.transform.translation[0], 0.0));
+        assert!(near(child.transform.translation[1], -30.0));
+        let world = scene.world_transform("child").unwrap();
+        assert!(near(world.translation[0], 130.0));
+        assert!(near(world.translation[1], 50.0));
+
+        set_entity_parent(&mut scene, "child", None).unwrap();
+        let root = scene.find_entity("child").unwrap();
+        assert!(root.parent.is_none());
+        assert!(near(root.transform.translation[0], 130.0));
+        assert!(near(root.transform.translation[1], 50.0));
+    }
+
+    #[test]
+    fn set_entity_world_xy_under_rotated_parent() {
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "p",
+            &MutateOpts {
+                x: Some(100.0),
+                y: Some(100.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_rotation_z(&mut scene, "p", 90f32.to_radians()).unwrap();
+        add_entity(
+            &mut scene,
+            "c",
+            &MutateOpts {
+                x: Some(100.0),
+                y: Some(100.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_parent(&mut scene, "c", Some("p")).unwrap();
+        set_entity_world_xy(&mut scene, "c", 150.0, 120.0).unwrap();
+        // inv_rot90 * (50, 20) = (20, -50)
+        let local = &scene.find_entity("c").unwrap().transform.translation;
+        assert!(near(local[0], 20.0));
+        assert!(near(local[1], -50.0));
+        let w = scene.world_transform("c").unwrap();
+        assert!(near(w.translation[0], 150.0));
+        assert!(near(w.translation[1], 120.0));
+    }
+
     #[test]
     fn camera_follow_mutate_and_rename_target() {
         let mut scene = empty_scene();
