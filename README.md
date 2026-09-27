@@ -131,6 +131,15 @@ wiimaker play-wii hello-orb
 
 **Dolphin check (tilemaps / audio):** `wiimaker build <game>` then `wiimaker dolphin <game>` (or File → Open `target/wii/<game>/boot.dol`). Occupied tile cells should match host `wiimaker run` / editor Game view (colored walls, sprite tiles, auto-tile variants). Animated palette clips tick on GX when the bake includes 2+ frames. AudioSource play-on-awake should fire once after load (PCM16 from the wpack TOC). This environment cannot run Dolphin; use that path on a machine with it.
 
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
+
+1. **Host tests** — scaffolds `games/hello-orb` from `templates/basic-game` (workspace member; `games/` is gitignored locally), then `cargo test --workspace`.
+2. **PowerPC rustlib** — nightly + `rust-src`, `WIIMAKER_RUSTLIB_STRICT=1 ./tools/wii-rustlib.sh --strict`, asserts `target/powerpc-unknown-eabi/release/libwiimaker_wii.a` exists and is non-trivial.
+
+Local builds stay best-effort (`./tools/wii-rustlib.sh` exits 0 on toolchain failure so the Makefile can fall back to C `stub_game`). CI is strict so a broken `powerpc-unknown-eabi` / `build-std` path fails the PR.
+
 ## Workspace layout
 
 ```
@@ -142,12 +151,14 @@ wiimaker/
 │   ├── wiimaker-assets/   # PNG + PCM16 WAV → .wpack cooker
 │   ├── wiimaker-play/     # host/editor App tick + optional game cdylib
 │   ├── wiimaker-cli/      # `wiimaker` agent + human CLI
-│   └── wiimaker-editor/   # egui Hierarchy / Inspector / Scene / Project
-├── runtime/wii/           # C Broadway bootstrap (VI/GX/PAD/ASND)
-├── games/hello-orb/       # reference game (scene + sample sprites)
-├── templates/basic-game/  # scaffold for `wiimaker new`
-├── docker/                # reproducible PowerPC builds
-└── tools/                 # pack HBC, make ISO, launch Dolphin
+│   ├── wiimaker-editor/   # egui Hierarchy / Inspector / Scene / Project
+│   └── wiimaker-wii/      # Wii Rust staticlib (WSCN player; PowerPC CI)
+├── runtime/wii/           # C Broadway bootstrap (VI/GX/PAD/ASND) + target JSON
+├── games/hello-orb/       # reference game (local / CI-scaffolded; games/ gitignored)
+├── templates/basic-game/  # scaffold for `wiimaker new` + CI hello-orb
+├── docker/                # reproducible PowerPC .dol builds (devkitPPC)
+├── .github/workflows/     # host tests + strict PowerPC rustlib
+└── tools/                 # wii-rustlib, wii-build, HBC, Dolphin
 ```
 
 ## Design principles

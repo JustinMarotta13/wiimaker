@@ -1,0 +1,72 @@
+# Host tests + strict PowerPC wiimaker-wii staticlib (build-std).
+# Unblocks later Wii World + render_world sharing.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  host-test:
+    name: Host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scaffold games/hello-orb (gitignored workspace member)
+        run: ./tools/ci-scaffold-hello-orb.sh
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+  powerpc-rustlib:
+    name: PowerPC wiimaker-wii rustlib
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scaffold games/hello-orb (workspace member path)
+        run: ./tools/ci-scaffold-hello-orb.sh
+
+      - name: Install Rust nightly + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Separate key from host-test (different toolchain / target).
+          prefix-key: powerpc-rustlib
+
+      - name: Strict PowerPC cross-compile
+        env:
+          WIIMAKER_RUSTLIB_STRICT: "1"
+        run: ./tools/wii-rustlib.sh --strict
+
+      - name: Assert staticlib artifact
+        run: |
+          set -euo pipefail
+          OUT=target/powerpc-unknown-eabi/release/libwiimaker_wii.a
+          test -f "$OUT"
+          ls -la "$OUT"
+          # Archive should be non-trivial (empty/stub would be tiny).
+          SIZE=$(wc -c < "$OUT")
+          echo "libwiimaker_wii.a bytes=$SIZE"
+          test "$SIZE" -gt 100000
