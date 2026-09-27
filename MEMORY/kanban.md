@@ -29,13 +29,15 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-26):** Wii `World` + `render_world` / green PowerPC CI (or IR pointer). Today shipped full parent rotation compose (host).
+**Today (2026-09-27):** Green PowerPC CI for `wiimaker-wii` (`.github/workflows/ci.yml` + strict `wii-rustlib`) — open PR, then merge after review.
+
+**Recommended next morning:** Wii `World` + `render_world` (or IR pointer) once PowerPC CI is on `main`.
 
 ---
 
 ## Later
 
-- **Wii `World` + `render_world`** — replace the WSCN subset player with shared host World once `powerpc-unknown-eabi` + build-std is green in Docker.
+- **Wii `World` + `render_world`** — replace the WSCN subset player with shared host World / `render_world` on PowerPC (after staticlib CI is on `main`).
 - IR pointer / sensor-bar aiming and motion gestures.
 
 ---
@@ -79,6 +81,7 @@ Shipped. Keep here so we do not rebuild them.
 - **Wii ASND oneshots** (2026-09-22) — `WPACK001` audio TOC after meshes (`u32` count; old packs omit → 0): stem, rate, channels, LE PCM16. WSCN0003 `KIND_AUDIO=5` for audio-only entities; additive trailing table (entity index + clip + volume + play_on_awake) for AudioSource on Sprite/Disc/Tilemap/Text. C: `ASND_Init`, load TOC, 32-byte-aligned BE buffers, `ASND_SetVoice` at clip rate, volume 0..1, play-on-awake after load. Missing clip / empty TOC must not crash. Inspector subtitle no longer says ASND is unwired.
 
 - **Wiimote / Classic / Nunchuk input** (2026-09-23) — GCN-layout `Input` is still the lingua franca. Wii `fill_input`: GCN stick+C-stick+buttons, core Wiimote A/B/Plus/Home/D-pad + **1→X 2→Y Minus→Z**, Classic digital **only when `WPAD_EXP_CLASSIC`** (Nunchuk Z/C share Classic UP/LEFT bits), Nunchuk Z→GCN Z (C unmapped), Classic left/right sticks + Nunchuk stick when GCN idle, D-pad synthesizes `main` when analog still idle. `WPAD_SetDataFormat` + `WPAD_Probe` so `EXP_NONE` is safe. Rust `wiimaker-core::wiimote_map` (unit tests) documents the same bits as `wiimaker_abi.h` / libogc `wpad.h`. CLI `input map` / `--json`. Editor: Inspector **Input** card (empty selection + open scene) + Game-view overlay while Playing/Paused. Host WASD unchanged. No IR / motion. WSCN unchanged.
+
 
 
 - **Rust staticlib (WSCN player)** (2026-09-24) — `crates/wiimaker-wii` (`rlib` + `staticlib`): `wiimaker_game_init/frame/shutdown`, WSCN0002/0003 parse (Sprite/Disc/Text/Tilemap/Audio), GX/ASND FFI, `WiimakerInput` → core `Input`, hello-orb Player/OrbShadow tick. Makefile always links `EMBED_OBJ`; `USE_STUB=0` when `libwiimaker_wii.a` present. `tools/wii-rustlib.sh` + `wii-build.sh` best-effort PowerPC build-std. Host tests green; stub_game remains fallback. Host `hello-orb` cdylib unchanged.
@@ -155,5 +158,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Wii `World` + `render_world` (or green PowerPC CI).** Parent rotation compose shipped 2026-09-26 (host `wiimaker-scene`). Rust WSCN staticlib shipped 2026-09-24 (`wiimaker-wii`); next is share host World once cross-compile is reliable, or IR pointer.
+**Wii `World` + `render_world` (or IR pointer).** PowerPC CI is in flight 2026-09-27 (`.github/workflows/ci.yml` + strict `wii-rustlib.sh`) — do not mark Done until merged. Parent rotation compose shipped 2026-09-26. Next after merge is share host World / `render_world` on the Wii staticlib path, or IR pointer.
 
