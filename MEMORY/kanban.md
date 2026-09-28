@@ -21,7 +21,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle), 60 Hz `Clock`, `render_world` sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib draws sprites/discs/text/tilemap cells + ASND oneshots, `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle), 60 Hz `Clock`, `render_world` (in `wiimaker-core`, re-exported from `wiimaker-scene`) sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib (WSCN→World → `render_world` → DrawList → GX + ASND oneshots), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
 **Not present:** nested prefabs / prefab variants, IR pointer / sensor-bar aiming, motion gestures.
 
@@ -29,13 +29,12 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-09-28):** Wii `World` + `render_world` (or IR pointer). Today shipped green PowerPC CI for `wiimaker-wii`.
+**Recommended next morning (2026-09-28):** IR pointer / sensor-bar aiming (or motion gestures). Wii `World` + `render_world` shipped.
 
 ---
 
 ## Later
 
-- **Wii `World` + `render_world`** — replace the WSCN subset player with shared host World / `render_world` on PowerPC (staticlib CI is green).
 - IR pointer / sensor-bar aiming and motion gestures.
 
 ---
@@ -82,9 +81,11 @@ Shipped. Keep here so we do not rebuild them.
 
 
 
-- **Green PowerPC CI** (2026-09-27) — `.github/workflows/ci.yml`: host `cargo test --workspace` (scaffolds `games/hello-orb` via `tools/ci-scaffold-hello-orb.sh`) + strict PowerPC rustlib (`WIIMAKER_RUSTLIB_STRICT=1` / `./tools/wii-rustlib.sh --strict`, asserts `libwiimaker_wii.a`). Local rustlib stays best-effort for stub_game fallback. Unblocks Wii World + render_world.
+- **Wii `World` + `render_world`** (2026-09-28) — `render_world` / `render_world_ex` moved to `wiimaker-core` (`no_std` + alloc); `wiimaker-scene` re-exports. `wiimaker-wii` parses WSCN0002/0003 into a core `World` (named entities, Transform, Sprite/Disc/Tilemap/Text/AudioSource; Default sorting layer + baked `z`). Frame: `render_world` → `DrawList` → GX. Player/OrbShadow via `find_by_name`. Play-on-awake still ASND. C `stub_game` fallback unchanged. Do not bump WSCN magic.
 
-- **Rust staticlib (WSCN player)** (2026-09-24) — `crates/wiimaker-wii` (`rlib` + `staticlib`): `wiimaker_game_init/frame/shutdown`, WSCN0002/0003 parse (Sprite/Disc/Text/Tilemap/Audio), GX/ASND FFI, `WiimakerInput` → core `Input`, hello-orb Player/OrbShadow tick. Makefile always links `EMBED_OBJ`; `USE_STUB=0` when `libwiimaker_wii.a` present. `tools/wii-rustlib.sh` + `wii-build.sh` best-effort PowerPC build-std. Host tests green; stub_game remains fallback. Host `hello-orb` cdylib unchanged.
+- **Green PowerPC CI** (2026-09-27) — `.github/workflows/ci.yml`: host `cargo test --workspace` (scaffolds `games/hello-orb` via `tools/ci-scaffold-hello-orb.sh`) + strict PowerPC rustlib (`WIIMAKER_RUSTLIB_STRICT=1` / `./tools/wii-rustlib.sh --strict`, asserts `libwiimaker_wii.a`). Local rustlib stays best-effort for stub_game fallback. Unblocked Wii World + render_world.
+
+- **Rust staticlib (WSCN player)** (2026-09-24) — `crates/wiimaker-wii` (`rlib` + `staticlib`): `wiimaker_game_init/frame/shutdown`, WSCN0002/0003 parse, GX/ASND FFI, `WiimakerInput` → core `Input`, hello-orb Player/OrbShadow tick. Superseded for draw by **Wii World + render_world** (2026-09-28). Makefile always links `EMBED_OBJ`; `USE_STUB=0` when `libwiimaker_wii.a` present. Stub_game remains fallback.
 
 - **Sorting layers** (2026-09-11) — Unity Sorting Layer + Order in Layer. `game.toml` `sorting_layers` (default Background / Default / Foreground). Sprite/Disc/Tilemap `sorting_layer` name + `z` as order-in-layer. `render_world` sorts (layer, then z) across kinds; missing/unknown → Default. Inspector combo + Order in Layer; Project `game.toml` list (↑↓ – Add Rename). CLI `sorting-layer list|add|rename|move|remove` (`--json`); `entity set --sorting-layer --order-in-layer` (alias `--z`). Doctor warns unknown names. Host-first; WSCN0003 unchanged (C still sorts by raw z).
 
@@ -158,5 +159,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Wii `World` + `render_world` (or IR pointer).** Green PowerPC CI shipped 2026-09-27 (`.github/workflows/ci.yml` + strict `wii-rustlib.sh`). Parent rotation compose shipped 2026-09-26. Next is share host World / `render_world` on the Wii staticlib path, or IR pointer.
+**IR pointer / sensor-bar aiming (or motion gestures).** Wii `World` + `render_world` shipped 2026-09-28 (`render_world` in core; WSCN→World on PowerPC). Parent rotation compose shipped 2026-09-26. Green PowerPC CI shipped 2026-09-27.
 

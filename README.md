@@ -112,9 +112,9 @@ A tiny PCM16 beep lives at `crates/wiimaker-assets/fixtures/beep.wav` (also copi
 
 HUD text uses a built-in 8×8 bitmap font (`DrawCmd::DrawText` on host; WSCN0003 `KIND_TEXT` + GX quads on Wii). The visual fixture is `crates/wiimaker-assets/fixtures/hud_font.png`; it is **not** cooked into `.wpack`. Missing glyphs draw as `?`.
 
-Tilemaps bake into the same `WSCN0003` blob (`KIND_TILEMAP=3`, length-prefixed grid + palette). The Wii C player draws occupied cells as GX textured quads (palette sprite / auto-tile variant / anim frame 0+) or untextured tinted quads when the palette has no texture — matching host `render_world`. Editor/CLI tilemap tools are unchanged.
+Tilemaps bake into the same `WSCN0003` blob (`KIND_TILEMAP=3`, length-prefixed grid + palette). Occupied cells become `DrawSprite` (palette sprite / auto-tile / anim frame) or untextured tinted quads (`TextureId::UNTEXTURED`) via shared `render_world`. The C stub still draws cells itself when rustlib is missing. Editor/CLI tilemap tools are unchanged.
 
-AudioSource bakes under the same `WSCN0003` magic: `KIND_AUDIO=5` for audio-only entities, plus a trailing table (entity index, wpack clip, volume, play-on-awake) so a Sprite/Disc/Tilemap/Text can still fire a oneshot. Missing clips are `0xFFFF` and must not crash. The C player inits ASND, loads the TOC, and plays play-on-awake after scene load.
+AudioSource bakes under the same `WSCN0003` magic: `KIND_AUDIO=5` for audio-only entities, plus a trailing table (entity index, wpack clip, volume, play-on-awake) so a Sprite/Disc/Tilemap/Text can still fire a oneshot. Missing clips are `0xFFFF` and must not crash. Rust `wiimaker-wii` hydrates `AudioSource` on `World` and queues play-on-awake through ASND; the C stub does the same from its entity table.
 
 ## Quick start (Wii)
 

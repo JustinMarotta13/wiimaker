@@ -1,14 +1,26 @@
-//! WSCN0002 / WSCN0003 loader (same layout as `stub_game.c` / `wiimaker-scene` bake).
+//! WSCN0002 / WSCN0003 → core [`World`] (no JSON / no `wiimaker-scene` on PowerPC).
+//!
+//! Texture ids are wpack indices (same as host atlas insertion order). WSCN has
+//! no named sorting layers — drawables keep Default + baked `z` as order-in-layer.
+
+use wiimaker_core::color::Rgba8;
+use wiimaker_core::draw::{Rect, TextureId};
+use wiimaker_core::math::{Quat, Vec2, Vec3};
+use wiimaker_core::sorting::default_sorting_layer_index;
+use wiimaker_core::text::{Text, TextAlign};
+use wiimaker_core::tilemap::{AutoTileMatch, TileVisual, Tilemap};
+use wiimaker_core::world::{Disc, EntityId, Sprite, Transform, World};
+use wiimaker_core::AudioSource;
 
 #[cfg(feature = "std")]
-use std::string::String;
+use std::string::{String, ToString};
 #[cfg(feature = "std")]
 use std::vec::Vec;
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]
-use alloc::string::String;
+use alloc::string::{String, ToString};
 #[cfg(not(feature = "std"))]
 use alloc::vec;
 #[cfg(not(feature = "std"))]
@@ -29,138 +41,17 @@ pub const MAX_TILE_FRAMES: usize = 16;
 pub const MAX_TILE_CELLS: u32 = 16384;
 pub const AUDIO_NO_CLIP: u16 = 0xFFFF;
 
-#[derive(Clone, Debug)]
-pub struct TilePal {
-    pub id: u16,
-    pub color: [u8; 4],
-    pub tex: u16,
-    pub u0: f32,
-    pub v0: f32,
-    pub u1: f32,
-    pub v1: f32,
-    pub auto_mode: u8,
-    pub auto_tex: [u16; 16],
-    pub auto_u0: [f32; 16],
-    pub auto_v0: [f32; 16],
-    pub auto_u1: [f32; 16],
-    pub auto_v1: [f32; 16],
-    pub frame_n: u8,
-    pub fps: f32,
-    pub time: f32,
-    pub frame_tex: [u16; MAX_TILE_FRAMES],
-    pub frame_u0: [f32; MAX_TILE_FRAMES],
-    pub frame_v0: [f32; MAX_TILE_FRAMES],
-    pub frame_u1: [f32; MAX_TILE_FRAMES],
-    pub frame_v1: [f32; MAX_TILE_FRAMES],
-}
-
-impl Default for TilePal {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            color: [48, 88, 176, 255],
-            tex: TILE_NO_TEX,
-            u0: 0.0,
-            v0: 0.0,
-            u1: 1.0,
-            v1: 1.0,
-            auto_mode: TILE_AUTO_OFF,
-            auto_tex: [TILE_NO_TEX; 16],
-            auto_u0: [0.0; 16],
-            auto_v0: [0.0; 16],
-            auto_u1: [1.0; 16],
-            auto_v1: [1.0; 16],
-            frame_n: 0,
-            fps: 0.0,
-            time: 0.0,
-            frame_tex: [TILE_NO_TEX; MAX_TILE_FRAMES],
-            frame_u0: [0.0; MAX_TILE_FRAMES],
-            frame_v0: [0.0; MAX_TILE_FRAMES],
-            frame_u1: [1.0; MAX_TILE_FRAMES],
-            frame_v1: [1.0; MAX_TILE_FRAMES],
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct WiiTilemap {
-    pub cell: f32,
-    pub ox: f32,
-    pub oy: f32,
-    pub w: u16,
-    pub h: u16,
-    pub cells: Vec<u16>,
-    pub solid: Vec<u8>,
-    pub pal: Vec<TilePal>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Entity {
-    pub name: String,
-    pub x: f32,
-    pub y: f32,
-    pub sx: f32,
-    pub sy: f32,
-    pub kind: u8,
-    pub tex: u16,
-    pub size_w: f32,
-    pub size_h: f32,
-    pub u0: f32,
-    pub v0: f32,
-    pub u1: f32,
-    pub v1: f32,
-    pub pivot_x: f32,
-    pub pivot_y: f32,
-    pub radius: f32,
-    pub color: [u8; 4],
-    pub z: f32,
-    pub text: String,
-    pub text_size: f32,
-    pub text_align: u8,
-    pub tm: Option<WiiTilemap>,
-    pub has_audio: bool,
-    pub audio_clip: u16,
-    pub audio_volume: f32,
-    pub audio_awake: bool,
-}
-
-impl Default for Entity {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            x: 0.0,
-            y: 0.0,
-            sx: 1.0,
-            sy: 1.0,
-            kind: KIND_NONE,
-            tex: 0,
-            size_w: 0.0,
-            size_h: 0.0,
-            u0: 0.0,
-            v0: 0.0,
-            u1: 1.0,
-            v1: 1.0,
-            pivot_x: 0.5,
-            pivot_y: 0.5,
-            radius: 0.0,
-            color: [255, 255, 255, 255],
-            z: 0.0,
-            text: String::new(),
-            text_size: 8.0,
-            text_align: 0,
-            tm: None,
-            has_audio: false,
-            audio_clip: AUDIO_NO_CLIP,
-            audio_volume: 1.0,
-            audio_awake: false,
-        }
-    }
-}
-
+/// Parsed WSCN ready for `render_world` (clear + populated [`World`]).
 #[derive(Clone, Debug)]
 pub struct LoadedScene {
     pub clear: [u8; 4],
-    pub entities: Vec<Entity>,
+    pub world: World,
+}
+
+impl LoadedScene {
+    pub fn clear_rgba(&self) -> Rgba8 {
+        Rgba8::new(self.clear[0], self.clear[1], self.clear[2], self.clear[3])
+    }
 }
 
 #[derive(Debug)]
@@ -229,30 +120,77 @@ impl<'a> Cursor<'a> {
     }
 }
 
-fn load_tilemap_payload(c: &mut Cursor<'_>) -> Result<(WiiTilemap, f32), ParseError> {
-    let mut tm = WiiTilemap {
-        cell: c.f32()?,
-        ox: c.f32()?,
-        oy: c.f32()?,
-        w: c.u16()?,
-        h: c.u16()?,
-        ..Default::default()
-    };
+fn string_from_bytes(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn uv_rect(u0: f32, v0: f32, u1: f32, v1: f32) -> Rect {
+    Rect::new(u0, v0, u1 - u0, v1 - v0)
+}
+
+fn maybe_tex(tex: u16, u0: f32, v0: f32, u1: f32, v1: f32) -> Option<(TextureId, Rect)> {
+    if tex == TILE_NO_TEX {
+        None
+    } else {
+        Some((TextureId(tex as u32), uv_rect(u0, v0, u1, v1)))
+    }
+}
+
+fn rgba8(c: [u8; 4]) -> Rgba8 {
+    Rgba8::new(c[0], c[1], c[2], c[3])
+}
+
+/// Wii ASND clip index stored on [`AudioSource::clip`] (decimal). Empty = skip.
+pub fn audio_clip_string(clip: u16) -> String {
+    if clip == AUDIO_NO_CLIP {
+        String::new()
+    } else {
+        clip.to_string()
+    }
+}
+
+/// Parse a decimal wpack audio index written by [`audio_clip_string`].
+pub fn parse_audio_clip_id(clip: &str) -> Option<u32> {
+    let id: u32 = clip.parse().ok()?;
+    if id == AUDIO_NO_CLIP as u32 {
+        None
+    } else {
+        Some(id)
+    }
+}
+
+fn attach_audio(world: &mut World, id: EntityId, clip: u16, volume: f32, awake: bool) {
+    world.set_audio_source(
+        id,
+        Some(AudioSource::new(audio_clip_string(clip), volume, awake)),
+    );
+}
+
+fn load_tilemap_payload(c: &mut Cursor<'_>) -> Result<Tilemap, ParseError> {
+    let cell = c.f32()?;
+    let ox = c.f32()?;
+    let oy = c.f32()?;
+    let w = c.u16()?;
+    let h = c.u16()?;
     let z = c.f32()?;
     let n = c.u32()?;
-    let expect = tm.w as u32 * tm.h as u32;
+    let mut tm = Tilemap::new(w as u32, h as u32, cell);
+    tm.origin = Vec2::new(ox, oy);
+    tm.z = z;
+    tm.sorting_layer = default_sorting_layer_index();
+    let expect = tm.width.saturating_mul(tm.height);
     if n != expect || n > MAX_TILE_CELLS {
-        return Ok((tm, z));
+        return Ok(tm);
     }
-    tm.cells = Vec::with_capacity(n as usize);
+    tm.cells.clear();
+    tm.cells.reserve(n as usize);
     for _ in 0..n {
         tm.cells.push(c.u16()?);
     }
-    let sbytes = ((n + 7) / 8) as usize;
-    let solid_bytes = if sbytes == 0 { 1 } else { sbytes };
-    let packed = if c.remaining() >= ((n + 7) / 8) as usize {
-        let nb = ((n + 7) / 8) as usize;
-        let bytes = c.take(nb)?;
+    let packed_n = ((n + 7) / 8) as usize;
+    let solid_bytes = packed_n.max(1);
+    tm.solid = if c.remaining() >= packed_n {
+        let bytes = c.take(packed_n)?;
         let mut v = bytes.to_vec();
         if v.len() < solid_bytes {
             v.resize(solid_bytes, 0);
@@ -261,7 +199,6 @@ fn load_tilemap_payload(c: &mut Cursor<'_>) -> Result<(WiiTilemap, f32), ParseEr
     } else {
         vec![0u8; solid_bytes]
     };
-    tm.solid = packed;
 
     if c.remaining() >= 2 {
         let pal_n = c.u16()?;
@@ -269,44 +206,58 @@ fn load_tilemap_payload(c: &mut Cursor<'_>) -> Result<(WiiTilemap, f32), ParseEr
             if c.remaining() == 0 {
                 break;
             }
-            let mut scratch = TilePal::default();
-            scratch.id = c.u16()?;
-            scratch.color = c.rgba()?;
-            scratch.tex = c.u16()?;
-            scratch.u0 = c.f32()?;
-            scratch.v0 = c.f32()?;
-            scratch.u1 = c.f32()?;
-            scratch.v1 = c.f32()?;
-            scratch.auto_mode = if c.remaining() > 0 { c.u8()? } else { 0 };
+            let id = c.u16()?;
+            let color = rgba8(c.rgba()?);
+            let tex = c.u16()?;
+            let u0 = c.f32()?;
+            let v0 = c.f32()?;
+            let u1 = c.f32()?;
+            let v1 = c.f32()?;
+            let auto_mode = if c.remaining() > 0 { c.u8()? } else { 0 };
             let auto_bits = c.u16()?;
+            let mut vis = TileVisual::color_only(id, color);
+            vis.texture = maybe_tex(tex, u0, v0, u1, v1);
+            vis.auto_tile = match auto_mode {
+                TILE_AUTO_ID => Some(AutoTileMatch::Id),
+                TILE_AUTO_SOLID => Some(AutoTileMatch::Solid),
+                TILE_AUTO_OFF | _ => None,
+            };
             for m in 0..16 {
                 if auto_bits & (1u16 << m) != 0 {
-                    scratch.auto_tex[m] = c.u16()?;
-                    scratch.auto_u0[m] = c.f32()?;
-                    scratch.auto_v0[m] = c.f32()?;
-                    scratch.auto_u1[m] = c.f32()?;
-                    scratch.auto_v1[m] = c.f32()?;
+                    let at = c.u16()?;
+                    let au0 = c.f32()?;
+                    let av0 = c.f32()?;
+                    let au1 = c.f32()?;
+                    let av1 = c.f32()?;
+                    vis.auto_frames[m] = maybe_tex(at, au0, av0, au1, av1);
                 }
             }
-            scratch.frame_n = if c.remaining() > 0 { c.u8()? } else { 0 };
-            scratch.fps = c.f32()?;
-            if scratch.frame_n as usize > MAX_TILE_FRAMES {
-                scratch.frame_n = MAX_TILE_FRAMES as u8;
+            let mut frame_n = if c.remaining() > 0 { c.u8()? } else { 0 };
+            vis.fps = c.f32()?;
+            vis.loop_ = true;
+            if frame_n as usize > MAX_TILE_FRAMES {
+                frame_n = MAX_TILE_FRAMES as u8;
             }
-            for f in 0..scratch.frame_n as usize {
-                scratch.frame_tex[f] = c.u16()?;
-                scratch.frame_u0[f] = c.f32()?;
-                scratch.frame_v0[f] = c.f32()?;
-                scratch.frame_u1[f] = c.f32()?;
-                scratch.frame_v1[f] = c.f32()?;
+            for _ in 0..frame_n as usize {
+                let ft = c.u16()?;
+                let fu0 = c.f32()?;
+                let fv0 = c.f32()?;
+                let fu1 = c.f32()?;
+                let fv1 = c.f32()?;
+                if let Some(fr) = maybe_tex(ft, fu0, fv0, fu1, fv1) {
+                    vis.frames.push(fr);
+                }
             }
-            tm.pal.push(scratch);
+            if vis.texture.is_none() {
+                vis.texture = vis.frames.first().copied();
+            }
+            tm.palette.push(vis);
         }
     }
-    Ok((tm, z))
+    Ok(tm)
 }
 
-/// Parse a baked `scene.wscn` (WSCN0002 or WSCN0003).
+/// Parse a baked `scene.wscn` (WSCN0002 or WSCN0003) into a core [`World`].
 pub fn parse_wscn(data: &[u8]) -> Result<LoadedScene, ParseError> {
     if data.len() < 16 {
         return Err(ParseError::TooShort);
@@ -318,66 +269,89 @@ pub fn parse_wscn(data: &[u8]) -> Result<LoadedScene, ParseError> {
     }
     let clear = c.rgba()?;
     let n = c.u32()?;
-    let mut entities = Vec::with_capacity(n.min(64) as usize);
+    let mut world = World::new();
+    let mut ids: Vec<EntityId> = Vec::with_capacity(n.min(64) as usize);
+    let default_layer = default_sorting_layer_index();
 
     for _ in 0..n {
-        let mut e = Entity::default();
         let name_len = c.u16()? as usize;
         let name_bytes = c.take(name_len)?;
-        e.name = String::from_utf8_lossy(name_bytes).into_owned();
-        e.x = c.f32()?;
-        e.y = c.f32()?;
-        let _tz = c.f32()?;
-        e.sx = c.f32()?;
-        e.sy = c.f32()?;
-        let _sz = c.f32()?;
-        e.kind = if c.remaining() > 0 { c.u8()? } else { KIND_NONE };
+        let name = string_from_bytes(name_bytes);
+        let x = c.f32()?;
+        let y = c.f32()?;
+        let tz = c.f32()?;
+        let sx = c.f32()?;
+        let sy = c.f32()?;
+        let sz = c.f32()?;
+        let kind = if c.remaining() > 0 { c.u8()? } else { KIND_NONE };
 
-        match e.kind {
+        let xf = Transform {
+            translation: Vec3::new(x, y, tz),
+            rotation: Quat::IDENTITY,
+            scale: Vec3::new(sx, sy, sz),
+        };
+        let id = world.spawn_named(name, xf);
+
+        match kind {
             KIND_SPRITE => {
-                e.tex = c.u16()?;
-                e.size_w = c.f32()?;
-                e.size_h = c.f32()?;
-                e.u0 = c.f32()?;
-                e.v0 = c.f32()?;
-                e.u1 = c.f32()?;
-                e.v1 = c.f32()?;
-                e.pivot_x = c.f32()?;
-                e.pivot_y = c.f32()?;
-                e.color = c.rgba()?;
-                e.z = c.f32()?;
+                let tex = c.u16()?;
+                let size_w = c.f32()?;
+                let size_h = c.f32()?;
+                let u0 = c.f32()?;
+                let v0 = c.f32()?;
+                let u1 = c.f32()?;
+                let v1 = c.f32()?;
+                let pivot_x = c.f32()?;
+                let pivot_y = c.f32()?;
+                let color = rgba8(c.rgba()?);
+                let z = c.f32()?;
+                let mut sp = Sprite::new(TextureId(tex as u32), Vec2::new(size_w, size_h));
+                sp.uv = uv_rect(u0, v0, u1, v1);
+                sp.pivot = Vec2::new(pivot_x, pivot_y);
+                sp.color = color;
+                sp.z = z;
+                sp.sorting_layer = default_layer;
+                world.set_sprite(id, Some(sp));
             }
             KIND_DISC => {
-                e.radius = c.f32()?;
-                e.color = c.rgba()?;
-                e.z = c.f32()?;
+                let radius = c.f32()?;
+                let color = rgba8(c.rgba()?);
+                let z = c.f32()?;
+                let mut d = Disc::new(radius, color);
+                d.z = z;
+                d.sorting_layer = default_layer;
+                world.set_disc(id, Some(d));
             }
             KIND_TILEMAP => {
                 let plen = c.u32()? as usize;
                 let payload = c.take(plen)?;
                 let mut tc = Cursor::new(payload);
-                let (tm, z) = load_tilemap_payload(&mut tc)?;
-                e.z = z;
-                e.tm = Some(tm);
+                let tm = load_tilemap_payload(&mut tc)?;
+                world.set_tilemap(id, Some(tm));
             }
             KIND_TEXT => {
                 let slen = c.u16()? as usize;
                 let bytes = c.take(slen)?;
-                e.text = String::from_utf8_lossy(bytes).into_owned();
-                e.text_size = c.f32()?;
-                e.text_align = if c.remaining() > 0 { c.u8()? } else { 0 };
-                e.color = c.rgba()?;
-                e.z = c.f32()?;
+                let string = string_from_bytes(bytes);
+                let size = c.f32()?;
+                let align = TextAlign::from_u8(if c.remaining() > 0 { c.u8()? } else { 0 });
+                let color = rgba8(c.rgba()?);
+                let z = c.f32()?;
+                let mut t = Text::new(string, size, color);
+                t.align = align;
+                t.z = z;
+                t.sorting_layer = default_layer;
+                world.set_text(id, Some(t));
             }
             KIND_AUDIO => {
-                e.has_audio = true;
-                e.audio_clip = c.u16()?;
-                e.audio_volume = c.f32()?;
-                e.audio_awake = if c.remaining() > 0 { c.u8()? != 0 } else { false };
+                let clip = c.u16()?;
+                let volume = c.f32()?;
+                let awake = if c.remaining() > 0 { c.u8()? != 0 } else { false };
+                attach_audio(&mut world, id, clip, volume, awake);
             }
             _ => {}
         }
-        entities.push(e);
+        ids.push(id);
     }
 
     if c.remaining() >= 2 {
@@ -390,18 +364,11 @@ pub fn parse_wscn(data: &[u8]) -> Result<LoadedScene, ParseError> {
             let clip = c.u16()?;
             let vol = c.f32()?;
             let awake = if c.remaining() > 0 { c.u8()? != 0 } else { false };
-            if ei < entities.len() {
-                entities[ei].has_audio = true;
-                entities[ei].audio_clip = clip;
-                entities[ei].audio_volume = vol;
-                entities[ei].audio_awake = awake;
+            if ei < ids.len() {
+                attach_audio(&mut world, ids[ei], clip, vol, awake);
             }
         }
     }
 
-    Ok(LoadedScene { clear, entities })
-}
-
-pub fn rgba_pack(c: [u8; 4]) -> u32 {
-    ((c[0] as u32) << 24) | ((c[1] as u32) << 16) | ((c[2] as u32) << 8) | (c[3] as u32)
+    Ok(LoadedScene { clear, world })
 }

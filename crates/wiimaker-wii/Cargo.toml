@@ -3,7 +3,7 @@ name = "wiimaker-wii"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Wii Rust staticlib — WSCN subset player + GX FFI (replaces stub_game when linked)"
+description = "Wii Rust staticlib — WSCN→World + render_world + GX FFI (replaces stub_game when linked)"
 
 [lib]
 crate-type = ["rlib", "staticlib"]

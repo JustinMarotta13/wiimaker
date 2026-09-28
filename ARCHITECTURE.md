@@ -50,6 +50,7 @@ Key types:
 - `App` — implement `update` / `render`
 - `World` — named entities with Transform + Sprite/Disc/Camera/Follow/Tilemap/Collider/GridMover/Text (`tile_solid` / `overlaps` / `move_and_collide` / `follow_cameras` / `step_grid_movers`)
 - `DrawList` — ordered `DrawCmd` (Clear, SetCamera, DrawMesh, DrawSprite, DrawDisc, DrawText)
+- `render_world` / `render_world_ex` — World → DrawList (shared host / Wii; `wiimaker-scene` re-exports)
 - `Input` — normalized buttons + sticks (GCN layout as the lingua franca)
 - `Time` — fixed 60 Hz tick with accumulator (Wii VI is king)
 
@@ -70,11 +71,13 @@ enum DrawCmd {
 ```
 
 Host interprets this with a software rasterizer (v0) or GL (v1).
-Wii maps each command onto GX immediate / display-list calls.
+Wii maps each command onto GX immediate / display-list calls
+(`crates/wiimaker-wii` flushes `render_world` output; C `stub_game` is the
+fallback when the rustlib is missing).
 `DrawText` uses the built-in 8×8 font (`wiimaker-assets` `font.rs`); the host
-raster samples an atlas, and the Wii C player draws the same bits as untextured
-GX quads (`KIND_TEXT` in WSCN0003). Tilemaps bake as `KIND_TILEMAP` (length-prefixed
-grid + palette); GX draws occupied cells as textured quads or untextured tints.
+raster samples an atlas, and GX draws the same bits as untextured quads
+(`KIND_TEXT` in WSCN0003). Tilemaps bake as `KIND_TILEMAP` (length-prefixed
+grid + palette); `render_world` emits per-cell sprites / untextured quads.
 AudioSource bakes as `KIND_AUDIO=5` when it is the only enabled draw-like
 component, plus an additive trailing table (entity index + clip + volume +
 play-on-awake) so Sprite/Disc/Tilemap/Text entities can still carry a clip.
@@ -92,11 +95,13 @@ The previous project's pure-Rust `Video::configure` path leaked a heap
 4. `ASND_Init` / `ASND_Pause(0)` — PCM16 oneshots from the `.wpack` audio TOC
 5. Call into `wiimaker_game_frame(input, dt)` each VI
 
-Game logic is either `crates/wiimaker-wii` (`libwiimaker_wii.a` — WSCN subset
-player calling `wiimaker_gx_*` / ASND) or the C fallback `stub_game.c` when the
-`.a` is missing. Objcopy embeds (`assets_wpack.o` / `scene_wscn.o`) always link;
-Rust `extern`s `_binary_*` like the C stub. Makefile: `-lwiimaker_wii -lwiiuse -lbte -lasnd -logc -lm`.
+Game logic is either `crates/wiimaker-wii` (`libwiimaker_wii.a` — parse WSCN
+into core `World`, `render_world` → `DrawList` → `wiimaker_gx_*` / ASND) or the
+C fallback `stub_game.c` when the `.a` is missing. Objcopy embeds
+(`assets_wpack.o` / `scene_wscn.o`) always link; Rust `extern`s `_binary_*`
+like the C stub. Makefile: `-lwiimaker_wii -lwiiuse -lbte -lasnd -logc -lm`.
 Cross-build helper: `tools/wii-rustlib.sh` (nightly `build-std`).
+`wiimaker-scene` stays host-only (JSON / serde); PowerPC never links it.
 
 ### Asset pipeline (`.wpack`)
 
@@ -134,7 +139,7 @@ target/wii/<game>/
 - **Scene file / prefab + egui editor + agent CLI** (pulled forward from M3)
 
 ### Milestone 2 — First Dolphin boot
-- Rust staticlib linked through C bootstrap (`wiimaker-wii` WSCN player; stub fallback)
+- Rust staticlib linked through C bootstrap (`wiimaker-wii` World + `render_world`; stub fallback)
 - Clear screen + scene draw via GX
 - HBC pack script
 

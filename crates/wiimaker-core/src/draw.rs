@@ -27,6 +27,18 @@ pub struct MeshId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TextureId(pub u32);
 
+impl TextureId {
+    /// Sentinel for untextured tinted quads (tile cells without a sprite).
+    ///
+    /// Host atlas samples white, then tint supplies the cell color. Wii GX
+    /// draws [`crate::draw::DrawCmd::DrawSprite`] with this id as an untextured quad.
+    pub const UNTEXTURED: Self = Self(u32::MAX);
+
+    pub const fn is_untextured(self) -> bool {
+        self.0 == u32::MAX
+    }
+}
+
 /// Axis-aligned rect in pixel or UV space.
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
@@ -81,8 +93,8 @@ pub enum DrawCmd {
     /// Bitmap HUD string. Host samples the built-in 8×8 atlas (one quad per glyph).
     /// Wii GX draws the same bits as untextured quads (`KIND_TEXT` in WSCN0003).
     /// `pos` is the alignment anchor (top of first line).
-    /// Tilemaps are not a DrawCmd: host `render_world` emits per-cell sprites;
-    /// Wii GX loads `KIND_TILEMAP` and draws those cells itself.
+    /// Tilemaps are not a DrawCmd: [`crate::render::render_world`] emits per-cell
+    /// sprites (or [`TextureId::UNTEXTURED`] tinted quads).
     DrawText {
         pos: Vec2,
         text: String,

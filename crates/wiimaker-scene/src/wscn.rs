@@ -4,8 +4,9 @@
 //! time so the C runtime never parses JSON or string-matches asset names.
 //!
 //! Host-first Sorting Layers are **not** packed: WSCN0003 still stores raw `z`
-//! (order-in-layer). The C player sorts by `z` only. Do not bump the magic for
-//! this feature.
+//! (order-in-layer). The Rust Wii player hydrates Default + that `z` onto
+//! `World` and sorts via `render_world`. The C stub still sorts by `z` only.
+//! Do not bump the magic for this feature.
 //!
 //! `KIND_TEXT = 4`, `KIND_TILEMAP = 3`, and `KIND_AUDIO = 5` share this magic
 //! (sprite / disc / tilemap still win over text; those plus text win over
