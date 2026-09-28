@@ -50,6 +50,24 @@ impl TextAlign {
             TextAlign::Right => "Right",
         }
     }
+
+    /// WSCN0003 `KIND_TEXT` align byte (`0` Left / `1` Center / `2` Right).
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => TextAlign::Center,
+            2 => TextAlign::Right,
+            _ => TextAlign::Left,
+        }
+    }
+
+    /// Inverse of [`Self::from_u8`].
+    pub fn to_u8(self) -> u8 {
+        match self {
+            TextAlign::Left => 0,
+            TextAlign::Center => 1,
+            TextAlign::Right => 2,
+        }
+    }
 }
 
 /// Screen-space HUD string (Unity Text analogue for 2D).

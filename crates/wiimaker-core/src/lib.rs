@@ -1,7 +1,8 @@
 //! Wiimaker core — platform-agnostic engine for Wii homebrew.
 //!
 //! Games talk to this crate only. Backends (`wiimaker-host`, `runtime/wii`)
-//! interpret [`draw::DrawList`] and feed [`input::Input`].
+//! interpret [`draw::DrawList`] and feed [`input::Input`]. Host and Wii both
+//! go `World` → [`render::render_world`] → `DrawList` → backend flush.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -14,6 +15,7 @@ pub mod float;
 pub mod grid_mover;
 pub mod input;
 pub mod math;
+pub mod render;
 pub mod sorting;
 pub mod text;
 pub mod tilemap;
@@ -29,6 +31,7 @@ pub use collider::{
 };
 pub use color::Rgba8;
 pub use draw::{DrawCmd, DrawList, MeshId, Rect, TextureId};
+pub use render::{render_world, render_world_ex};
 pub use grid_mover::{cardinal, cell_center, step_grid_movers, Dir, GridMover, CARDINAL_DEADZONE};
 pub use input::{Button, Input, Stick};
 pub use sorting::{
