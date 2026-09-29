@@ -1669,6 +1669,35 @@ impl EditorApp {
                         .monospace(),
                 );
             });
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("IR").size(12.0).color(theme::TEXT_MUTED));
+                if input.ir_valid {
+                    ui.label(
+                        RichText::new(format!("{:.0}  {:.0}", input.ir_x, input.ir_y))
+                            .size(12.0)
+                            .color(theme::TEXT)
+                            .monospace(),
+                    );
+                    ui.label(
+                        RichText::new("Valid")
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(120, 200, 120))
+                            .strong(),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new("—  —")
+                            .size(12.0)
+                            .color(theme::TEXT_DIM)
+                            .monospace(),
+                    );
+                    ui.label(
+                        RichText::new("Invalid")
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
+                }
+            });
             ui.label(
                 RichText::new(&status)
                     .size(11.0)
@@ -2063,5 +2092,6 @@ mod tests {
         assert!(INPUT_LEGEND.contains("Classic"));
         assert!(INPUT_LEGEND.contains("Wiimote"));
         assert!(INPUT_LEGEND.contains("Nunchuk"));
+        assert!(INPUT_LEGEND.contains("IR"));
     }
 }

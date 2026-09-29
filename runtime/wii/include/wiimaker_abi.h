@@ -20,12 +20,18 @@ extern "C" {
 #define WIIMAKER_BTN_LEFT (1u << 10)
 #define WIIMAKER_BTN_RIGHT (1u << 11)
 
+/* Layout: sticks + buttons, then IR aim in 640×480 (+X right, +Y down).
+ * `ir_valid` is 0/1; `_ir_pad` keeps natural 4-byte alignment after the uint8. */
 typedef struct WiimakerInput {
     float main_x;
     float main_y;
     float c_x;
     float c_y;
     uint32_t buttons;
+    float ir_x;
+    float ir_y;
+    uint8_t ir_valid;
+    uint8_t _ir_pad[3];
 } WiimakerInput;
 
 /* Implemented by the game staticlib (Rust) or C scene player. */

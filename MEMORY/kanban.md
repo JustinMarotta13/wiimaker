@@ -12,7 +12,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 |---|---|
 | Project window | `game.toml` + `assets/` + `scenes/` + editor **Project** explorer |
 | Hierarchy | editor Hierarchy (parent/unparent DnD, multi-select, duplicate) |
-| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer**, Sprite **Pivot** X/Y override + Reset, scene **Environment** **Clear Color** (empty selection + open `.scene.json`), **Input** card (live GCN-layout stick / D-pad / face + Keyboard · Wiimote · Classic · GCN) |
+| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer**, Sprite **Pivot** X/Y override + Reset, scene **Environment** **Clear Color** (empty selection + open `.scene.json`), **Input** card (live GCN-layout stick / D-pad / face / IR + Keyboard · Wiimote · IR · Classic · GCN · mouse aim) |
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, **Move axis handles** (red X / green Y), Snap + nudge |
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
@@ -21,21 +21,21 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle), 60 Hz `Clock`, `render_world` (in `wiimaker-core`, re-exported from `wiimaker-scene`) sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib (WSCN→World → `render_world` → DrawList → GX + ASND oneshots), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle; **IR aim** `ir_x`/`ir_y`/`ir_valid` in 640×480), 60 Hz `Clock`, `render_world` (in `wiimaker-core`, re-exported from `wiimaker-scene`) sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib (WSCN→World → `render_world` → DrawList → GX + ASND oneshots), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** nested prefabs / prefab variants, IR pointer / sensor-bar aiming, motion gestures.
+**Not present:** nested prefabs / prefab variants, motion gestures.
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-09-28):** IR pointer / sensor-bar aiming (or motion gestures). Wii `World` + `render_world` shipped.
+**Recommended next morning (2026-09-29):** Motion gestures (or nested prefabs if that unblocks authoring). IR pointer shipped.
 
 ---
 
 ## Later
 
-- IR pointer / sensor-bar aiming and motion gestures.
+- Motion gestures · nested prefabs / prefab variants.
 
 ---
 
@@ -80,6 +80,9 @@ Shipped. Keep here so we do not rebuild them.
 - **Wiimote / Classic / Nunchuk input** (2026-09-23) — GCN-layout `Input` is still the lingua franca. Wii `fill_input`: GCN stick+C-stick+buttons, core Wiimote A/B/Plus/Home/D-pad + **1→X 2→Y Minus→Z**, Classic digital **only when `WPAD_EXP_CLASSIC`** (Nunchuk Z/C share Classic UP/LEFT bits), Nunchuk Z→GCN Z (C unmapped), Classic left/right sticks + Nunchuk stick when GCN idle, D-pad synthesizes `main` when analog still idle. `WPAD_SetDataFormat` + `WPAD_Probe` so `EXP_NONE` is safe. Rust `wiimaker-core::wiimote_map` (unit tests) documents the same bits as `wiimaker_abi.h` / libogc `wpad.h`. CLI `input map` / `--json`. Editor: Inspector **Input** card (empty selection + open scene) + Game-view overlay while Playing/Paused. Host WASD unchanged. No IR / motion. WSCN unchanged.
 
 
+
+
+- **IR pointer / sensor-bar aiming** (2026-09-29) — Additive `Input::{ir_x, ir_y, ir_valid}` in 640×480 (+X right, +Y down). HorrorDash lesson: pads stay lingua franca; IR never replaces stick/D-pad. Wii: `WPAD_SetVRes(…, 640, 480)` + `wd->ir.valid` → ABI. Host mouse over 640×480 window / editor Game view letterbox → same fields. `WiimakerInput` + `PlayInputC` (ABI **2**) carry IR. Editor: Inspector Input IR + Valid badge; Game overlay crosshair when valid. CLI `input map` rows for Wiimote IR + Host mouse. Helpers: `map_ir_raw_to_640` / `apply_ir_aim`. No motion gestures.
 
 - **Wii `World` + `render_world`** (2026-09-28) — `render_world` / `render_world_ex` moved to `wiimaker-core` (`no_std` + alloc); `wiimaker-scene` re-exports. `wiimaker-wii` parses WSCN0002/0003 into a core `World` (named entities, Transform, Sprite/Disc/Tilemap/Text/AudioSource; Default sorting layer + baked `z`). Frame: `render_world` → `DrawList` → GX. Player/OrbShadow via `find_by_name`. Play-on-awake still ASND. C `stub_game` fallback unchanged. Do not bump WSCN magic.
 
@@ -148,16 +151,16 @@ Toolbar (left): Save · Build · Play in Dolphin · Build & Run · ⋯ (Cook ass
 Toolbar (center): Play / Pause / Stop
 Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
-Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale · Play overlay: live stick / D-pad / face + mapping legend
+Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale · Play overlay: live stick / D-pad / face / IR crosshair + mapping legend
 Bottom tabs: Project · Console
 Project: Search (filename / relative path) · collapsible folders (foldout + `#`) · Refresh · New scene · Set default · Build Settings…
 Console: Search (text + info/warn/error tags) · Info / Warn / Error toggles · Clear · Doctor · count `N messages` / `k / N messages`
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · **Input** card (live stick / D-pad / A/B/Start + Keyboard · Wiimote · Classic · GCN; empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · **Input** card (live stick / D-pad / A/B/Start / IR + Keyboard · Wiimote · IR · Classic · GCN · mouse aim; empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**IR pointer / sensor-bar aiming (or motion gestures).** Wii `World` + `render_world` shipped 2026-09-28 (`render_world` in core; WSCN→World on PowerPC). Parent rotation compose shipped 2026-09-26. Green PowerPC CI shipped 2026-09-27.
+**Motion gestures (or nested prefabs).** IR pointer / sensor-bar aiming shipped 2026-09-29. Wii `World` + `render_world` shipped 2026-09-28. Parent rotation compose shipped 2026-09-26. Green PowerPC CI shipped 2026-09-27.
 

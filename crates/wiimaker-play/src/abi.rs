@@ -16,7 +16,7 @@ use wiimaker_core::world::World;
 use crate::PlayApp;
 
 /// Bump when the C symbol set or [`PlayInputC`] layout changes.
-pub const PLAY_ABI_VERSION: u32 = 1;
+pub const PLAY_ABI_VERSION: u32 = 2;
 
 /// POD input snapshot (GCN layout bits match [`Input`] masks).
 #[repr(C)]
@@ -31,6 +31,10 @@ pub struct PlayInputC {
     pub down: u32,
     pub pressed: u32,
     pub released: u32,
+    pub ir_x: f32,
+    pub ir_y: f32,
+    pub ir_valid: u8,
+    pub _ir_pad: [u8; 3],
 }
 
 const BUTTONS: [Button; 12] = [
@@ -75,6 +79,10 @@ impl PlayInputC {
             down,
             pressed,
             released,
+            ir_x: input.ir_x,
+            ir_y: input.ir_y,
+            ir_valid: if input.ir_valid { 1 } else { 0 },
+            _ir_pad: [0; 3],
         }
     }
 
@@ -86,6 +94,7 @@ impl PlayInputC {
         input.c.y = self.c_y;
         input.l_analog = self.l_analog;
         input.r_analog = self.r_analog;
+        input.set_ir(self.ir_x, self.ir_y, self.ir_valid != 0);
         for b in BUTTONS {
             let m = 1u32 << (b as u32);
             input.set_down(b, self.down & m != 0);
@@ -238,5 +247,17 @@ mod tests {
         assert!(dst.down(Button::A));
         assert!(dst.down(Button::DPadRight));
         assert!(!dst.down(Button::B));
+    }
+
+    #[test]
+    fn play_input_roundtrip_ir() {
+        let mut src = Input::new();
+        src.set_ir(123.0, 456.0, true);
+        let c = PlayInputC::from_input(&src);
+        assert_eq!(c.ir_valid, 1);
+        let dst = c.to_input();
+        assert!(dst.ir_valid);
+        assert!((dst.ir_x - 123.0).abs() < 1e-6);
+        assert!((dst.ir_y - 456.0).abs() < 1e-6);
     }
 }

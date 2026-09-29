@@ -2,7 +2,8 @@
 //!
 //! HorrorDash lesson: Wiimote IR/sensor bar is fiddly. Pads stay the map:
 //! keyboard, Wiimote D-pad/A/B/1/2, Classic, and Nunchuk (stick + Z) all merge onto
-//! these bits (see [`crate::wiimote_map`]).
+//! these bits (see [`crate::wiimote_map`]). IR is **additive aiming** in 640×480
+//! game space (`ir_x`/`ir_y`/`ir_valid`) — never a stick/D-pad replacement.
 
 /// Digital buttons shared across GCN / Classic / emulated keyboard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -48,6 +49,12 @@ pub struct Input {
     pub c: Stick,
     pub l_analog: f32,
     pub r_analog: f32,
+    /// Aim X in 640×480 game space (+X right). Meaningful when [`Self::ir_valid`].
+    pub ir_x: f32,
+    /// Aim Y in 640×480 game space (+Y down). Meaningful when [`Self::ir_valid`].
+    pub ir_y: f32,
+    /// True when a pointing sample is live this frame (Wiimote IR / host mouse).
+    pub ir_valid: bool,
     down: u32,
     pressed: u32,
     released: u32,
@@ -79,9 +86,19 @@ impl Input {
     }
 
     /// Call once at the start of each frame before applying fresh device state.
+    ///
+    /// Clears edge bits and [`Self::ir_valid`]. Backends must re-set IR each frame.
     pub fn begin_frame(&mut self) {
         self.pressed = 0;
         self.released = 0;
+        self.ir_valid = false;
+    }
+
+    /// Set IR aim in 640×480 game space for this frame.
+    pub fn set_ir(&mut self, x: f32, y: f32, valid: bool) {
+        self.ir_x = x;
+        self.ir_y = y;
+        self.ir_valid = valid;
     }
 
     pub fn down(&self, button: Button) -> bool {

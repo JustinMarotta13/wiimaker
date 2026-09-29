@@ -2,12 +2,13 @@
 
 use std::time::Instant;
 
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, MouseMode, Window, WindowOptions};
 
 use wiimaker_core::app::{App, FrameCtx};
 use wiimaker_core::draw::DrawList;
 use wiimaker_core::input::Input;
 use wiimaker_core::time::Clock;
+use wiimaker_core::wiimote_map::{apply_ir_aim, map_ir_raw_to_640, IR_GAME_H, IR_GAME_W};
 use wiimaker_play::{apply_pad_keys, step_app, PadKeys};
 
 use crate::atlas::TextureAtlas;
@@ -48,7 +49,7 @@ pub fn run_with_atlas<A: App>(
         let real_dt = now.duration_since(last).as_secs_f32();
         last = now;
 
-        poll_input(&window, &mut input);
+        poll_input(&mut window, &mut input);
 
         let steps = clock.push_real(real_dt);
         let ctx = FrameCtx {
@@ -77,7 +78,7 @@ pub fn run_with_atlas<A: App>(
     Ok(())
 }
 
-fn poll_input(window: &Window, input: &mut Input) {
+fn poll_input(window: &mut Window, input: &mut Input) {
     input.begin_frame();
     apply_pad_keys(
         input,
@@ -91,6 +92,17 @@ fn poll_input(window: &Window, input: &mut Input) {
             start: key(window, Key::Enter),
         },
     );
+    // Host mouse → IR aim in 640×480 when over the game framebuffer and focused.
+    if window.is_active() {
+        if let Some((mx, my)) = window.get_mouse_pos(MouseMode::Discard) {
+            let (x, y) = map_ir_raw_to_640(mx, my, IR_GAME_W, IR_GAME_H);
+            apply_ir_aim(input, x, y, true);
+        } else {
+            apply_ir_aim(input, 0.0, 0.0, false);
+        }
+    } else {
+        apply_ir_aim(input, 0.0, 0.0, false);
+    }
 }
 
 fn key(window: &Window, k: Key) -> bool {

@@ -185,6 +185,8 @@ pub(crate) struct EditorApp {
     pub(crate) last_play_hit: Option<String>,
     /// Host keyboard → GCN-layout `Input` (Inspector + Game overlay + Play tick).
     pub(crate) live_input: Input,
+    /// Last Game-view letterboxed image rect (screen px) for mouse → IR.
+    pub(crate) game_view_ir_rect: Option<egui::Rect>,
 }
 
 #[derive(Clone)]
@@ -261,6 +263,7 @@ impl EditorApp {
             console: Vec::new(),
             last_play_hit: None,
             live_input: Input::new(),
+            game_view_ir_rect: None,
         };
         app.reload_assets()?;
         app.refresh_scenes();
@@ -1232,9 +1235,21 @@ impl EditorApp {
     }
 
     /// Keyboard → GCN-layout snapshot for Inspector / Game overlay / Play.
+    /// Mouse over the Game view letterbox → IR aim in 640×480 when Playing/Paused.
     pub(crate) fn sample_live_input(&mut self, ctx: &egui::Context) {
         self.live_input.begin_frame();
         apply_pad_keys(&mut self.live_input, Self::sample_pad_keys(ctx));
+        let pointer = ctx.input(|i| i.pointer.hover_pos());
+        let focused = ctx.input(|i| i.focused);
+        if focused {
+            if let (Some(pos), Some(rect)) = (pointer, self.game_view_ir_rect) {
+                if rect.contains(pos) && rect.width() > 1.0 && rect.height() > 1.0 {
+                    let x = (pos.x - rect.min.x) / rect.width() * VIEW_W as f32;
+                    let y = (pos.y - rect.min.y) / rect.height() * VIEW_H as f32;
+                    wiimaker_core::apply_ir_aim(&mut self.live_input, x, y, true);
+                }
+            }
+        }
     }
 
     /// In-editor play tick: game `App` plugin when present, else WASD `Player`.
