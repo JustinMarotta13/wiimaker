@@ -305,6 +305,7 @@ impl EditorApp {
         let well_resp = ui.interact(well, ui.id().with("viewport_well"), egui::Sense::hover());
 
         if is_scene {
+            self.game_view_ir_rect = None;
             if self.prefs.scene_view.grid_overlay {
                 paint_grid_overlay(ui, image_rect, self.prefs.scene_view.snap_size.max(1.0));
             }
@@ -330,6 +331,7 @@ impl EditorApp {
             self.handle_scene_nav(&well_resp, well);
             self.handle_viewport_input(&response, image_rect);
         } else if self.play_mode == PlayMode::Edit {
+            self.game_view_ir_rect = Some(image_rect);
             ui.painter().text(
                 image_rect.center(),
                 egui::Align2::CENTER_CENTER,
@@ -338,6 +340,7 @@ impl EditorApp {
                 theme::TEXT_DIM,
             );
         } else {
+            self.game_view_ir_rect = Some(image_rect);
             paint_game_input_overlay(ui, image_rect, &self.live_input);
         }
     }
@@ -1235,8 +1238,25 @@ fn paint_one_outline(
     }
 }
 
-/// Compact Game-view pad readout while Playing / Paused (host keyboard).
+/// Compact Game-view pad readout while Playing / Paused (host keyboard + IR).
 fn paint_game_input_overlay(ui: &mut egui::Ui, image_rect: egui::Rect, input: &Input) {
+    let painter = ui.painter();
+    // Unity-ish IR reticle when aiming (readable on dark clear).
+    if input.ir_valid {
+        let cx = image_rect.min.x + (input.ir_x / VIEW_W as f32) * image_rect.width();
+        let cy = image_rect.min.y + (input.ir_y / VIEW_H as f32) * image_rect.height();
+        let c = egui::pos2(cx, cy);
+        let col = egui::Color32::from_rgb(255, 220, 80);
+        let stroke = egui::Stroke::new(1.5_f32, col);
+        let arm = 10.0;
+        let gap = 3.0;
+        painter.line_segment([egui::pos2(c.x - arm, c.y), egui::pos2(c.x - gap, c.y)], stroke);
+        painter.line_segment([egui::pos2(c.x + gap, c.y), egui::pos2(c.x + arm, c.y)], stroke);
+        painter.line_segment([egui::pos2(c.x, c.y - arm), egui::pos2(c.x, c.y - gap)], stroke);
+        painter.line_segment([egui::pos2(c.x, c.y + gap), egui::pos2(c.x, c.y + arm)], stroke);
+        painter.circle_stroke(c, 5.0, stroke);
+    }
+
     let status = wiimaker_core::format_input_status(input);
     let legend = wiimaker_core::INPUT_LEGEND;
     let pad = 6.0;
@@ -1247,7 +1267,6 @@ fn paint_game_input_overlay(ui: &mut egui::Ui, image_rect: egui::Rect, input: &I
         egui::pos2(image_rect.min.x + 6.0, image_rect.max.y - box_h - 6.0),
         egui::vec2(box_w, box_h),
     );
-    let painter = ui.painter();
     painter.rect_filled(
         rect,
         3.0,

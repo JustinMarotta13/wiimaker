@@ -48,8 +48,8 @@ pub use time::Clock;
 #[cfg(feature = "std")]
 pub use wiimote_map::format_input_status;
 pub use wiimote_map::{
-    merge_pad, MapRow, MergedPad, PadSources, WpadExpansion, INPUT_LEGEND, MAP_ROWS,
-    STICK_IDLE_DEADZONE,
+    apply_ir_aim, map_ir_raw_to_640, merge_pad, MapRow, MergedPad, PadSources, WpadExpansion,
+    INPUT_LEGEND, IR_GAME_H, IR_GAME_W, MAP_ROWS, STICK_IDLE_DEADZONE,
 };
 pub use world::{
     Animation, Camera, Disc, EntityId, Follow, Sprite, Transform, World, SCREEN_H, SCREEN_W,

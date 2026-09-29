@@ -39,6 +39,8 @@ static void init_video(void) {
     WPAD_Init();
     /* Expansion analog (Classic ljs/rjs, Nunchuk js) needs more than buttons. */
     WPAD_SetDataFormat(WPAD_CHAN_ALL, WPAD_FMT_BTNS_ACC_IR);
+    /* IR x/y in 640×480 game space (same as Scene/Game viewport). */
+    WPAD_SetVRes(WPAD_CHAN_ALL, 640, 480);
     PAD_Init();
 
     rmode = VIDEO_GetPreferredMode(NULL);
@@ -218,6 +220,14 @@ static void fill_input(WiimakerInput *out) {
         /* Same bit as CLASSIC_UP. C (CLASSIC_LEFT) is unmapped. */
         if (wii & WPAD_NUNCHUK_BUTTON_Z)
             out->buttons |= WIIMAKER_BTN_Z;
+    }
+
+    /* IR / sensor-bar aiming: additive; prefer ir.valid (bounded). memset
+     * already left ir_* invalid. After SetVRes(640,480), x/y are game space. */
+    if (wd && wd->err == WPAD_ERR_NONE && wd->ir.valid) {
+        out->ir_x = wd->ir.x;
+        out->ir_y = wd->ir.y;
+        out->ir_valid = 1;
     }
 
     /* Analog expansions: missing Wiimote / EXP_NONE is a no-op. */

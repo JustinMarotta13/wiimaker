@@ -18,6 +18,8 @@ pub fn wiimaker_input_to_core(prev: &mut Input, raw: &WiimakerInput) {
         y: raw.c_y,
     };
     prev.apply_down_bits(raw.buttons);
+    // IR is additive aiming from C fill_input — never invent from buttons.
+    prev.set_ir(raw.ir_x, raw.ir_y, raw.ir_valid != 0);
 }
 
 /// Snapshot without edge tracking (fresh Input each call).
@@ -40,6 +42,7 @@ mod tests {
             c_x: 0.1,
             c_y: 0.2,
             buttons: wiimote_map::BTN_A | wiimote_map::BTN_LEFT,
+            ..Default::default()
         };
         let input = wiimaker_input_snapshot(&raw);
         assert!((input.main.x - 0.5).abs() < 1e-6);
@@ -48,6 +51,23 @@ mod tests {
         assert!(input.down(Button::DPadLeft));
         assert!(!input.down(Button::B));
         assert!(input.pressed(Button::A));
+    }
+
+    #[test]
+    fn maps_ir_when_valid() {
+        let raw = WiimakerInput {
+            ir_x: 100.0,
+            ir_y: 200.0,
+            ir_valid: 1,
+            ..Default::default()
+        };
+        let input = wiimaker_input_snapshot(&raw);
+        assert!(input.ir_valid);
+        assert!((input.ir_x - 100.0).abs() < 1e-6);
+        assert!((input.ir_y - 200.0).abs() < 1e-6);
+        let invalid = WiimakerInput::default();
+        let input = wiimaker_input_snapshot(&invalid);
+        assert!(!input.ir_valid);
     }
 
     #[test]

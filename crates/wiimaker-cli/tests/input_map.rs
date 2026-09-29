@@ -29,12 +29,32 @@ fn input_map_json_lists_sources() {
     for row in map {
         sources.push(row["source"].as_str().unwrap_or("").to_string());
     }
-    for need in ["Keyboard", "GCN", "Wiimote", "Classic", "Nunchuk"] {
+    for need in ["Keyboard", "GCN", "Wiimote", "Classic", "Nunchuk", "Host"] {
         assert!(
             sources.iter().any(|s| s == need),
             "missing {need} in {stdout}"
         );
     }
+    assert!(
+        legend.contains("IR"),
+        "legend missing IR: {legend}"
+    );
+    assert!(
+        map.iter().any(|r| {
+            r["source"] == "Wiimote"
+                && r["control"].as_str().unwrap_or("").contains("IR")
+                && r["target"].as_str().unwrap_or("").contains("aim")
+        }),
+        "Wiimote IR → aim missing in {stdout}"
+    );
+    assert!(
+        map.iter().any(|r| {
+            r["source"] == "Host"
+                && r["control"].as_str().unwrap_or("").contains("Mouse")
+                && r["target"].as_str().unwrap_or("").contains("aim")
+        }),
+        "Host mouse → aim missing in {stdout}"
+    );
     assert!(
         map.iter()
             .any(|r| r["source"] == "Nunchuk" && r["control"] == "Z" && r["target"] == "Z"),
@@ -56,4 +76,6 @@ fn input_map_text_prints_legend() {
     assert!(stdout.contains("Classic"));
     assert!(stdout.contains("Nunchuk"));
     assert!(stdout.contains("1"));
+    assert!(stdout.contains("IR") || stdout.contains("sensor"));
+    assert!(stdout.contains("Mouse") || stdout.contains("Host"));
 }

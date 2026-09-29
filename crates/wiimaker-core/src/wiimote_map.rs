@@ -6,6 +6,16 @@
 //! Classic — Nunchuk Z/C share Classic UP/LEFT in the high word of
 //! `WPAD_ButtonsHeld`. Merges are additive (`OR`); analog sources never clear
 //! an already-live GCN stick.
+//!
+//! # IR / sensor-bar aiming
+//!
+//! After `WPAD_SetVRes(chan, 640, 480)` (or framebuffer size), libogc fills
+//! `wd->ir.x` / `wd->ir.y` in that virtual resolution. Prefer `wd->ir.valid`
+//! for strict aiming (bounded pointer). `smooth_valid` / `sx`/`sy` exist for
+//! smoothed tracking but are not used here — games that need lag-free aim
+//! should trust `valid`. Host maps mouse over the 640×480 Game view / window
+//! onto the same [`crate::input::Input`] IR fields. IR never replaces stick or
+//! D-pad.
 
 #[allow(unused_imports)] // Input/Button used by host helpers; Stick always
 use crate::input::{Button, Input, Stick};
@@ -15,7 +25,7 @@ use crate::input::{Button, Input, Stick};
 pub const STICK_IDLE_DEADZONE: f32 = 0.20;
 
 /// One-line legend for Game view / Inspector / `wiimaker input map`.
-pub const INPUT_LEGEND: &str = "Keyboard · Wiimote D-pad/A/B/1/2 · Classic · Nunchuk Z · GCN";
+pub const INPUT_LEGEND: &str = "Keyboard · Wiimote D-pad/A/B/1/2 · IR · Classic · Nunchuk Z · GCN · mouse aim";
 
 /// `WIIMAKER_BTN_A`
 pub const BTN_A: u32 = 1 << 0;
@@ -223,6 +233,16 @@ pub const MAP_ROWS: &[MapRow] = &[
         control: "D-pad",
         target: "D-pad",
     },
+    MapRow {
+        source: "Wiimote",
+        control: "IR / sensor bar",
+        target: "aim (ir_x, ir_y) in 640×480 when valid",
+    },
+    MapRow {
+        source: "Host",
+        control: "Mouse over Game view / window",
+        target: "aim (ir_x, ir_y) in 640×480 when valid",
+    },
 ];
 
 /// libogc `WPAD_EXP_*` subset used by [`merge_pad`].
@@ -268,6 +288,51 @@ pub fn take_stick_if_idle(base: Stick, fallback: Stick, zone: f32) -> Stick {
         fallback
     } else {
         base
+    }
+}
+
+
+/// Game framebuffer width used by Scene / Game / Wii aim space.
+pub const IR_GAME_W: f32 = 640.0;
+/// Game framebuffer height used by Scene / Game / Wii aim space.
+pub const IR_GAME_H: f32 = 480.0;
+
+/// Map raw pointer coords from a framebuffer of size `fb_w`×`fb_h` into 640×480
+/// game space (+X right, +Y down). Clamps to the game rect.
+///
+/// When `WPAD_SetVRes(chan, 640, 480)` already produced game-space samples,
+/// pass `fb_w = 640`, `fb_h = 480` (identity + clamp).
+pub fn map_ir_raw_to_640(x: f32, y: f32, fb_w: f32, fb_h: f32) -> (f32, f32) {
+    if !(fb_w > 0.0) || !(fb_h > 0.0) {
+        return (0.0, 0.0);
+    }
+    let sx = (x / fb_w) * IR_GAME_W;
+    let sy = (y / fb_h) * IR_GAME_H;
+    (
+        if sx < 0.0 {
+            0.0
+        } else if sx > IR_GAME_W {
+            IR_GAME_W
+        } else {
+            sx
+        },
+        if sy < 0.0 {
+            0.0
+        } else if sy > IR_GAME_H {
+            IR_GAME_H
+        } else {
+            sy
+        },
+    )
+}
+
+/// Apply a live IR sample (already in 640×480), or clear when `valid` is false.
+pub fn apply_ir_aim(input: &mut Input, x: f32, y: f32, valid: bool) {
+    if valid {
+        let (x, y) = map_ir_raw_to_640(x, y, IR_GAME_W, IR_GAME_H);
+        input.set_ir(x, y, true);
+    } else {
+        input.set_ir(0.0, 0.0, false);
     }
 }
 
@@ -474,8 +539,13 @@ pub fn format_input_status(input: &Input) -> String {
     }
     let face = face.trim();
     let face = if face.is_empty() { "·" } else { face };
+    let ir = if input.ir_valid {
+        format!("ir {:.0},{:.0}", input.ir_x, input.ir_y)
+    } else {
+        "ir ·".to_string()
+    };
     format!(
-        "stick {:+.2},{:+.2}  dpad {dpad}  {face}",
+        "stick {:+.2},{:+.2}  dpad {dpad}  {face}  {ir}",
         input.main.x, input.main.y
     )
 }
@@ -628,9 +698,15 @@ mod tests {
     #[test]
     fn map_rows_cover_sources() {
         let sources: Vec<_> = MAP_ROWS.iter().map(|r| r.source).collect();
-        for need in ["Keyboard", "GCN", "Wiimote", "Classic", "Nunchuk"] {
+        for need in ["Keyboard", "GCN", "Wiimote", "Classic", "Nunchuk", "Host"] {
             assert!(sources.contains(&need), "missing {need}");
         }
+        assert!(MAP_ROWS.iter().any(|r| {
+            r.source == "Wiimote" && r.control.contains("IR") && r.target.contains("aim")
+        }));
+        assert!(MAP_ROWS.iter().any(|r| {
+            r.source == "Host" && r.control.contains("Mouse") && r.target.contains("aim")
+        }));
     }
 
     #[test]
@@ -652,6 +728,46 @@ mod tests {
         assert!(INPUT_LEGEND.contains("Classic"));
         assert!(INPUT_LEGEND.contains("Nunchuk"));
         assert!(INPUT_LEGEND.contains("GCN"));
+        assert!(INPUT_LEGEND.contains("IR"));
+        assert!(INPUT_LEGEND.contains("mouse"));
+    }
+
+    #[test]
+    fn map_ir_raw_scales_and_clamps() {
+        let (x, y) = map_ir_raw_to_640(320.0, 240.0, 640.0, 480.0);
+        assert!((x - 320.0).abs() < 1e-5);
+        assert!((y - 240.0).abs() < 1e-5);
+        let (x, y) = map_ir_raw_to_640(100.0, 50.0, 320.0, 240.0);
+        assert!((x - 200.0).abs() < 1e-5);
+        assert!((y - 100.0).abs() < 1e-5);
+        let (x, y) = map_ir_raw_to_640(-10.0, 999.0, 640.0, 480.0);
+        assert!((x - 0.0).abs() < 1e-5);
+        assert!((y - 480.0).abs() < 1e-5);
+        let (x, y) = map_ir_raw_to_640(10.0, 10.0, 0.0, 480.0);
+        assert_eq!((x, y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn apply_ir_invalid_clears() {
+        let mut input = Input::new();
+        apply_ir_aim(&mut input, 100.0, 200.0, true);
+        assert!(input.ir_valid);
+        assert!((input.ir_x - 100.0).abs() < 1e-5);
+        apply_ir_aim(&mut input, 50.0, 50.0, false);
+        assert!(!input.ir_valid);
+        input.begin_frame();
+        assert!(!input.ir_valid);
+    }
+
+    #[test]
+    fn format_status_mentions_ir_when_valid() {
+        let mut input = Input::new();
+        input.set_ir(320.0, 240.0, true);
+        let s = format_input_status(&input);
+        assert!(s.contains("ir 320,240"), "{s}");
+        input.begin_frame();
+        let s = format_input_status(&input);
+        assert!(s.contains("ir ·"), "{s}");
     }
 
     #[test]
