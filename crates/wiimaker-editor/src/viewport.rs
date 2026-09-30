@@ -1238,7 +1238,7 @@ fn paint_one_outline(
     }
 }
 
-/// Compact Game-view pad readout while Playing / Paused (host keyboard + IR).
+/// Compact Game-view pad readout while Playing / Paused (host keyboard + IR + motion).
 fn paint_game_input_overlay(ui: &mut egui::Ui, image_rect: egui::Rect, input: &Input) {
     let painter = ui.painter();
     // Unity-ish IR reticle when aiming (readable on dark clear).
@@ -1257,12 +1257,46 @@ fn paint_game_input_overlay(ui: &mut egui::Ui, image_rect: egui::Rect, input: &I
         painter.circle_stroke(c, 5.0, stroke);
     }
 
+    // Accel XYZ bars (top-right of Game letterbox) when motion is live.
+    if input.motion_valid {
+        let bar_w = 56.0;
+        let bar_h = 5.0;
+        let gap = 3.0;
+        let origin = egui::pos2(image_rect.max.x - bar_w - 10.0, image_rect.min.y + 10.0);
+        let vals = [input.accel_x, input.accel_y, input.accel_z];
+        let cols = [
+            egui::Color32::from_rgb(220, 90, 90),
+            egui::Color32::from_rgb(90, 200, 110),
+            egui::Color32::from_rgb(90, 140, 230),
+        ];
+        for (i, (v, col)) in vals.iter().zip(cols).enumerate() {
+            let y = origin.y + i as f32 * (bar_h + gap);
+            let bg = egui::Rect::from_min_size(egui::pos2(origin.x, y), egui::vec2(bar_w, bar_h));
+            painter.rect_filled(bg, 1.0, egui::Color32::from_rgb(28, 28, 28));
+            let t = ((*v + 2.0) / 4.0).clamp(0.0, 1.0);
+            let fill = egui::Rect::from_min_size(
+                egui::pos2(origin.x, y),
+                egui::vec2(bar_w * t, bar_h),
+            );
+            painter.rect_filled(fill, 1.0, col);
+        }
+        if input.shake() || input.gesture_down(wiimaker_core::Gesture::Shake) {
+            painter.text(
+                egui::pos2(origin.x, origin.y + 3.0 * (bar_h + gap) + 2.0),
+                egui::Align2::LEFT_TOP,
+                if input.shake() { "SHAKE!" } else { "shake" },
+                egui::FontId::monospace(10.0),
+                egui::Color32::from_rgb(255, 180, 80),
+            );
+        }
+    }
+
     let status = wiimaker_core::format_input_status(input);
     let legend = wiimaker_core::INPUT_LEGEND;
     let pad = 6.0;
     let line_h = 14.0;
     let box_h = pad * 2.0 + line_h * 2.0 + 2.0;
-    let box_w = (image_rect.width() - 12.0).clamp(180.0, 420.0);
+    let box_w = (image_rect.width() - 12.0).clamp(180.0, 520.0);
     let rect = egui::Rect::from_min_size(
         egui::pos2(image_rect.min.x + 6.0, image_rect.max.y - box_h - 6.0),
         egui::vec2(box_w, box_h),

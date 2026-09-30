@@ -20,8 +20,9 @@ extern "C" {
 #define WIIMAKER_BTN_LEFT (1u << 10)
 #define WIIMAKER_BTN_RIGHT (1u << 11)
 
-/* Layout: sticks + buttons, then IR aim in 640×480 (+X right, +Y down).
- * `ir_valid` is 0/1; `_ir_pad` keeps natural 4-byte alignment after the uint8. */
+/* Layout: sticks + buttons, then IR aim in 640×480 (+X right, +Y down),
+ * then accelerometer in g (libogc gforce; rest ≈ 0,0,1 face-up).
+ * `ir_valid` / `motion_valid` are 0/1; pads keep natural 4-byte alignment. */
 typedef struct WiimakerInput {
     float main_x;
     float main_y;
@@ -32,6 +33,11 @@ typedef struct WiimakerInput {
     float ir_y;
     uint8_t ir_valid;
     uint8_t _ir_pad[3];
+    float accel_x;
+    float accel_y;
+    float accel_z;
+    uint8_t motion_valid;
+    uint8_t _motion_pad[3];
 } WiimakerInput;
 
 /* Implemented by the game staticlib (Rust) or C scene player. */

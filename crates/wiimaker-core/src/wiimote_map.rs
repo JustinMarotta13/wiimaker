@@ -16,6 +16,16 @@
 //! should trust `valid`. Host maps mouse over the 640×480 Game view / window
 //! onto the same [`crate::input::Input`] IR fields. IR never replaces stick or
 //! D-pad.
+//!
+//! # Motion / accelerometer
+//!
+//! Libogc fills `wd->gforce.{x,y,z}` in **g** when data format includes ACC
+//! (`WPAD_FMT_BTNS_ACC_IR`). Convention (match `Input` / host sim): rest ≈
+//! `(0, 0, 1)` with the Wiimote **face-up** (A/B toward ceiling, IR forward).
+//! Raw `wd->accel` can be scaled with [`scale_wpad_accel_raw_to_g`] when gforce
+//! is unavailable. Motion is **additive** — never replaces stick/D-pad/IR.
+//! Host: hold **Shift** and move the mouse (offset from window/Game center) to
+//! tilt; valid only while Shift is held (mirrors IR's "live sample" rule).
 
 #[allow(unused_imports)] // Input/Button used by host helpers; Stick always
 use crate::input::{Button, Input, Stick};
@@ -25,7 +35,7 @@ use crate::input::{Button, Input, Stick};
 pub const STICK_IDLE_DEADZONE: f32 = 0.20;
 
 /// One-line legend for Game view / Inspector / `wiimaker input map`.
-pub const INPUT_LEGEND: &str = "Keyboard · Wiimote D-pad/A/B/1/2 · IR · Classic · Nunchuk Z · GCN · mouse aim";
+pub const INPUT_LEGEND: &str = "Keyboard · Wiimote D-pad/A/B/1/2 · IR · motion · Classic · Nunchuk Z · GCN · mouse aim · Shift+mouse tilt";
 
 /// `WIIMAKER_BTN_A`
 pub const BTN_A: u32 = 1 << 0;
@@ -243,6 +253,16 @@ pub const MAP_ROWS: &[MapRow] = &[
         control: "Mouse over Game view / window",
         target: "aim (ir_x, ir_y) in 640×480 when valid",
     },
+    MapRow {
+        source: "Wiimote",
+        control: "Accelerometer (gforce)",
+        target: "accel_x/y/z (g) + motion_valid; shake/swing edges",
+    },
+    MapRow {
+        source: "Host",
+        control: "Shift + mouse offset from center",
+        target: "accel tilt (g) when Shift held; shake when jabbed",
+    },
 ];
 
 /// libogc `WPAD_EXP_*` subset used by [`merge_pad`].
@@ -334,6 +354,45 @@ pub fn apply_ir_aim(input: &mut Input, x: f32, y: f32, valid: bool) {
     } else {
         input.set_ir(0.0, 0.0, false);
     }
+}
+
+/// Re-export gesture thresholds for docs / CLI.
+pub use crate::input::{SHAKE_DELTA_G, SWING_G};
+
+/// Typical libogc / wiiuse raw accel "zero-g" bias (device units).
+pub const WPAD_ACCEL_RAW_ZERO: f32 = 0x1F7 as f32;
+/// Typical raw reading for ≈ +1 g along a calibrated axis.
+pub const WPAD_ACCEL_RAW_ONE: f32 = (0x1F7 + 0x6A) as f32;
+
+/// Scale a WPAD raw accelerometer axis to **g** (same units as `wd->gforce`).
+///
+/// `g = (raw − zero) / (one − zero)`. Defaults match common wiiuse calibration
+/// (`WPAD_ACCEL_RAW_ZERO` / `WPAD_ACCEL_RAW_ONE`). Prefer `wd->gforce` on device.
+pub fn scale_wpad_accel_raw_to_g(raw: f32, zero: f32, one: f32) -> f32 {
+    let denom = one - zero;
+    if denom.abs() < 1e-6 {
+        return 0.0;
+    }
+    (raw - zero) / denom
+}
+
+/// Map host mouse offset from a rect center into a tilt accel sample.
+///
+/// `nx`/`ny` are normalized −1..1 (right / down positive in screen space). Rest
+/// is `(0, 0, 1)`; tilt adds up to ±`max_tilt_g` on X/Y and slightly reduces Z
+/// so magnitude stays near 1 g when gently tilted.
+pub fn host_mouse_tilt_to_accel(nx: f32, ny: f32, max_tilt_g: f32) -> (f32, f32, f32) {
+    let nx = nx.clamp(-1.0, 1.0);
+    let ny = ny.clamp(-1.0, 1.0);
+    let ax = nx * max_tilt_g;
+    let ay = -ny * max_tilt_g; // screen +Y down → Wiimote +Y (toward buttons) when tilting back
+    let az = (1.0 - (ax * ax + ay * ay) * 0.15).max(0.25);
+    (ax, ay, az)
+}
+
+/// Apply host / Wii accel (g). When `valid` is false, clears motion like IR.
+pub fn apply_accel(input: &mut Input, x: f32, y: f32, z: f32, valid: bool) {
+    input.set_accel(x, y, z, valid);
 }
 
 /// Core Wiimote held bits → GCN-layout (`1→X`, `2→Y`, Minus→Z, Home/Plus→Start).
@@ -544,8 +603,23 @@ pub fn format_input_status(input: &Input) -> String {
     } else {
         "ir ·".to_string()
     };
+    let motion = if input.motion_valid {
+        let shake = if input.shake() {
+            " shake!"
+        } else if input.gesture_down(crate::input::Gesture::Shake) {
+            " shake"
+        } else {
+            ""
+        };
+        format!(
+            "acc {:+.1},{:+.1},{:+.1}{}",
+            input.accel_x, input.accel_y, input.accel_z, shake
+        )
+    } else {
+        "acc ·".to_string()
+    };
     format!(
-        "stick {:+.2},{:+.2}  dpad {dpad}  {face}  {ir}",
+        "stick {:+.2},{:+.2}  dpad {dpad}  {face}  {ir}  {motion}",
         input.main.x, input.main.y
     )
 }
@@ -707,6 +781,12 @@ mod tests {
         assert!(MAP_ROWS.iter().any(|r| {
             r.source == "Host" && r.control.contains("Mouse") && r.target.contains("aim")
         }));
+        assert!(MAP_ROWS.iter().any(|r| {
+            r.source == "Wiimote" && r.control.contains("Accelerometer") && r.target.contains("accel")
+        }));
+        assert!(MAP_ROWS.iter().any(|r| {
+            r.source == "Host" && r.control.contains("Shift") && r.target.contains("accel")
+        }));
     }
 
     #[test]
@@ -730,6 +810,8 @@ mod tests {
         assert!(INPUT_LEGEND.contains("GCN"));
         assert!(INPUT_LEGEND.contains("IR"));
         assert!(INPUT_LEGEND.contains("mouse"));
+        assert!(INPUT_LEGEND.contains("motion"));
+        assert!(INPUT_LEGEND.contains("Shift"));
     }
 
     #[test]
@@ -768,6 +850,46 @@ mod tests {
         input.begin_frame();
         let s = format_input_status(&input);
         assert!(s.contains("ir ·"), "{s}");
+    }
+
+    #[test]
+    fn scale_wpad_accel_raw_one_g() {
+        let g = scale_wpad_accel_raw_to_g(WPAD_ACCEL_RAW_ONE, WPAD_ACCEL_RAW_ZERO, WPAD_ACCEL_RAW_ONE);
+        assert!((g - 1.0).abs() < 1e-5);
+        let z = scale_wpad_accel_raw_to_g(WPAD_ACCEL_RAW_ZERO, WPAD_ACCEL_RAW_ZERO, WPAD_ACCEL_RAW_ONE);
+        assert!(z.abs() < 1e-5);
+    }
+
+    #[test]
+    fn apply_accel_invalid_clears() {
+        let mut input = Input::new();
+        apply_accel(&mut input, 0.5, 0.0, 1.0, true);
+        assert!(input.motion_valid);
+        apply_accel(&mut input, 0.0, 0.0, 0.0, false);
+        assert!(!input.motion_valid);
+        input.begin_frame();
+        assert!(!input.motion_valid);
+    }
+
+    #[test]
+    fn host_mouse_tilt_rest_and_edges() {
+        let (x, y, z) = host_mouse_tilt_to_accel(0.0, 0.0, 2.0);
+        assert!(x.abs() < 1e-5 && y.abs() < 1e-5);
+        assert!((z - 1.0).abs() < 1e-5);
+        let (x, _, _) = host_mouse_tilt_to_accel(1.0, 0.0, 2.0);
+        assert!((x - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn format_status_mentions_accel_when_valid() {
+        let mut input = Input::new();
+        input.set_accel(0.5, -0.25, 1.0, true);
+        let s = format_input_status(&input);
+        assert!(s.contains("acc "), "{s}");
+        assert!(s.contains("+0.5"), "{s}");
+        input.begin_frame();
+        let s = format_input_status(&input);
+        assert!(s.contains("acc ·"), "{s}");
     }
 
     #[test]

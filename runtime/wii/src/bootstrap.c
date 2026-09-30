@@ -230,6 +230,15 @@ static void fill_input(WiimakerInput *out) {
         out->ir_valid = 1;
     }
 
+    /* Motion / accelerometer: libogc gforce is already in g. Convention:
+     * rest ≈ (0,0,1) face-up. Additive; GCN-only paths leave motion_valid=0. */
+    if (wd && wd->err == WPAD_ERR_NONE) {
+        out->accel_x = wd->gforce.x;
+        out->accel_y = wd->gforce.y;
+        out->accel_z = wd->gforce.z;
+        out->motion_valid = 1;
+    }
+
     /* Analog expansions: missing Wiimote / EXP_NONE is a no-op. */
     if (wd && wd->err == WPAD_ERR_NONE) {
         if (kind == WPAD_EXP_CLASSIC) {

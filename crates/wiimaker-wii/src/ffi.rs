@@ -3,7 +3,7 @@
 //! Real GX / tex / audio symbols live in the C runtime. With the `std` feature,
 //! [`install_test_backend`] records calls for host unit tests (no libogc).
 
-/// Mirror of `WiimakerInput` (GCN-layout sticks + button bits + IR aim).
+/// Mirror of `WiimakerInput` (GCN-layout sticks + button bits + IR + motion).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WiimakerInput {
@@ -16,6 +16,11 @@ pub struct WiimakerInput {
     pub ir_y: f32,
     pub ir_valid: u8,
     pub _ir_pad: [u8; 3],
+    pub accel_x: f32,
+    pub accel_y: f32,
+    pub accel_z: f32,
+    pub motion_valid: u8,
+    pub _motion_pad: [u8; 3],
 }
 
 /// One recorded GX / audio / tex call (host tests).

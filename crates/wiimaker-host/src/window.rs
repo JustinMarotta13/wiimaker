@@ -8,7 +8,9 @@ use wiimaker_core::app::{App, FrameCtx};
 use wiimaker_core::draw::DrawList;
 use wiimaker_core::input::Input;
 use wiimaker_core::time::Clock;
-use wiimaker_core::wiimote_map::{apply_ir_aim, map_ir_raw_to_640, IR_GAME_H, IR_GAME_W};
+use wiimaker_core::wiimote_map::{
+    apply_accel, apply_ir_aim, host_mouse_tilt_to_accel, map_ir_raw_to_640, IR_GAME_H, IR_GAME_W,
+};
 use wiimaker_play::{apply_pad_keys, step_app, PadKeys};
 
 use crate::atlas::TextureAtlas;
@@ -93,15 +95,27 @@ fn poll_input(window: &mut Window, input: &mut Input) {
         },
     );
     // Host mouse → IR aim in 640×480 when over the game framebuffer and focused.
+    // Shift + mouse offset from center → accel tilt (g); valid only while Shift held.
+    let shift = key(window, Key::LeftShift) || key(window, Key::RightShift);
     if window.is_active() {
         if let Some((mx, my)) = window.get_mouse_pos(MouseMode::Discard) {
             let (x, y) = map_ir_raw_to_640(mx, my, IR_GAME_W, IR_GAME_H);
             apply_ir_aim(input, x, y, true);
+            if shift {
+                let nx = ((mx / IR_GAME_W) * 2.0 - 1.0).clamp(-1.0, 1.0);
+                let ny = ((my / IR_GAME_H) * 2.0 - 1.0).clamp(-1.0, 1.0);
+                let (ax, ay, az) = host_mouse_tilt_to_accel(nx, ny, 2.0);
+                apply_accel(input, ax, ay, az, true);
+            } else {
+                apply_accel(input, 0.0, 0.0, 0.0, false);
+            }
         } else {
             apply_ir_aim(input, 0.0, 0.0, false);
+            apply_accel(input, 0.0, 0.0, 0.0, false);
         }
     } else {
         apply_ir_aim(input, 0.0, 0.0, false);
+        apply_accel(input, 0.0, 0.0, 0.0, false);
     }
 }
 

@@ -1236,19 +1236,32 @@ impl EditorApp {
 
     /// Keyboard → GCN-layout snapshot for Inspector / Game overlay / Play.
     /// Mouse over the Game view letterbox → IR aim in 640×480 when Playing/Paused.
+    /// Shift + mouse offset from Game center → accel tilt (g); valid only while Shift.
     pub(crate) fn sample_live_input(&mut self, ctx: &egui::Context) {
         self.live_input.begin_frame();
         apply_pad_keys(&mut self.live_input, Self::sample_pad_keys(ctx));
         let pointer = ctx.input(|i| i.pointer.hover_pos());
         let focused = ctx.input(|i| i.focused);
+        let shift = ctx.input(|i| i.modifiers.shift);
+        let mut motion_set = false;
         if focused {
             if let (Some(pos), Some(rect)) = (pointer, self.game_view_ir_rect) {
                 if rect.contains(pos) && rect.width() > 1.0 && rect.height() > 1.0 {
                     let x = (pos.x - rect.min.x) / rect.width() * VIEW_W as f32;
                     let y = (pos.y - rect.min.y) / rect.height() * VIEW_H as f32;
                     wiimaker_core::apply_ir_aim(&mut self.live_input, x, y, true);
+                    if shift {
+                        let nx = ((pos.x - rect.center().x) / (rect.width() * 0.5)).clamp(-1.0, 1.0);
+                        let ny = ((pos.y - rect.center().y) / (rect.height() * 0.5)).clamp(-1.0, 1.0);
+                        let (ax, ay, az) = wiimaker_core::host_mouse_tilt_to_accel(nx, ny, 2.0);
+                        wiimaker_core::apply_accel(&mut self.live_input, ax, ay, az, true);
+                        motion_set = true;
+                    }
                 }
             }
+        }
+        if !motion_set {
+            wiimaker_core::apply_accel(&mut self.live_input, 0.0, 0.0, 0.0, false);
         }
     }
 

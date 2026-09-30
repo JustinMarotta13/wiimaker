@@ -1698,6 +1698,80 @@ impl EditorApp {
                     );
                 }
             });
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Accel").size(12.0).color(theme::TEXT_MUTED));
+                if input.motion_valid {
+                    ui.label(
+                        RichText::new(format!(
+                            "{:+.2}  {:+.2}  {:+.2}",
+                            input.accel_x, input.accel_y, input.accel_z
+                        ))
+                        .size(12.0)
+                        .color(theme::TEXT)
+                        .monospace(),
+                    );
+                    ui.label(
+                        RichText::new("Valid")
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(120, 200, 120))
+                            .strong(),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new("—  —  —")
+                            .size(12.0)
+                            .color(theme::TEXT_DIM)
+                            .monospace(),
+                    );
+                    ui.label(
+                        RichText::new("Invalid")
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Gesture").size(12.0).color(theme::TEXT_MUTED));
+                let mut any = false;
+                if input.shake() || input.gesture_down(wiimaker_core::Gesture::Shake) {
+                    let edge = if input.shake() { "Shake!" } else { "Shake" };
+                    ui.label(
+                        RichText::new(edge)
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(255, 180, 80))
+                            .strong(),
+                    );
+                    any = true;
+                }
+                for (g, label) in [
+                    (wiimaker_core::Gesture::SwingXPlus, "Swing+X"),
+                    (wiimaker_core::Gesture::SwingXMinus, "Swing−X"),
+                    (wiimaker_core::Gesture::SwingYPlus, "Swing+Y"),
+                    (wiimaker_core::Gesture::SwingYMinus, "Swing−Y"),
+                ] {
+                    if input.gesture_pressed(g) || input.gesture_down(g) {
+                        let text = if input.gesture_pressed(g) {
+                            format!("{label}!")
+                        } else {
+                            label.to_string()
+                        };
+                        ui.label(
+                            RichText::new(text)
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(140, 190, 255))
+                                .strong(),
+                        );
+                        any = true;
+                    }
+                }
+                if !any {
+                    ui.label(
+                        RichText::new("—")
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
+                }
+            });
             ui.label(
                 RichText::new(&status)
                     .size(11.0)
@@ -2093,5 +2167,6 @@ mod tests {
         assert!(INPUT_LEGEND.contains("Wiimote"));
         assert!(INPUT_LEGEND.contains("Nunchuk"));
         assert!(INPUT_LEGEND.contains("IR"));
+        assert!(INPUT_LEGEND.contains("motion"));
     }
 }

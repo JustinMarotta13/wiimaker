@@ -20,6 +20,8 @@ pub fn wiimaker_input_to_core(prev: &mut Input, raw: &WiimakerInput) {
     prev.apply_down_bits(raw.buttons);
     // IR is additive aiming from C fill_input — never invent from buttons.
     prev.set_ir(raw.ir_x, raw.ir_y, raw.ir_valid != 0);
+    // Motion / accel (g) — additive; gesture edges via set_accel on persistent Input.
+    prev.set_accel(raw.accel_x, raw.accel_y, raw.accel_z, raw.motion_valid != 0);
 }
 
 /// Snapshot without edge tracking (fresh Input each call).
@@ -68,6 +70,53 @@ mod tests {
         let invalid = WiimakerInput::default();
         let input = wiimaker_input_snapshot(&invalid);
         assert!(!input.ir_valid);
+    }
+
+    #[test]
+    fn maps_accel_when_valid() {
+        let raw = WiimakerInput {
+            accel_x: 0.25,
+            accel_y: -0.5,
+            accel_z: 1.0,
+            motion_valid: 1,
+            ..Default::default()
+        };
+        let input = wiimaker_input_snapshot(&raw);
+        assert!(input.motion_valid);
+        assert!((input.accel_x - 0.25).abs() < 1e-6);
+        assert!((input.accel_y + 0.5).abs() < 1e-6);
+        assert!((input.accel_z - 1.0).abs() < 1e-6);
+        let invalid = WiimakerInput::default();
+        let input = wiimaker_input_snapshot(&invalid);
+        assert!(!input.motion_valid);
+    }
+
+    #[test]
+    fn shake_edge_across_wii_frames() {
+        use wiimaker_core::Gesture;
+        let mut input = Input::new();
+        let rest = WiimakerInput {
+            accel_x: 0.0,
+            accel_y: 0.0,
+            accel_z: 1.0,
+            motion_valid: 1,
+            ..Default::default()
+        };
+        wiimaker_input_to_core(&mut input, &rest);
+        assert!(!input.shake());
+        let jab = WiimakerInput {
+            accel_x: 2.5,
+            accel_y: 0.0,
+            accel_z: 1.0,
+            motion_valid: 1,
+            ..Default::default()
+        };
+        wiimaker_input_to_core(&mut input, &jab);
+        assert!(input.shake());
+        assert!(input.gesture_down(Gesture::Shake));
+        wiimaker_input_to_core(&mut input, &jab);
+        assert!(!input.shake());
+        assert!(input.gesture_down(Gesture::Shake));
     }
 
     #[test]
