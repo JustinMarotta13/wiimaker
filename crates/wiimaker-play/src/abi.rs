@@ -16,7 +16,7 @@ use wiimaker_core::world::World;
 use crate::PlayApp;
 
 /// Bump when the C symbol set or [`PlayInputC`] layout changes.
-pub const PLAY_ABI_VERSION: u32 = 2;
+pub const PLAY_ABI_VERSION: u32 = 3;
 
 /// POD input snapshot (GCN layout bits match [`Input`] masks).
 #[repr(C)]
@@ -35,6 +35,13 @@ pub struct PlayInputC {
     pub ir_y: f32,
     pub ir_valid: u8,
     pub _ir_pad: [u8; 3],
+    pub accel_x: f32,
+    pub accel_y: f32,
+    pub accel_z: f32,
+    pub motion_valid: u8,
+    pub gesture_pressed: u8,
+    pub gesture_down: u8,
+    pub _motion_pad: u8,
 }
 
 const BUTTONS: [Button; 12] = [
@@ -83,6 +90,13 @@ impl PlayInputC {
             ir_y: input.ir_y,
             ir_valid: if input.ir_valid { 1 } else { 0 },
             _ir_pad: [0; 3],
+            accel_x: input.accel_x,
+            accel_y: input.accel_y,
+            accel_z: input.accel_z,
+            motion_valid: if input.motion_valid { 1 } else { 0 },
+            gesture_pressed: input.gesture_pressed_bits(),
+            gesture_down: input.gesture_down_bits(),
+            _motion_pad: 0,
         }
     }
 
@@ -95,12 +109,20 @@ impl PlayInputC {
         input.l_analog = self.l_analog;
         input.r_analog = self.r_analog;
         input.set_ir(self.ir_x, self.ir_y, self.ir_valid != 0);
+        // Accel + gestures: set_accel would re-detect edges from scratch on a fresh
+        // Input; restore ABI gesture bits after so play plugins see true edges.
+        input.accel_x = self.accel_x;
+        input.accel_y = self.accel_y;
+        input.accel_z = self.accel_z;
+        input.motion_valid = self.motion_valid != 0;
         for b in BUTTONS {
             let m = 1u32 << (b as u32);
             input.set_down(b, self.down & m != 0);
         }
         // `set_down` on a fresh Input treats every hold as a press. Restore edges.
         input.set_edge_bits(self.pressed, self.released);
+        input.apply_gesture_down_bits(self.gesture_down);
+        input.set_gesture_edge_bits(self.gesture_pressed, 0);
         input
     }
 }
@@ -259,5 +281,21 @@ mod tests {
         assert!(dst.ir_valid);
         assert!((dst.ir_x - 123.0).abs() < 1e-6);
         assert!((dst.ir_y - 456.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn play_input_roundtrip_accel_and_shake() {
+        let mut src = Input::new();
+        src.set_accel(2.0, 0.0, 1.0, true);
+        assert!(src.shake());
+        let c = PlayInputC::from_input(&src);
+        assert_eq!(c.motion_valid, 1);
+        assert_eq!(PLAY_ABI_VERSION, 3);
+        assert!((c.accel_x - 2.0).abs() < 1e-6);
+        assert!(c.gesture_pressed != 0);
+        let dst = c.to_input();
+        assert!(dst.motion_valid);
+        assert!((dst.accel_x - 2.0).abs() < 1e-6);
+        assert!(dst.shake());
     }
 }

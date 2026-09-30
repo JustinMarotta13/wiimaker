@@ -33,7 +33,7 @@ pub use color::Rgba8;
 pub use draw::{DrawCmd, DrawList, MeshId, Rect, TextureId};
 pub use render::{render_world, render_world_ex};
 pub use grid_mover::{cardinal, cell_center, step_grid_movers, Dir, GridMover, CARDINAL_DEADZONE};
-pub use input::{Button, Input, Stick};
+pub use input::{Button, Gesture, Input, Stick, SHAKE_DELTA_G, SWING_G};
 pub use sorting::{
     cmp_sorting, default_sorting_layer_index, default_sorting_layers,
     is_default_sorting_layer_name, sorting_layer_index, DEFAULT_SORTING_LAYER,
@@ -48,8 +48,9 @@ pub use time::Clock;
 #[cfg(feature = "std")]
 pub use wiimote_map::format_input_status;
 pub use wiimote_map::{
-    apply_ir_aim, map_ir_raw_to_640, merge_pad, MapRow, MergedPad, PadSources, WpadExpansion,
-    INPUT_LEGEND, IR_GAME_H, IR_GAME_W, MAP_ROWS, STICK_IDLE_DEADZONE,
+    apply_accel, apply_ir_aim, host_mouse_tilt_to_accel, map_ir_raw_to_640, merge_pad,
+    scale_wpad_accel_raw_to_g, MapRow, MergedPad, PadSources, WpadExpansion, INPUT_LEGEND,
+    IR_GAME_H, IR_GAME_W, MAP_ROWS, STICK_IDLE_DEADZONE, WPAD_ACCEL_RAW_ONE, WPAD_ACCEL_RAW_ZERO,
 };
 pub use world::{
     Animation, Camera, Disc, EntityId, Follow, Sprite, Transform, World, SCREEN_H, SCREEN_W,

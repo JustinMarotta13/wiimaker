@@ -60,6 +60,26 @@ fn input_map_json_lists_sources() {
             .any(|r| r["source"] == "Nunchuk" && r["control"] == "Z" && r["target"] == "Z"),
         "Nunchuk Z → Z missing in {stdout}"
     );
+    assert!(
+        legend.contains("motion") || legend.contains("Shift"),
+        "legend missing motion: {legend}"
+    );
+    assert!(
+        map.iter().any(|r| {
+            r["source"] == "Wiimote"
+                && r["control"].as_str().unwrap_or("").contains("Accelerometer")
+                && r["target"].as_str().unwrap_or("").contains("accel")
+        }),
+        "Wiimote accel missing in {stdout}"
+    );
+    assert!(
+        map.iter().any(|r| {
+            r["source"] == "Host"
+                && r["control"].as_str().unwrap_or("").contains("Shift")
+                && r["target"].as_str().unwrap_or("").contains("accel")
+        }),
+        "Host Shift+mouse tilt missing in {stdout}"
+    );
     assert_eq!(v["buttons"]["a"], 1);
     assert_eq!(v["buttons"]["right"], 1 << 11);
 }
@@ -78,4 +98,5 @@ fn input_map_text_prints_legend() {
     assert!(stdout.contains("1"));
     assert!(stdout.contains("IR") || stdout.contains("sensor"));
     assert!(stdout.contains("Mouse") || stdout.contains("Host"));
+    assert!(stdout.contains("Accelerometer") || stdout.contains("accel") || stdout.contains("Shift"));
 }
