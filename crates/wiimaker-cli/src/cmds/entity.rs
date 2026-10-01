@@ -8,7 +8,7 @@ use wiimaker_scene::{
     add_component_sprite, add_component_text, add_component_tilemap, add_entity, apply_prefab,
     attach_prefab_instance, duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab,
     entity_triggers_entered, instantiate_prefab, load_prefab, load_prefab_for_instance,
-    normalize_prefab_source, prefab_overrides, remove_component_animation,
+    normalize_prefab_source, prefab_tree_overrides, remove_component_animation,
     remove_component_audio_source, remove_component_camera, remove_component_collider,
     remove_component_disc, remove_component_follow, remove_component_grid_mover,
     remove_component_sprite, remove_component_text, remove_component_tilemap, remove_entity,
@@ -556,6 +556,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
         } => {
             let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             let prefab = entity_to_prefab(&sc, &name)?;
+            let child_count = prefab.children.len();
             let stem = as_name.unwrap_or_else(|| name.clone());
             let dest = gd
                 .join("assets")
@@ -571,6 +572,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     ok: bool,
                     path: String,
                     prefab: String,
+                    children: usize,
                 }
                 println!(
                     "{}",
@@ -578,11 +580,18 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                         ok: true,
                         path: dest.display().to_string(),
                         prefab: link,
+                        children: child_count,
                     })?
                 );
                 Ok(())
-            } else {
+            } else if child_count == 0 {
                 println!("wrote {} (instance {name})", dest.display());
+                Ok(())
+            } else {
+                println!(
+                    "wrote {} (instance {name}, {child_count} nested)",
+                    dest.display()
+                );
                 Ok(())
             }
         }
@@ -597,6 +606,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             let prefab_path = resolve_prefab_path(&gd, &prefab)?;
             let pf = load_prefab(&prefab_path)?;
             let link = normalize_prefab_source(&prefab);
+            let child_count = pf.children.len();
             let new_name = instantiate_prefab(&mut sc, &pf, &link, x, y);
             save_scene(&path, &sc)?;
             if json {
@@ -605,6 +615,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     ok: bool,
                     name: String,
                     prefab: String,
+                    children: usize,
                 }
                 println!(
                     "{}",
@@ -612,11 +623,15 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                         ok: true,
                         name: new_name,
                         prefab: link,
+                        children: child_count,
                     })?
                 );
                 Ok(())
-            } else {
+            } else if child_count == 0 {
                 println!("instantiated → {new_name} ({link})");
+                Ok(())
+            } else {
+                println!("instantiated → {new_name} ({link}, {child_count} nested)");
                 Ok(())
             }
         }
@@ -684,7 +699,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             let source = ent.prefab.clone();
             let (instance, overrides) = if source.is_some() {
                 match load_prefab_for_instance(&gd, ent) {
-                    Ok(pf) => (true, prefab_overrides(ent, &pf.entity).fields),
+                    Ok(pf) => (true, prefab_tree_overrides(&sc, &name, &pf).fields),
                     Err(_) => (true, Vec::new()),
                 }
             } else {

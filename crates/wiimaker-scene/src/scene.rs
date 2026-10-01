@@ -45,11 +45,32 @@ impl Scene {
     }
 }
 
-/// Prefab = one entity blob (Unity prefab analogue).
+/// Prefab = root entity + optional nested children (Unity nested-prefab analogue).
+///
+/// Old single-entity `.prefab.json` files still load (no `children` key). Only the
+/// scene **instance root** carries `EntityData.prefab`; nested children are part of
+/// the instance and do not get their own link.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Prefab {
     #[serde(flatten)]
     pub entity: EntityData,
+    /// Descendants with `parent` links using prefab-local entity names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<EntityData>,
+}
+
+impl Prefab {
+    pub fn from_entity(entity: EntityData) -> Self {
+        Self {
+            entity,
+            children: Vec::new(),
+        }
+    }
+
+    /// Root + children entity count.
+    pub fn entity_count(&self) -> usize {
+        1 + self.children.len()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

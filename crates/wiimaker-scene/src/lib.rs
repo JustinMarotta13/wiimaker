@@ -48,8 +48,10 @@ pub use pick::{
     pointer_to_scene,
 };
 pub use prefab::{
-    load_prefab_for_instance, normalize_prefab_source, prefab_overrides, prefab_stem,
-    resolve_prefab_asset, PrefabOverrides,
+    collect_descendants, find_prefab_instance_root, load_prefab_for_instance,
+    match_prefab_instance, normalize_prefab_source, prefab_local_name, prefab_overrides,
+    prefab_stem, prefab_tree_overrides, resolve_prefab_asset, topo_prefab_children,
+    PrefabOverrides,
 };
 pub use prefs::{
     apply_game_view, apply_project_view, apply_scene_view, editor_prefs_path, fitted_blit_rect,

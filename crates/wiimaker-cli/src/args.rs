@@ -504,7 +504,7 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
-    /// Save an entity as `assets/prefabs/<name>.prefab.json`
+    /// Save an entity (+ Hierarchy children) as `assets/prefabs/<name>.prefab.json`
     CreatePrefab {
         game: String,
         #[arg(long)]
@@ -515,7 +515,7 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
-    /// Instantiate a prefab into the scene
+    /// Instantiate a prefab into the scene (root + nested children)
     InstantiatePrefab {
         game: String,
         /// Prefab stem or path relative to game (e.g. player or assets/prefabs/player.prefab.json)
@@ -527,7 +527,7 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
-    /// Push instance overrides onto the prefab asset (Unity Apply)
+    /// Push instance tree overrides onto the prefab asset (Unity Apply)
     ApplyPrefab {
         game: String,
         #[arg(long)]
@@ -537,7 +537,7 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
-    /// Reset instance transform/components from the prefab asset (Unity Revert)
+    /// Reset instance tree from the prefab asset (Unity Revert)
     RevertPrefab {
         game: String,
         #[arg(long)]

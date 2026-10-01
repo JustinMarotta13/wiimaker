@@ -37,7 +37,9 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 
 - Scene hierarchy TRS: `SceneTransform::compose_child` / `to_local` are the single source of truth. `world.scale = parent.scale * local.scale` (component-wise, no shear), `world.rotation = parent.rotation * local.rotation` (glam `Quat`, scene stores `[x,y,z,w]`), `world.t = parent.t + rotate(parent.r, local.t * parent.s)`. Hydrate writes flattened world pose onto `World` (no parent links at runtime). WSCN bake writes composed translation+scale only. Identity rotation still matches the old translate×scale path.
 
+- Nested prefabs: `Prefab { entity, children }` — children use prefab-local `parent` names; scene instances link only on the root (`EntityData.prefab`). Override paths: `ChildName/transform.position`. Apply/Revert rebuild the nested tree. Old single-entity `.prefab.json` remains valid.
+
 ## Open follow-ups
 
-- Nested prefabs / prefab variants (motion gestures shipped 2026-09-30; IR pointer 2026-09-29; digital Wiimote / Classic / Nunchuk merge 2026-09-23).
+- Prefab variants / inheritance (nested prefabs shipped 2026-10-01; motion gestures 2026-09-30; IR pointer 2026-09-29).
 - Sprite sheet offset/padding, Grid By Cell Size.

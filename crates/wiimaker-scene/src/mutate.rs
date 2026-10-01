@@ -186,7 +186,11 @@ pub fn insert_entity_clone(scene: &mut Scene, entity: &EntityData) -> String {
     new_name
 }
 
-/// Snapshot an entity as a Prefab (root; parent + instance link cleared).
+/// Snapshot an entity (and descendants) as a Prefab.
+///
+/// Root `parent` + instance link cleared. Nested children keep relative `parent`
+/// links (prefab-local names) and have their prefab links cleared. Only the scene
+/// instance root should carry a `prefab` link after instantiate / Save as Prefab.
 pub fn entity_to_prefab(scene: &Scene, name: &str) -> Result<crate::scene::Prefab> {
     let ent = scene
         .find_entity(name)
@@ -195,7 +199,16 @@ pub fn entity_to_prefab(scene: &Scene, name: &str) -> Result<crate::scene::Prefa
     let mut entity = ent;
     entity.parent = None;
     entity.prefab = None;
-    Ok(crate::scene::Prefab { entity })
+    let mut children = Vec::new();
+    for dname in crate::prefab::collect_descendants(scene, name) {
+        let mut child = scene
+            .find_entity(&dname)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("entity '{dname}' not found"))?;
+        child.prefab = None;
+        children.push(child);
+    }
+    Ok(crate::scene::Prefab { entity, children })
 }
 
 /// Record `source` (stem or relative `*.prefab.json`) on an existing entity.
@@ -209,8 +222,10 @@ pub fn attach_prefab_instance(scene: &mut Scene, name: &str, source: &str) -> Re
     Ok(())
 }
 
-/// Instantiate a prefab into the scene at optional world XY. Returns new entity name.
-/// `source` is stored on the instance (stem or game-relative `*.prefab.json`).
+/// Instantiate a prefab into the scene at optional world XY. Returns new root name.
+///
+/// Spawns the root plus all nested children with unique names. Children are
+/// reparented under the remapped hierarchy. Only the root stores `source`.
 pub fn instantiate_prefab(
     scene: &mut Scene,
     prefab: &crate::scene::Prefab,
@@ -218,59 +233,142 @@ pub fn instantiate_prefab(
     x: Option<f32>,
     y: Option<f32>,
 ) -> String {
-    let mut entity = prefab.entity.clone();
-    entity.parent = None;
-    entity.prefab = Some(crate::prefab::normalize_prefab_source(source));
+    use std::collections::HashMap;
+
+    let mut name_map: HashMap<String, String> = HashMap::new();
+    let mut root = prefab.entity.clone();
+    root.parent = None;
+    root.prefab = Some(crate::prefab::normalize_prefab_source(source));
     if let Some(x) = x {
-        entity.transform.translation[0] = x;
+        root.transform.translation[0] = x;
     }
     if let Some(y) = y {
-        entity.transform.translation[1] = y;
+        root.transform.translation[1] = y;
     }
-    // Avoid double +16 when x/y provided: insert without offset path.
-    let new_name = unique_entity_name(scene, &entity.name);
-    entity.name = new_name.clone();
-    scene.entities.push(entity);
+    let new_name = unique_entity_name(scene, &root.name);
+    name_map.insert(prefab.entity.name.clone(), new_name.clone());
+    root.name = new_name.clone();
+    scene.entities.push(root);
+
+    for child_tmpl in crate::prefab::topo_prefab_children(prefab) {
+        let mut child = child_tmpl.clone();
+        child.prefab = None;
+        let inst_name = unique_entity_name(scene, &child.name);
+        name_map.insert(child_tmpl.name.clone(), inst_name.clone());
+        child.name = inst_name;
+        let prefab_parent = child_tmpl
+            .parent
+            .as_deref()
+            .unwrap_or(prefab.entity.name.as_str());
+        let inst_parent = name_map
+            .get(prefab_parent)
+            .cloned()
+            .unwrap_or_else(|| new_name.clone());
+        child.parent = Some(inst_parent);
+        scene.entities.push(child);
+    }
     new_name
 }
 
-/// Unity Apply: push instance transform / components / tag onto the prefab asset blob.
-/// Keeps the prefab's own name; clears parent/link on the asset. Links the instance to `source`.
+/// Unity Apply: push the instance tree (root + nested children) onto the prefab asset.
+/// Keeps the prefab asset root name when possible; remaps nested names via the prior match.
+/// Links the instance root to `source`.
 pub fn apply_prefab(
     scene: &mut Scene,
     name: &str,
     prefab: &mut crate::scene::Prefab,
     source: &str,
 ) -> Result<()> {
-    let ent = find_mut(scene, name)?;
-    prefab.entity.transform = ent.transform.clone();
-    prefab.entity.components = ent.components.clone();
-    prefab.entity.tag = ent.tag;
-    prefab.entity.parent = None;
-    prefab.entity.prefab = None;
+    use std::collections::HashMap;
+
     let link = crate::prefab::normalize_prefab_source(source);
     if link.is_empty() {
         bail!("prefab source cannot be empty");
     }
+    let old = prefab.clone();
+    let map = crate::prefab::match_prefab_instance(scene, name, &old);
+    let inv: HashMap<String, String> = map.into_iter().map(|(l, i)| (i, l)).collect();
+
+    let inst_root = scene
+        .find_entity(name)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
+    let mut new_root = inst_root;
+    new_root.name = old.entity.name.clone();
+    new_root.parent = None;
+    new_root.prefab = None;
+
+    let mut new_children = Vec::new();
+    for d in crate::prefab::collect_descendants(scene, name) {
+        let mut e = scene
+            .find_entity(&d)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("entity '{d}' not found"))?;
+        let local = inv.get(&d).cloned().unwrap_or_else(|| e.name.clone());
+        let parent_local = match e.parent.as_deref() {
+            Some(p) if p == name => Some(old.entity.name.clone()),
+            Some(p) => Some(inv.get(p).cloned().unwrap_or_else(|| p.to_string())),
+            None => None,
+        };
+        e.name = local;
+        e.parent = parent_local;
+        e.prefab = None;
+        new_children.push(e);
+    }
+
+    prefab.entity = new_root;
+    prefab.children = new_children;
+
+    let ent = find_mut(scene, name)?;
     ent.prefab = Some(link);
     Ok(())
 }
 
-/// Unity Revert: reset instance transform / components / tag from the prefab asset.
-/// Keeps name, parent, and prefab link.
+/// Unity Revert: restore root properties and rebuild nested children from the asset.
+/// Keeps instance root name, parent, and prefab link.
 pub fn revert_prefab_instance(
     scene: &mut Scene,
     name: &str,
     prefab: &crate::scene::Prefab,
 ) -> Result<()> {
-    let ent = find_mut(scene, name)?;
-    ent.transform = prefab.entity.transform.clone();
-    ent.components = prefab.entity.components.clone();
-    ent.tag = prefab.entity.tag;
+    use std::collections::HashMap;
+
+    {
+        let ent = find_mut(scene, name)?;
+        ent.transform = prefab.entity.transform.clone();
+        ent.components = prefab.entity.components.clone();
+        ent.tag = prefab.entity.tag;
+    }
+
+    let descs = crate::prefab::collect_descendants(scene, name);
+    scene
+        .entities
+        .retain(|e| !descs.iter().any(|d| d == &e.name));
+
+    let mut name_map: HashMap<String, String> = HashMap::new();
+    name_map.insert(prefab.entity.name.clone(), name.to_string());
+    for child_tmpl in crate::prefab::topo_prefab_children(prefab) {
+        let mut child = child_tmpl.clone();
+        child.prefab = None;
+        let inst_name = unique_entity_name(scene, &child.name);
+        name_map.insert(child_tmpl.name.clone(), inst_name.clone());
+        child.name = inst_name;
+        let prefab_parent = child_tmpl
+            .parent
+            .as_deref()
+            .unwrap_or(prefab.entity.name.as_str());
+        child.parent = Some(
+            name_map
+                .get(prefab_parent)
+                .cloned()
+                .unwrap_or_else(|| name.to_string()),
+        );
+        scene.entities.push(child);
+    }
     Ok(())
 }
 
-/// Clear the prefab instance link; current values stay as a plain entity.
+/// Clear the prefab instance link on the root; nested entities and values stay.
 pub fn unpack_prefab_instance(scene: &mut Scene, name: &str) -> Result<()> {
     let ent = find_mut(scene, name)?;
     ent.prefab = None;
@@ -1327,6 +1425,114 @@ mod tests {
             inst.prefab.as_deref(),
             Some("assets/prefabs/dot.prefab.json")
         );
+    }
+
+    #[test]
+    fn nested_prefab_save_instantiate_apply_revert_unpack() {
+        let mut scene = empty_scene();
+        add_entity(
+            &mut scene,
+            "Ghost",
+            &MutateOpts {
+                x: Some(80.0),
+                y: Some(90.0),
+                radius: Some(10.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "Eye",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                radius: Some(2.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Parent first (preserves world), then set local offset under Ghost.
+        set_entity_parent(&mut scene, "Eye", Some("Ghost")).unwrap();
+        set_entity_transform(&mut scene, "Eye", Some(4.0), Some(-2.0)).unwrap();
+
+        let prefab = entity_to_prefab(&scene, "Ghost").unwrap();
+        assert_eq!(prefab.entity.name, "Ghost");
+        assert_eq!(prefab.children.len(), 1);
+        assert_eq!(prefab.children[0].name, "Eye");
+        assert_eq!(prefab.children[0].parent.as_deref(), Some("Ghost"));
+        assert!(prefab.entity.prefab.is_none());
+        assert!(prefab.children[0].prefab.is_none());
+
+        // Old one-entity shape still round-trips via from_entity.
+        let legacy = crate::scene::Prefab::from_entity(prefab.entity.clone());
+        assert!(legacy.children.is_empty());
+
+        let root = instantiate_prefab(&mut scene, &prefab, "ghost", Some(200.0), Some(210.0));
+        assert_eq!(root, "Ghost_1");
+        let children = scene.child_names(&root);
+        assert_eq!(children.len(), 1, "{children:?}");
+        let eye = &children[0];
+        assert!(eye.starts_with("Eye"), "{eye}");
+        let inst_root = scene.find_entity(&root).unwrap();
+        assert_eq!(
+            inst_root.prefab.as_deref(),
+            Some("assets/prefabs/ghost.prefab.json")
+        );
+        assert_eq!(inst_root.transform.translation[0], 200.0);
+        let inst_eye = scene.find_entity(eye).unwrap();
+        assert!(inst_eye.prefab.is_none());
+        assert_eq!(inst_eye.parent.as_deref(), Some(root.as_str()));
+        assert_eq!(inst_eye.transform.translation[0], 4.0);
+
+        // Override nested child + root, then Apply.
+        set_entity_transform(&mut scene, eye, Some(9.0), Some(-2.0)).unwrap();
+        scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == *eye)
+            .unwrap()
+            .components
+            .disc
+            .as_mut()
+            .unwrap()
+            .radius = 3.0;
+        set_entity_transform(&mut scene, &root, Some(220.0), Some(210.0)).unwrap();
+
+        let ov = crate::prefab::prefab_tree_overrides(&scene, &root, &prefab);
+        assert!(ov.has(None, "transform.position"), "{ov:?}");
+        assert!(ov.has(Some("Eye"), "transform.position"), "{ov:?}");
+        assert!(ov.has(Some("Eye"), "Disc.radius"), "{ov:?}");
+
+        let mut prefab = prefab;
+        apply_prefab(&mut scene, &root, &mut prefab, "ghost").unwrap();
+        assert_eq!(prefab.entity.transform.translation[0], 220.0);
+        assert_eq!(prefab.children.len(), 1);
+        assert_eq!(prefab.children[0].name, "Eye");
+        assert_eq!(prefab.children[0].transform.translation[0], 9.0);
+        assert!((prefab.children[0].components.disc.as_ref().unwrap().radius - 3.0).abs() < 1e-4);
+        assert!(prefab.entity.prefab.is_none());
+
+        // Mutate again and Revert — restores asset tree.
+        set_entity_transform(&mut scene, &root, Some(1.0), Some(2.0)).unwrap();
+        set_entity_transform(&mut scene, eye, Some(0.0), Some(0.0)).unwrap();
+        revert_prefab_instance(&mut scene, &root, &prefab).unwrap();
+        let inst = scene.find_entity(&root).unwrap();
+        assert_eq!(inst.transform.translation[0], 220.0);
+        assert_eq!(
+            inst.prefab.as_deref(),
+            Some("assets/prefabs/ghost.prefab.json")
+        );
+        let kids = scene.child_names(&root);
+        assert_eq!(kids.len(), 1);
+        let eye2 = scene.find_entity(&kids[0]).unwrap();
+        assert_eq!(eye2.transform.translation[0], 9.0);
+        assert!((eye2.components.disc.as_ref().unwrap().radius - 3.0).abs() < 1e-4);
+        assert!(eye2.prefab.is_none());
+
+        unpack_prefab_instance(&mut scene, &root).unwrap();
+        assert!(scene.find_entity(&root).unwrap().prefab.is_none());
+        assert_eq!(scene.child_names(&root).len(), 1);
     }
 
     #[test]

@@ -17,31 +17,35 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
 | Console | editor Console: Search (session-only, Hierarchy chrome) + Info/Warn/Error toggles · Clear · Doctor |
-| Prefab | `.prefab.json` · instance `prefab` link · Save as Prefab / Instantiate / Apply (push to asset) / Revert / Unpack Completely · orange-bold Inspector overrides |
+| Prefab | `.prefab.json` · root + optional `children[]` (nested) · instance `prefab` link on **root only** · Save as Prefab / Instantiate / Apply / Revert / Unpack Completely · orange-bold overrides (`Child/field`) |
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
 Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle; **IR aim** `ir_x`/`ir_y`/`ir_valid` in 640×480; **motion** `accel_*`/`motion_valid` + shake/swing edges), 60 Hz `Clock`, `render_world` (in `wiimaker-core`, re-exported from `wiimaker-scene`) sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib (WSCN→World → `render_world` → DrawList → GX + ASND oneshots), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** nested prefabs / prefab variants.
+**Not present:** prefab variants (inheritance).
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-09-30):** Nested prefabs / prefab variants. Motion gestures shipped.
+**Recommended next morning (2026-10-01):** Prefab variants (inheritance / overrides-from-base). Nested prefabs shipped.
 
 ---
 
 ## Later
 
-- Nested prefabs / prefab variants.
+- Prefab variants (inheritance).
+- Animation state machine / Animator (clips already exist).
+- Timeline / cutscene authoring.
 
 ---
 
 ## Done
 
 Shipped. Keep here so we do not rebuild them.
+
+- **Nested prefabs** (2026-10-01) — `Prefab` root + `children: Vec<EntityData>` (old one-entity JSON still loads). Save as Prefab / `entity create-prefab` captures Hierarchy subtree. Instantiate expands tree (unique names; only root gets `prefab` link). Apply/Revert/Unpack operate on whole tree; override paths `ChildName/field`. Inspector Prefab chrome on root; orange-bold for nested. CLI twins `--json` include `children` count. Host-first (WSCN hydrate still flattens). Variants deferred.
 
 - **Unity Hierarchy + Inspector chrome** (2026-09-01) · 1:1 follow-up: crops + rules in `MEMORY/durable/unity-chrome/` / `.cursor/rules/wiimaker-editor.mdc` — Hierarchy search, + Create Empty, right-click Duplicate/Delete/Unparent, no per-row D/x; Inspector GameObject name+Tag, Transform Position/Rotation/Scale as XYZ DragValues, ⋮ Remove Component, full-width Add Component. Dark Pro only.
 

@@ -109,25 +109,41 @@ impl EditorApp {
         let mut prefab_revert = false;
         let mut prefab_unpack = false;
 
-        let prefab_link = self
+        // Prefab Apply/Revert/Unpack on the instance root only. Orange-bold uses
+        // prefab_tree_overrides paths (`field` on root, `ChildName/field` on nested).
+        let sel_prefab_link = self
             .scene
             .find_entity(&sel)
             .and_then(|e| e.prefab.clone())
             .filter(|s| !s.is_empty());
-        let prefab_ov = if let Some(src) = prefab_link.as_deref() {
-            self.scene
-                .find_entity(&sel)
-                .and_then(|ent| {
-                    wiimaker_scene::resolve_prefab_asset(&self.game_dir, src)
-                        .ok()
-                        .and_then(|p| wiimaker_scene::load_prefab(&p).ok())
-                        .map(|pf| wiimaker_scene::prefab_overrides(ent, &pf.entity))
-                })
-                .unwrap_or_default()
+        let is_prefab_instance = sel_prefab_link.is_some();
+        let instance_root_ent = if is_prefab_instance {
+            self.scene.find_entity(&sel)
         } else {
-            wiimaker_scene::PrefabOverrides::default()
+            wiimaker_scene::find_prefab_instance_root(&self.scene, &sel)
         };
-        let is_prefab_instance = prefab_link.is_some();
+        let prefab_link = instance_root_ent
+            .and_then(|e| e.prefab.clone())
+            .filter(|s| !s.is_empty());
+        let instance_root_name = instance_root_ent.map(|e| e.name.clone());
+        let loaded_prefab = prefab_link.as_deref().and_then(|src| {
+            wiimaker_scene::resolve_prefab_asset(&self.game_dir, src)
+                .ok()
+                .and_then(|p| wiimaker_scene::load_prefab(&p).ok())
+        });
+        let prefab_ov = match (&instance_root_name, &loaded_prefab) {
+            (Some(root), Some(pf)) => {
+                wiimaker_scene::prefab_tree_overrides(&self.scene, root, pf)
+            }
+            _ => wiimaker_scene::PrefabOverrides::default(),
+        };
+        let ov_child_owned: Option<String> = match (&instance_root_name, &loaded_prefab) {
+            (Some(root), Some(pf)) if root.as_str() != sel.as_str() => {
+                wiimaker_scene::prefab_local_name(&self.scene, root, pf, &sel)
+            }
+            _ => None,
+        };
+        let ov_child: Option<&str> = ov_child_owned.as_deref();
 
         // GameObject header — inspector.png (name row, then Tag).
         ui.horizontal(|ui| {
@@ -142,7 +158,7 @@ impl EditorApp {
             }
         });
         ui.horizontal(|ui| {
-            theme::inspector_label_ov(ui, "Tag", prefab_ov.contains("tag"));
+            theme::inspector_label_ov(ui, "Tag", prefab_ov.has(ov_child, "tag"));
             if let Some(ent) = self.scene.entities.iter_mut().find(|e| e.name == sel) {
                 dirty |= ui.add(egui::DragValue::new(&mut ent.tag)).changed();
             }
@@ -226,7 +242,7 @@ impl EditorApp {
                     "Position",
                     &mut ent.transform.translation,
                     1.0,
-                    prefab_ov.contains("transform.position"),
+                    prefab_ov.has(ov_child, "transform.position"),
                 );
                 let rot = ent.transform.rotation;
                 let mut euler = [
@@ -239,7 +255,7 @@ impl EditorApp {
                     "Rotation",
                     &mut euler,
                     0.5,
-                    prefab_ov.contains("transform.rotation"),
+                    prefab_ov.has(ov_child, "transform.rotation"),
                 ) {
                     let half = euler[2].to_radians() * 0.5;
                     ent.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
@@ -250,7 +266,7 @@ impl EditorApp {
                     "Scale",
                     &mut ent.transform.scale,
                     0.01,
-                    prefab_ov.contains("transform.scale"),
+                    prefab_ov.has(ov_child, "transform.scale"),
                 );
             });
             }
@@ -263,7 +279,7 @@ impl EditorApp {
                     "Sprite",
                     Some(sp.enabled),
                     true,
-                    prefab_ov.component("Sprite"),
+                    prefab_ov.component_at(ov_child, "Sprite"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_sprite = Some(en);
@@ -297,7 +313,7 @@ impl EditorApp {
                         "Size",
                         &mut sp.size,
                         0.5,
-                        prefab_ov.contains("Sprite.size"),
+                        prefab_ov.has(ov_child, "Sprite.size"),
                     );
                     let catalog_pivot = catalog_pivot_by_name
                         .get(&sp.texture)
@@ -310,7 +326,7 @@ impl EditorApp {
                             "Pivot",
                             &mut pivot_edit,
                             0.01,
-                            prefab_ov.contains("Sprite.pivot"),
+                            prefab_ov.has(ov_child, "Sprite.pivot"),
                         );
                         if changed {
                             sp.pivot = Some(pivot_edit);
@@ -341,8 +357,8 @@ impl EditorApp {
                         &layer_names,
                         &mut sp.sorting_layer,
                         &mut sp.z,
-                        prefab_ov.contains("Sprite.sorting_layer"),
-                        prefab_ov.contains("Sprite.z"),
+                        prefab_ov.has(ov_child, "Sprite.sorting_layer"),
+                        prefab_ov.has(ov_child, "Sprite.z"),
                     );
                 });
                 }
@@ -356,7 +372,7 @@ impl EditorApp {
                     "Animation",
                     Some(a.enabled),
                     true,
-                    prefab_ov.component("Animation"),
+                    prefab_ov.component_at(ov_child, "Animation"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_animation = Some(en);
@@ -407,7 +423,7 @@ impl EditorApp {
                             "Fps",
                             fps,
                             0.25,
-                            prefab_ov.contains("Animation.fps"),
+                            prefab_ov.has(ov_child, "Animation.fps"),
                         );
                     } else if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
                         ui.label(
@@ -436,7 +452,7 @@ impl EditorApp {
                     "Disc",
                     Some(d.enabled),
                     true,
-                    prefab_ov.component("Disc"),
+                    prefab_ov.component_at(ov_child, "Disc"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_disc = Some(en);
@@ -451,7 +467,7 @@ impl EditorApp {
                         "Radius",
                         &mut d.radius,
                         0.5,
-                        prefab_ov.contains("Disc.radius"),
+                        prefab_ov.has(ov_child, "Disc.radius"),
                     );
                     dirty |= sorting_layer_fields(
                         ui,
@@ -459,8 +475,8 @@ impl EditorApp {
                         &layer_names,
                         &mut d.sorting_layer,
                         &mut d.z,
-                        prefab_ov.contains("Disc.sorting_layer"),
-                        prefab_ov.contains("Disc.z"),
+                        prefab_ov.has(ov_child, "Disc.sorting_layer"),
+                        prefab_ov.has(ov_child, "Disc.z"),
                     );
                 });
                 }
@@ -473,7 +489,7 @@ impl EditorApp {
                     "Tilemap",
                     Some(tm.enabled),
                     true,
-                    prefab_ov.component("Tilemap"),
+                    prefab_ov.component_at(ov_child, "Tilemap"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_tilemap = Some(en);
@@ -498,14 +514,14 @@ impl EditorApp {
                         "Cell",
                         &mut tm.cell,
                         0.25,
-                        prefab_ov.contains("Tilemap.cell"),
+                        prefab_ov.has(ov_child, "Tilemap.cell"),
                     );
                     dirty |= theme::vec2_row_ov(
                         ui,
                         "Origin",
                         &mut tm.origin,
                         1.0,
-                        prefab_ov.contains("Tilemap.origin"),
+                        prefab_ov.has(ov_child, "Tilemap.origin"),
                     );
                     dirty |= sorting_layer_fields(
                         ui,
@@ -513,8 +529,8 @@ impl EditorApp {
                         &layer_names,
                         &mut tm.sorting_layer,
                         &mut tm.z,
-                        prefab_ov.contains("Tilemap.sorting_layer"),
-                        prefab_ov.contains("Tilemap.z"),
+                        prefab_ov.has(ov_child, "Tilemap.sorting_layer"),
+                        prefab_ov.has(ov_child, "Tilemap.z"),
                     );
                     let occupied = tm.cells.iter().filter(|c| **c != 0).count();
                     ui.label(
@@ -757,7 +773,7 @@ impl EditorApp {
                     "Collider",
                     Some(c.enabled),
                     true,
-                    prefab_ov.component("Collider"),
+                    prefab_ov.component_at(ov_child, "Collider"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_collider = Some(en);
@@ -797,7 +813,7 @@ impl EditorApp {
                                 "Size",
                                 &mut c.size,
                                 0.5,
-                                prefab_ov.contains("Collider.size"),
+                                prefab_ov.has(ov_child, "Collider.size"),
                             );
                         }
                         SceneColliderKind::Circle => {
@@ -806,7 +822,7 @@ impl EditorApp {
                                 "Radius",
                                 &mut c.radius,
                                 0.5,
-                                prefab_ov.contains("Collider.radius"),
+                                prefab_ov.has(ov_child, "Collider.radius"),
                             );
                         }
                     }
@@ -824,7 +840,7 @@ impl EditorApp {
                         "Offset",
                         &mut c.offset,
                         0.5,
-                        prefab_ov.contains("Collider.offset"),
+                        prefab_ov.has(ov_child, "Collider.offset"),
                     );
                 });
                 }
@@ -837,7 +853,7 @@ impl EditorApp {
                     "Camera",
                     Some(cam.active),
                     true,
-                    prefab_ov.component("Camera"),
+                    prefab_ov.component_at(ov_child, "Camera"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_camera = Some(en);
@@ -889,7 +905,7 @@ impl EditorApp {
                         "Lerp",
                         &mut cam.lerp,
                         0.01,
-                        prefab_ov.contains("Camera.lerp"),
+                        prefab_ov.has(ov_child, "Camera.lerp"),
                     );
                     if cam.lerp < 0.0 {
                         cam.lerp = 0.0;
@@ -909,7 +925,7 @@ impl EditorApp {
                     "GridMover",
                     Some(g.enabled),
                     true,
-                    prefab_ov.component("GridMover"),
+                    prefab_ov.component_at(ov_child, "GridMover"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_grid_mover = Some(en);
@@ -924,7 +940,7 @@ impl EditorApp {
                         "Cell",
                         &mut g.cell,
                         0.25,
-                        prefab_ov.contains("GridMover.cell"),
+                        prefab_ov.has(ov_child, "GridMover.cell"),
                     );
                     if g.cell < 0.01 {
                         g.cell = 0.01;
@@ -934,7 +950,7 @@ impl EditorApp {
                         "Speed",
                         &mut g.speed,
                         0.5,
-                        prefab_ov.contains("GridMover.speed"),
+                        prefab_ov.has(ov_child, "GridMover.speed"),
                     );
                     if g.speed < 0.0 {
                         g.speed = 0.0;
@@ -991,7 +1007,7 @@ impl EditorApp {
                     "AudioSource",
                     Some(a.enabled),
                     true,
-                    prefab_ov.component("AudioSource"),
+                    prefab_ov.component_at(ov_child, "AudioSource"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_audio_source = Some(en);
@@ -1031,7 +1047,7 @@ impl EditorApp {
                         "Volume",
                         &mut a.volume,
                         0.01,
-                        prefab_ov.contains("AudioSource.volume"),
+                        prefab_ov.has(ov_child, "AudioSource.volume"),
                     );
                     if a.volume < 0.0 {
                         a.volume = 0.0;
@@ -1067,7 +1083,7 @@ impl EditorApp {
                     "Text",
                     Some(t.enabled),
                     true,
-                    prefab_ov.component("Text"),
+                    prefab_ov.component_at(ov_child, "Text"),
                 );
                 if let Some(en) = hdr.toggle {
                     toggle_text = Some(en);
@@ -1081,7 +1097,7 @@ impl EditorApp {
                             theme::inspector_label_ov(
                                 ui,
                                 "Text",
-                                prefab_ov.contains("Text.text"),
+                                prefab_ov.has(ov_child, "Text.text"),
                             );
                             let edit_w = (ui.available_width() - 8.0).clamp(80.0, 220.0);
                             if ui
@@ -1100,7 +1116,7 @@ impl EditorApp {
                             "Size",
                             &mut t.size,
                             0.5,
-                            prefab_ov.contains("Text.size"),
+                            prefab_ov.has(ov_child, "Text.size"),
                         );
                         if t.size < 1.0 {
                             t.size = 1.0;
@@ -1109,7 +1125,7 @@ impl EditorApp {
                             theme::inspector_label_ov(
                                 ui,
                                 "Color",
-                                prefab_ov.contains("Text.color"),
+                                prefab_ov.has(ov_child, "Text.color"),
                             );
                             let mut col = egui::Color32::from_rgba_unmultiplied(
                                 t.color[0],
@@ -1129,7 +1145,7 @@ impl EditorApp {
                             theme::inspector_label_ov(
                                 ui,
                                 "Align",
-                                prefab_ov.contains("Text.align"),
+                                prefab_ov.has(ov_child, "Text.align"),
                             );
                             egui::ComboBox::from_id_salt("text_align")
                                 .selected_text(current.to_runtime().as_str())
@@ -1162,8 +1178,8 @@ impl EditorApp {
                             &layer_names,
                             &mut t.sorting_layer,
                             &mut t.z,
-                            prefab_ov.contains("Text.sorting_layer"),
-                            prefab_ov.contains("Text.z"),
+                            prefab_ov.has(ov_child, "Text.sorting_layer"),
+                            prefab_ov.has(ov_child, "Text.z"),
                         );
                         ui.label(
                             RichText::new("Host + Wii GX 8×8 bitmap HUD")
@@ -1572,7 +1588,7 @@ impl EditorApp {
                 if ui.button("Save as Prefab…").clicked() {
                     self.save_entity_as_prefab(&sel);
                 }
-                theme::muted(ui, "Writes assets/prefabs/<name>.prefab.json");
+                theme::muted(ui, "Writes assets/prefabs/<name>.prefab.json (includes Hierarchy children)");
             });
         }
     }
