@@ -1,12 +1,13 @@
-//! Prefab instance links + override detection (Unity analogue, one-entity prefabs).
+//! Prefab instance links + override detection (Unity analogue, nested prefabs).
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use serde::Serialize;
 
 use crate::scene::{
-    display_sorting_layer, EntityData, Prefab, SceneAudioSource, SceneCamera, SceneCollider,
+    display_sorting_layer, EntityData, Prefab, Scene, SceneAudioSource, SceneCamera, SceneCollider,
     SceneComponents, SceneDisc, SceneGridMover, SceneSprite, SceneText, SceneTilemap,
     SceneTransform,
 };
@@ -94,12 +95,31 @@ impl PrefabOverrides {
         self.fields.iter().any(|f| f == key)
     }
 
+    /// Override key for a root field (`key`) or nested child (`ChildName/key`).
+    pub fn path(child: Option<&str>, key: &str) -> String {
+        match child {
+            Some(c) if !c.is_empty() => format!("{c}/{key}"),
+            _ => key.to_string(),
+        }
+    }
+
+    /// True if `key` (optionally under prefab-local `child`) is overridden.
+    pub fn has(&self, child: Option<&str>, key: &str) -> bool {
+        self.contains(&Self::path(child, key))
+    }
+
     /// True if the component is added/removed or any of its fields differ.
     pub fn component(&self, name: &str) -> bool {
-        let prefix = format!("{name}.");
+        self.component_at(None, name)
+    }
+
+    /// Component override on the root or under prefab-local `child` (`Eye/Disc.radius`).
+    pub fn component_at(&self, child: Option<&str>, name: &str) -> bool {
+        let exact = Self::path(child, name);
+        let prefix = format!("{exact}.");
         self.fields
             .iter()
-            .any(|f| f == name || f.starts_with(&prefix))
+            .any(|f| f == &exact || f.starts_with(&prefix))
     }
 }
 
@@ -112,6 +132,173 @@ pub fn prefab_overrides(instance: &EntityData, prefab: &EntityData) -> PrefabOve
     }
     push_components(&mut fields, &instance.components, &prefab.components);
     PrefabOverrides { fields }
+}
+
+/// Map prefab-local entity names → instance entity names for a prefab instance root.
+///
+/// Matching prefers exact names, then `Name_N` unique suffixes, then first unpaired child.
+pub fn match_prefab_instance(
+    scene: &Scene,
+    instance_root: &str,
+    prefab: &Prefab,
+) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    map.insert(prefab.entity.name.clone(), instance_root.to_string());
+    let mut remaining: Vec<&EntityData> = prefab.children.iter().collect();
+    let mut safety = 0usize;
+    while !remaining.is_empty() && safety < prefab.children.len().saturating_add(8) {
+        safety += 1;
+        let before = remaining.len();
+        remaining.retain(|child| {
+            let prefab_parent = child
+                .parent
+                .as_deref()
+                .unwrap_or(prefab.entity.name.as_str());
+            let Some(inst_parent) = map.get(prefab_parent).cloned() else {
+                return true;
+            };
+            let candidates = scene.child_names(&inst_parent);
+            if let Some(inst_name) = pick_matching_child(&candidates, &child.name, &map) {
+                map.insert(child.name.clone(), inst_name);
+                false
+            } else {
+                true
+            }
+        });
+        if remaining.len() == before {
+            break;
+        }
+    }
+    map
+}
+
+fn pick_matching_child(
+    candidates: &[String],
+    prefab_name: &str,
+    map: &HashMap<String, String>,
+) -> Option<String> {
+    let used: HashSet<&String> = map.values().collect();
+    if let Some(c) = candidates
+        .iter()
+        .find(|c| c.as_str() == prefab_name && !used.contains(c))
+    {
+        return Some(c.clone());
+    }
+    let prefix = format!("{prefab_name}_");
+    if let Some(c) = candidates.iter().find(|c| {
+        !used.contains(c)
+            && c.starts_with(&prefix)
+            && c[prefix.len()..].chars().all(|ch| ch.is_ascii_digit())
+    }) {
+        return Some(c.clone());
+    }
+    candidates.iter().find(|c| !used.contains(c)).cloned()
+}
+
+/// Collect descendant entity names under `root` (not including root), breadth-first.
+pub fn collect_descendants(scene: &Scene, root: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = scene.child_names(root);
+    let mut i = 0usize;
+    while i < stack.len() {
+        let n = stack[i].clone();
+        out.push(n.clone());
+        for c in scene.child_names(&n) {
+            if !stack.iter().any(|s| s == &c) {
+                stack.push(c);
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Walk up from `name` and return the nearest ancestor (or self) with a prefab link.
+pub fn find_prefab_instance_root<'a>(scene: &'a Scene, name: &str) -> Option<&'a EntityData> {
+    let mut current = name.to_string();
+    for _ in 0..=scene.entities.len() {
+        let ent = scene.find_entity(&current)?;
+        if ent.prefab.as_ref().is_some_and(|s| !s.is_empty()) {
+            return Some(ent);
+        }
+        match &ent.parent {
+            Some(p) => current = p.clone(),
+            None => return None,
+        }
+    }
+    None
+}
+
+/// Prefab-local name for an instance entity under a matched instance root, if any.
+pub fn prefab_local_name(
+    scene: &Scene,
+    instance_root: &str,
+    prefab: &Prefab,
+    instance_entity: &str,
+) -> Option<String> {
+    let map = match_prefab_instance(scene, instance_root, prefab);
+    map.into_iter()
+        .find(|(_, inst)| inst == instance_entity)
+        .map(|(local, _)| local)
+}
+
+/// Compare a prefab instance tree to the asset (root fields unprefixed; children as `Child/field`).
+pub fn prefab_tree_overrides(
+    scene: &Scene,
+    instance_root: &str,
+    prefab: &Prefab,
+) -> PrefabOverrides {
+    let Some(inst_root) = scene.find_entity(instance_root) else {
+        return PrefabOverrides::default();
+    };
+    let map = match_prefab_instance(scene, instance_root, prefab);
+    let mut fields = Vec::new();
+    fields.extend(prefab_overrides(inst_root, &prefab.entity).fields);
+    for child in &prefab.children {
+        let Some(inst_name) = map.get(&child.name) else {
+            // Missing nested child counts as a structural override marker.
+            fields.push(format!("{}/<missing>", child.name));
+            continue;
+        };
+        let Some(inst) = scene.find_entity(inst_name) else {
+            fields.push(format!("{}/<missing>", child.name));
+            continue;
+        };
+        for f in prefab_overrides(inst, child).fields {
+            fields.push(format!("{}/{f}", child.name));
+        }
+    }
+    PrefabOverrides { fields }
+}
+
+/// Topo-order prefab children so parents appear before their descendants.
+pub fn topo_prefab_children(prefab: &Prefab) -> Vec<&EntityData> {
+    let root = prefab.entity.name.as_str();
+    let mut remaining: Vec<&EntityData> = prefab.children.iter().collect();
+    let mut ordered = Vec::with_capacity(remaining.len());
+    let mut ready = HashSet::new();
+    ready.insert(root.to_string());
+    let mut safety = 0usize;
+    while !remaining.is_empty() && safety < prefab.children.len().saturating_add(8) {
+        safety += 1;
+        let before = remaining.len();
+        remaining.retain(|child| {
+            let parent = child.parent.as_deref().unwrap_or(root);
+            if ready.contains(parent) {
+                ready.insert(child.name.clone());
+                ordered.push(*child);
+                false
+            } else {
+                true
+            }
+        });
+        if remaining.len() == before {
+            // Cycle / missing parent — append rest as-is.
+            ordered.extend(remaining);
+            break;
+        }
+    }
+    ordered
 }
 
 fn push_transform(out: &mut Vec<String>, a: &SceneTransform, b: &SceneTransform) {
@@ -476,5 +663,122 @@ mod tests {
         inst.components.sprite.as_mut().unwrap().pivot = Some([0.0, 1.0]);
         let ov = prefab_overrides(&inst, &prefab);
         assert!(ov.contains("Sprite.pivot"), "{ov:?}");
+    }
+
+    #[test]
+    fn old_single_entity_prefab_json_loads() {
+        let json = r#"{"name":"Ghost","transform":{"translation":[1.0,2.0,0.0]},"components":{},"tag":0}"#;
+        let pf: Prefab = serde_json::from_str(json).unwrap();
+        assert_eq!(pf.entity.name, "Ghost");
+        assert!(pf.children.is_empty());
+        assert_eq!(pf.entity.transform.translation[0], 1.0);
+    }
+
+    #[test]
+    fn nested_prefab_json_roundtrip() {
+        let pf = Prefab {
+            entity: EntityData {
+                name: "Ghost".into(),
+                parent: None,
+                transform: SceneTransform::from_xy(10.0, 20.0),
+                components: SceneComponents {
+                    disc: Some(SceneDisc {
+                        radius: 8.0,
+                        color: [255, 0, 0, 255],
+                        z: 0.0,
+                        sorting_layer: String::new(),
+                        enabled: true,
+                    }),
+                    ..Default::default()
+                },
+                tag: 0,
+                prefab: None,
+            },
+            children: vec![EntityData {
+                name: "Eye".into(),
+                parent: Some("Ghost".into()),
+                transform: SceneTransform::from_xy(4.0, -2.0),
+                components: SceneComponents {
+                    disc: Some(SceneDisc {
+                        radius: 2.0,
+                        color: [255, 255, 255, 255],
+                        z: 1.0,
+                        sorting_layer: String::new(),
+                        enabled: true,
+                    }),
+                    ..Default::default()
+                },
+                tag: 0,
+                prefab: None,
+            }],
+        };
+        let text = serde_json::to_string(&pf).unwrap();
+        assert!(text.contains("\"children\""), "{text}");
+        let back: Prefab = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.children.len(), 1);
+        assert_eq!(back.children[0].name, "Eye");
+        assert_eq!(back.children[0].parent.as_deref(), Some("Ghost"));
+    }
+
+    #[test]
+    fn tree_overrides_use_child_prefix() {
+        let mut scene = Scene::new("t");
+        scene.entities.push(EntityData {
+            name: "Ghost_1".into(),
+            parent: None,
+            transform: SceneTransform::from_xy(0.0, 0.0),
+            components: Default::default(),
+            tag: 0,
+            prefab: Some("assets/prefabs/ghost.prefab.json".into()),
+        });
+        scene.entities.push(EntityData {
+            name: "Eye_1".into(),
+            parent: Some("Ghost_1".into()),
+            transform: SceneTransform::from_xy(9.0, 0.0),
+            components: SceneComponents {
+                disc: Some(SceneDisc {
+                    radius: 3.0,
+                    color: [255, 255, 255, 255],
+                    z: 0.0,
+                    sorting_layer: String::new(),
+                    enabled: true,
+                }),
+                ..Default::default()
+            },
+            tag: 0,
+            prefab: None,
+        });
+        let prefab = Prefab {
+            entity: EntityData {
+                name: "Ghost".into(),
+                parent: None,
+                transform: SceneTransform::from_xy(0.0, 0.0),
+                components: Default::default(),
+                tag: 0,
+                prefab: None,
+            },
+            children: vec![EntityData {
+                name: "Eye".into(),
+                parent: Some("Ghost".into()),
+                transform: SceneTransform::from_xy(4.0, 0.0),
+                components: SceneComponents {
+                    disc: Some(SceneDisc {
+                        radius: 2.0,
+                        color: [255, 255, 255, 255],
+                        z: 0.0,
+                        sorting_layer: String::new(),
+                        enabled: true,
+                    }),
+                    ..Default::default()
+                },
+                tag: 0,
+                prefab: None,
+            }],
+        };
+        let ov = prefab_tree_overrides(&scene, "Ghost_1", &prefab);
+        assert!(ov.has(Some("Eye"), "transform.position"), "{ov:?}");
+        assert!(ov.has(Some("Eye"), "Disc.radius"), "{ov:?}");
+        assert!(ov.component_at(Some("Eye"), "Disc"), "{ov:?}");
+        assert!(!ov.contains("transform.position"));
     }
 }
