@@ -1033,24 +1033,72 @@ impl EditorApp {
         }
     }
 
+    /// Create a prefab variant from the selected instance (base = instance link).
+    pub(crate) fn create_variant_from_selected(&mut self, name: &str, as_name: &str) {
+        match wiimaker_scene::variant_from_instance(&self.game_dir, &self.scene, name) {
+            Ok(mut variant) => {
+                let stem = if as_name.is_empty() {
+                    format!(
+                        "{}_Variant",
+                        wiimaker_scene::prefab_stem(variant.base.as_deref().unwrap_or(name))
+                    )
+                } else {
+                    as_name.to_string()
+                };
+                let dest = self
+                    .game_dir
+                    .join("assets")
+                    .join("prefabs")
+                    .join(format!("{stem}.prefab.json"));
+                if let Err(e) =
+                    wiimaker_scene::refresh_variant_overrides(&self.game_dir, &mut variant)
+                {
+                    self.status = format!("variant overrides failed: {e}");
+                    return;
+                }
+                match wiimaker_scene::save_prefab(&dest, &variant) {
+                    Ok(()) => {
+                        let link = format!("assets/prefabs/{stem}.prefab.json");
+                        self.push_undo();
+                        if let Err(e) =
+                            wiimaker_scene::attach_prefab_instance(&mut self.scene, name, &link)
+                        {
+                            self.status = format!("variant saved, link failed: {e}");
+                        } else {
+                            self.sync_baseline();
+                            self.mark_dirty();
+                            self.status = format!("variant → {link}");
+                        }
+                        self.refresh_project_tree();
+                    }
+                    Err(e) => self.status = format!("save variant failed: {e}"),
+                }
+            }
+            Err(e) => self.status = format!("create variant failed: {e}"),
+        }
+    }
+
     pub(crate) fn instantiate_prefab_rel(&mut self, rel: &std::path::Path) {
         let abs = self.game_dir.join(rel);
         match wiimaker_scene::load_prefab(&abs) {
-            Ok(prefab) => {
-                self.push_undo();
-                let source = rel.to_string_lossy().replace('\\', "/");
-                let new_name = wiimaker_scene::instantiate_prefab(
-                    &mut self.scene,
-                    &prefab,
-                    &source,
-                    Some(320.0),
-                    Some(240.0),
-                );
-                self.select(Some(new_name.clone()));
-                self.sync_baseline();
-                self.mark_dirty();
-                self.status = format!("instantiated → {new_name}");
-            }
+            Ok(raw) => match wiimaker_scene::resolve_prefab(&self.game_dir, &raw) {
+                Ok(prefab) => {
+                    self.push_undo();
+                    let source = rel.to_string_lossy().replace('\\', "/");
+                    let new_name = wiimaker_scene::instantiate_prefab(
+                        &mut self.scene,
+                        &prefab,
+                        &source,
+                        Some(320.0),
+                        Some(240.0),
+                    );
+                    self.select(Some(new_name.clone()));
+                    self.sync_baseline();
+                    self.mark_dirty();
+                    self.status = format!("instantiated → {new_name}");
+                }
+                Err(e) => self.status = format!("resolve prefab failed: {e}"),
+            },
             Err(e) => self.status = format!("load prefab failed: {e}"),
         }
     }
@@ -1069,6 +1117,13 @@ impl EditorApp {
                     {
                         let _ = self.undo.undo(&mut self.scene);
                         self.status = format!("apply prefab failed: {e}");
+                        return;
+                    }
+                    if let Err(e) =
+                        wiimaker_scene::refresh_variant_overrides(&self.game_dir, &mut prefab)
+                    {
+                        let _ = self.undo.undo(&mut self.scene);
+                        self.status = format!("variant overrides failed: {e}");
                         return;
                     }
                     if let Err(e) = wiimaker_scene::save_prefab(&path, &prefab) {

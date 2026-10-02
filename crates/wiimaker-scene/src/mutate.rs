@@ -208,7 +208,12 @@ pub fn entity_to_prefab(scene: &Scene, name: &str) -> Result<crate::scene::Prefa
         child.prefab = None;
         children.push(child);
     }
-    Ok(crate::scene::Prefab { entity, children })
+    Ok(crate::scene::Prefab {
+        entity,
+        children,
+        base: None,
+        overrides: Vec::new(),
+    })
 }
 
 /// Record `source` (stem or relative `*.prefab.json`) on an existing entity.

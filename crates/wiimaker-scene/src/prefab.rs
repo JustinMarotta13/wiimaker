@@ -1,4 +1,4 @@
-//! Prefab instance links + override detection (Unity analogue, nested prefabs).
+//! Prefab instance links + override detection (Unity analogue, nested + variants).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -65,14 +65,15 @@ pub fn resolve_prefab_asset(game_dir: &Path, source: &str) -> Result<PathBuf> {
     )
 }
 
-/// Load the prefab asset linked on `entity`.
+/// Load the prefab asset linked on `entity`, resolving variants (base + overrides).
 pub fn load_prefab_for_instance(game_dir: &Path, entity: &EntityData) -> Result<Prefab> {
     let src = entity
         .prefab
         .as_deref()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow::anyhow!("entity '{}' is not a prefab instance", entity.name))?;
-    crate::scene::load_prefab(&resolve_prefab_asset(game_dir, src)?)
+    let raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, src)?)?;
+    resolve_prefab(game_dir, &raw)
 }
 
 /// Overridden property paths vs the prefab asset (`transform.position`, `Disc.radius`, …).
@@ -299,6 +300,408 @@ pub fn topo_prefab_children(prefab: &Prefab) -> Vec<&EntityData> {
         }
     }
     ordered
+}
+
+/// Diff two prefab assets (root fields unprefixed; children as `Child/field`).
+pub fn prefab_asset_overrides(variant: &Prefab, base: &Prefab) -> PrefabOverrides {
+    let mut fields = prefab_overrides(&variant.entity, &base.entity).fields;
+    let base_children: HashMap<&str, &EntityData> = base
+        .children
+        .iter()
+        .map(|c| (c.name.as_str(), c))
+        .collect();
+    let mut seen = HashSet::new();
+    for child in &variant.children {
+        seen.insert(child.name.as_str());
+        match base_children.get(child.name.as_str()) {
+            Some(b) => {
+                for f in prefab_overrides(child, b).fields {
+                    fields.push(format!("{}/{f}", child.name));
+                }
+            }
+            None => fields.push(format!("{}/<added>", child.name)),
+        }
+    }
+    for b in &base.children {
+        if !seen.contains(b.name.as_str()) {
+            fields.push(format!("{}/<missing>", b.name));
+        }
+    }
+    PrefabOverrides { fields }
+}
+
+/// Resolve a prefab for instantiate / override detect: ordinary assets pass through;
+/// variants apply `overrides` on top of the recursively resolved base.
+pub fn resolve_prefab(game_dir: &Path, prefab: &Prefab) -> Result<Prefab> {
+    resolve_prefab_inner(game_dir, prefab, &mut Vec::new())
+}
+
+fn resolve_prefab_inner(
+    game_dir: &Path,
+    prefab: &Prefab,
+    stack: &mut Vec<String>,
+) -> Result<Prefab> {
+    let Some(base_src) = prefab.base.as_deref().filter(|s| !s.is_empty()) else {
+        return Ok(Prefab {
+            entity: prefab.entity.clone(),
+            children: prefab.children.clone(),
+            base: None,
+            overrides: Vec::new(),
+        });
+    };
+    let link = normalize_prefab_source(base_src);
+    if stack.iter().any(|s| s == &link) {
+        bail!("prefab variant cycle involving {link}");
+    }
+    stack.push(link.clone());
+    let base_raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, &link)?)?;
+    let mut resolved = resolve_prefab_inner(game_dir, &base_raw, stack)?;
+    stack.pop();
+
+    // Keep variant root name (Unity allows renaming the variant root).
+    let variant_root_name = prefab.entity.name.clone();
+    let base_root_name = resolved.entity.name.clone();
+
+    let paths = if prefab.overrides.is_empty() {
+        // Hand-edited / legacy: treat full tree diff as overrides.
+        prefab_asset_overrides(prefab, &resolved).fields
+    } else {
+        prefab.overrides.clone()
+    };
+    apply_override_paths(&mut resolved, prefab, &paths)?;
+
+    if variant_root_name != base_root_name {
+        // Remap child parent pointers that still name the base root.
+        for child in &mut resolved.children {
+            if child.parent.as_deref() == Some(base_root_name.as_str()) {
+                child.parent = Some(variant_root_name.clone());
+            }
+        }
+        resolved.entity.name = variant_root_name;
+    }
+    resolved.base = None;
+    resolved.overrides.clear();
+    Ok(resolved)
+}
+
+/// Recompute `overrides` for a variant asset vs its resolved base. No-op if not a variant.
+pub fn refresh_variant_overrides(game_dir: &Path, prefab: &mut Prefab) -> Result<()> {
+    let Some(base_src) = prefab.base.clone().filter(|s| !s.is_empty()) else {
+        prefab.overrides.clear();
+        return Ok(());
+    };
+    let base_raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, &base_src)?)?;
+    let base = resolve_prefab(game_dir, &base_raw)?;
+    // Compare using matching root names for clean paths.
+    let mut cmp = prefab.clone();
+    let base_name = base.entity.name.clone();
+    if cmp.entity.name != base_name {
+        let old = cmp.entity.name.clone();
+        cmp.entity.name = base_name.clone();
+        for child in &mut cmp.children {
+            if child.parent.as_deref() == Some(old.as_str()) {
+                child.parent = Some(base_name.clone());
+            }
+        }
+    }
+    prefab.overrides = prefab_asset_overrides(&cmp, &base).fields;
+    Ok(())
+}
+
+/// Create a prefab variant asset from a base (resolved snapshot, empty overrides).
+pub fn create_prefab_variant(
+    game_dir: &Path,
+    base_source: &str,
+    as_name: &str,
+) -> Result<(PathBuf, Prefab)> {
+    let base_link = normalize_prefab_source(base_source);
+    if base_link.is_empty() {
+        bail!("base prefab source cannot be empty");
+    }
+    let stem = as_name.trim();
+    if stem.is_empty() {
+        bail!("variant name cannot be empty");
+    }
+    let base_raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, &base_link)?)?;
+    let resolved = resolve_prefab(game_dir, &base_raw)?;
+    let variant = Prefab {
+        entity: resolved.entity,
+        children: resolved.children,
+        base: Some(base_link),
+        overrides: Vec::new(),
+    };
+    let dest = game_dir
+        .join("assets")
+        .join("prefabs")
+        .join(format!("{stem}.prefab.json"));
+    crate::scene::save_prefab(&dest, &variant)?;
+    Ok((dest, variant))
+}
+
+/// Build a variant Prefab from a scene instance (base = instance link; overrides vs base).
+pub fn variant_from_instance(
+    game_dir: &Path,
+    scene: &crate::scene::Scene,
+    instance_root: &str,
+) -> Result<Prefab> {
+    let ent = scene
+        .find_entity(instance_root)
+        .ok_or_else(|| anyhow::anyhow!("entity '{instance_root}' not found"))?;
+    let base_src = ent
+        .prefab
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("entity '{instance_root}' is not a prefab instance (need a base link)")
+        })?;
+    let base_link = normalize_prefab_source(base_src);
+    let mut variant = crate::mutate::entity_to_prefab(scene, instance_root)?;
+    variant.base = Some(base_link);
+    refresh_variant_overrides(game_dir, &mut variant)?;
+    Ok(variant)
+}
+
+fn apply_override_paths(dest: &mut Prefab, src: &Prefab, paths: &[String]) -> Result<()> {
+    for path in paths {
+        if path.ends_with("/<missing>") || path.ends_with("/<added>") {
+            let child_name = path.rsplit_once('/').map(|(c, _)| c).unwrap_or(path);
+            if path.ends_with("/<added>") {
+                if let Some(child) = src.children.iter().find(|c| c.name == child_name) {
+                    if !dest.children.iter().any(|c| c.name == child_name) {
+                        let mut c = child.clone();
+                        if c.parent.is_none() {
+                            c.parent = Some(dest.entity.name.clone());
+                        }
+                        dest.children.push(c);
+                    }
+                }
+            }
+            // <missing>: leave base child (variant removed it) — drop from dest.
+            if path.ends_with("/<missing>") {
+                dest.children.retain(|c| c.name != child_name);
+            }
+            continue;
+        }
+        if let Some((child_name, field)) = path.split_once('/') {
+            ensure_child_from_src(dest, src, child_name);
+            let Some(dest_child) = dest.children.iter_mut().find(|c| c.name == child_name) else {
+                continue;
+            };
+            let Some(src_child) = src.children.iter().find(|c| c.name == child_name) else {
+                continue;
+            };
+            copy_entity_field(dest_child, src_child, field);
+        } else {
+            copy_entity_field(&mut dest.entity, &src.entity, path);
+        }
+    }
+    Ok(())
+}
+
+fn ensure_child_from_src(dest: &mut Prefab, src: &Prefab, child_name: &str) {
+    if dest.children.iter().any(|c| c.name == child_name) {
+        return;
+    }
+    if let Some(child) = src.children.iter().find(|c| c.name == child_name) {
+        let mut c = child.clone();
+        if c.parent.is_none() {
+            c.parent = Some(dest.entity.name.clone());
+        }
+        dest.children.push(c);
+    }
+}
+
+fn copy_entity_field(dest: &mut EntityData, src: &EntityData, field: &str) {
+    match field {
+        "transform.position" => dest.transform.translation = src.transform.translation,
+        "transform.rotation" => dest.transform.rotation = src.transform.rotation,
+        "transform.scale" => dest.transform.scale = src.transform.scale,
+        "tag" => dest.tag = src.tag,
+        "Sprite" => dest.components.sprite = src.components.sprite.clone(),
+        "Sprite.texture" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.sprite, &src.components.sprite) {
+                d.texture = s.texture.clone();
+            } else {
+                dest.components.sprite = src.components.sprite.clone();
+            }
+        }
+        "Sprite.size" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.sprite, &src.components.sprite) {
+                d.size = s.size;
+            }
+        }
+        "Sprite.color" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.sprite, &src.components.sprite) {
+                d.color = s.color;
+            }
+        }
+        "Sprite.z" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.sprite, &src.components.sprite) {
+                d.z = s.z;
+            }
+        }
+        "Sprite.sorting_layer" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.sprite, &src.components.sprite) {
+                d.sorting_layer = s.sorting_layer.clone();
+            }
+        }
+        "Sprite.enabled" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.sprite, &src.components.sprite) {
+                d.enabled = s.enabled;
+            }
+        }
+        "Sprite.pivot" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.sprite, &src.components.sprite) {
+                d.pivot = s.pivot;
+            }
+        }
+        "Disc" => dest.components.disc = src.components.disc.clone(),
+        "Disc.radius" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.disc, &src.components.disc) {
+                d.radius = s.radius;
+            } else {
+                dest.components.disc = src.components.disc.clone();
+            }
+        }
+        "Disc.color" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.disc, &src.components.disc) {
+                d.color = s.color;
+            }
+        }
+        "Disc.z" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.disc, &src.components.disc) {
+                d.z = s.z;
+            }
+        }
+        "Disc.sorting_layer" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.disc, &src.components.disc) {
+                d.sorting_layer = s.sorting_layer.clone();
+            }
+        }
+        "Disc.enabled" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.disc, &src.components.disc) {
+                d.enabled = s.enabled;
+            }
+        }
+        "Camera" => dest.components.camera = src.components.camera.clone(),
+        "Camera.active" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.camera, &src.components.camera) {
+                d.active = s.active;
+            }
+        }
+        "Camera.follow" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.camera, &src.components.camera) {
+                d.follow = s.follow.clone();
+            }
+        }
+        "Camera.lerp" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.camera, &src.components.camera) {
+                d.lerp = s.lerp;
+            }
+        }
+        "Tilemap" => dest.components.tilemap = src.components.tilemap.clone(),
+        "Tilemap.cell" | "Tilemap.origin" | "Tilemap.size" | "Tilemap.cells" | "Tilemap.solid"
+        | "Tilemap.palette" | "Tilemap.z" | "Tilemap.sorting_layer" | "Tilemap.enabled" => {
+            dest.components.tilemap = src.components.tilemap.clone();
+        }
+        "Collider" => dest.components.collider = src.components.collider.clone(),
+        "Collider.kind" | "Collider.size" | "Collider.radius" | "Collider.offset"
+        | "Collider.solid" | "Collider.trigger" | "Collider.filter_tag" | "Collider.enabled" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.collider, &src.components.collider) {
+                match field {
+                    "Collider.kind" => d.kind = s.kind,
+                    "Collider.size" => d.size = s.size,
+                    "Collider.radius" => d.radius = s.radius,
+                    "Collider.offset" => d.offset = s.offset,
+                    "Collider.solid" => d.solid = s.solid,
+                    "Collider.trigger" => d.trigger = s.trigger,
+                    "Collider.filter_tag" => d.filter_tag = s.filter_tag,
+                    "Collider.enabled" => d.enabled = s.enabled,
+                    _ => {}
+                }
+            } else {
+                dest.components.collider = src.components.collider.clone();
+            }
+        }
+        "Animation" => dest.components.animation = src.components.animation.clone(),
+        "Animation.clip" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.animation, &src.components.animation)
+            {
+                d.clip = s.clip.clone();
+            }
+        }
+        "Animation.fps" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.animation, &src.components.animation)
+            {
+                d.fps = s.fps;
+            }
+        }
+        "Animation.loop" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.animation, &src.components.animation)
+            {
+                d.loop_ = s.loop_;
+            }
+        }
+        "Animation.enabled" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.animation, &src.components.animation)
+            {
+                d.enabled = s.enabled;
+            }
+        }
+        "GridMover" => dest.components.grid_mover = src.components.grid_mover.clone(),
+        "GridMover.cell" | "GridMover.speed" | "GridMover.queued_dir" | "GridMover.enabled" => {
+            if let (Some(d), Some(s)) =
+                (&mut dest.components.grid_mover, &src.components.grid_mover)
+            {
+                match field {
+                    "GridMover.cell" => d.cell = s.cell,
+                    "GridMover.speed" => d.speed = s.speed,
+                    "GridMover.queued_dir" => d.queued_dir = s.queued_dir,
+                    "GridMover.enabled" => d.enabled = s.enabled,
+                    _ => {}
+                }
+            } else {
+                dest.components.grid_mover = src.components.grid_mover.clone();
+            }
+        }
+        "AudioSource" => dest.components.audio_source = src.components.audio_source.clone(),
+        "AudioSource.clip" | "AudioSource.volume" | "AudioSource.play_on_awake"
+        | "AudioSource.enabled" => {
+            if let (Some(d), Some(s)) = (
+                &mut dest.components.audio_source,
+                &src.components.audio_source,
+            ) {
+                match field {
+                    "AudioSource.clip" => d.clip = s.clip.clone(),
+                    "AudioSource.volume" => d.volume = s.volume,
+                    "AudioSource.play_on_awake" => d.play_on_awake = s.play_on_awake,
+                    "AudioSource.enabled" => d.enabled = s.enabled,
+                    _ => {}
+                }
+            } else {
+                dest.components.audio_source = src.components.audio_source.clone();
+            }
+        }
+        "Text" => dest.components.text = src.components.text.clone(),
+        "Text.text" | "Text.size" | "Text.color" | "Text.align" | "Text.z"
+        | "Text.sorting_layer" | "Text.enabled" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.text, &src.components.text) {
+                match field {
+                    "Text.text" => d.text = s.text.clone(),
+                    "Text.size" => d.size = s.size,
+                    "Text.color" => d.color = s.color,
+                    "Text.align" => d.align = s.align,
+                    "Text.z" => d.z = s.z,
+                    "Text.sorting_layer" => d.sorting_layer = s.sorting_layer.clone(),
+                    "Text.enabled" => d.enabled = s.enabled,
+                    _ => {}
+                }
+            } else {
+                dest.components.text = src.components.text.clone();
+            }
+        }
+        _ => {}
+    }
 }
 
 fn push_transform(out: &mut Vec<String>, a: &SceneTransform, b: &SceneTransform) {
@@ -711,6 +1114,8 @@ mod tests {
                 tag: 0,
                 prefab: None,
             }],
+            base: None,
+            overrides: Vec::new(),
         };
         let text = serde_json::to_string(&pf).unwrap();
         assert!(text.contains("\"children\""), "{text}");
@@ -774,11 +1179,55 @@ mod tests {
                 tag: 0,
                 prefab: None,
             }],
+            base: None,
+            overrides: Vec::new(),
         };
         let ov = prefab_tree_overrides(&scene, "Ghost_1", &prefab);
         assert!(ov.has(Some("Eye"), "transform.position"), "{ov:?}");
         assert!(ov.has(Some("Eye"), "Disc.radius"), "{ov:?}");
         assert!(ov.component_at(Some("Eye"), "Disc"), "{ov:?}");
         assert!(!ov.contains("transform.position"));
+    }
+
+    #[test]
+    fn old_prefab_without_base_still_loads() {
+        let json = r#"{"name":"Ghost","transform":{"translation":[1.0,2.0,0.0]},"components":{},"tag":0}"#;
+        let pf: Prefab = serde_json::from_str(json).unwrap();
+        assert!(!pf.is_variant());
+        assert!(pf.base.is_none());
+        assert!(pf.overrides.is_empty());
+    }
+
+    #[test]
+    fn variant_json_roundtrip() {
+        let pf = Prefab {
+            entity: EntityData {
+                name: "GhostBlue".into(),
+                parent: None,
+                transform: SceneTransform::from_xy(0.0, 0.0),
+                components: SceneComponents {
+                    disc: Some(SceneDisc {
+                        radius: 8.0,
+                        color: [0, 0, 255, 255],
+                        z: 0.0,
+                        sorting_layer: String::new(),
+                        enabled: true,
+                    }),
+                    ..Default::default()
+                },
+                tag: 0,
+                prefab: None,
+            },
+            children: Vec::new(),
+            base: Some("assets/prefabs/ghost.prefab.json".into()),
+            overrides: vec!["Disc.color".into()],
+        };
+        let text = serde_json::to_string(&pf).unwrap();
+        assert!(text.contains("\"base\""), "{text}");
+        assert!(text.contains("\"overrides\""), "{text}");
+        let back: Prefab = serde_json::from_str(&text).unwrap();
+        assert!(back.is_variant());
+        assert_eq!(back.base.as_deref(), Some("assets/prefabs/ghost.prefab.json"));
+        assert_eq!(back.overrides, vec!["Disc.color".to_string()]);
     }
 }
