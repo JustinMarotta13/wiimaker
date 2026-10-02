@@ -17,27 +17,27 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
 | Console | editor Console: Search (session-only, Hierarchy chrome) + Info/Warn/Error toggles · Clear · Doctor |
-| Prefab | `.prefab.json` · root + optional `children[]` (nested) · instance `prefab` link on **root only** · Save as Prefab / Instantiate / Apply / Revert / Unpack Completely · orange-bold overrides (`Child/field`) |
+| Prefab | `.prefab.json` · root + optional `children[]` (nested) · optional `base` + `overrides[]` (**variants**) · instance `prefab` link on **root only** · Save as Prefab / Create Prefab Variant / Instantiate / Apply / Revert / Unpack Completely · orange-bold overrides (`Child/field`) |
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
 Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle; **IR aim** `ir_x`/`ir_y`/`ir_valid` in 640×480; **motion** `accel_*`/`motion_valid` + shake/swing edges), 60 Hz `Clock`, `render_world` (in `wiimaker-core`, re-exported from `wiimaker-scene`) sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib (WSCN→World → `render_world` → DrawList → GX + ASND oneshots), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** prefab variants (inheritance).
+**Not present:** (none currently — Animation state machine next).
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-10-01):** Prefab variants (inheritance / overrides-from-base). Nested prefabs shipped.
+**Recommended next morning (2026-10-02):** Animation state machine / Animator (clips already exist). Prefab variants shipped.
 
 ---
 
 ## Later
 
-- Prefab variants (inheritance).
 - Animation state machine / Animator (clips already exist).
 - Timeline / cutscene authoring.
+- Apply to base / Open Base for prefab variants (deferred from 2026-10-02).
 
 ---
 
@@ -45,7 +45,9 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 Shipped. Keep here so we do not rebuild them.
 
-- **Nested prefabs** (2026-10-01) — `Prefab` root + `children: Vec<EntityData>` (old one-entity JSON still loads). Save as Prefab / `entity create-prefab` captures Hierarchy subtree. Instantiate expands tree (unique names; only root gets `prefab` link). Apply/Revert/Unpack operate on whole tree; override paths `ChildName/field`. Inspector Prefab chrome on root; orange-bold for nested. CLI twins `--json` include `children` count. Host-first (WSCN hydrate still flattens). Variants deferred.
+- **Prefab variants** (2026-10-02) — `Prefab.base` + `overrides: Vec<String>` (old assets without fields still load). `create_prefab_variant` / `variant_from_instance`; `resolve_prefab` applies base + overrides (live inherit for non-overridden fields). Instantiate resolves first; Apply/Revert write the **variant** asset (not the base) and refresh overrides. Inspector **Prefab Variant** chrome (`of <base>`) + **Create Prefab Variant…**; orange-bold instance overrides. CLI `entity create-variant --from|--name --as-name` (`--json` base/overrides/variant); `instantiate-prefab` / `apply-prefab` / `prefab-status` twin. Host-first. Deferred: Apply to Base / Open Base.
+
+- **Nested prefabs** (2026-10-01) — `Prefab` root + `children: Vec<EntityData>` (old one-entity JSON still loads). Save as Prefab / `entity create-prefab` captures Hierarchy subtree. Instantiate expands tree (unique names; only root gets `prefab` link). Apply/Revert/Unpack operate on whole tree; override paths `ChildName/field`. Inspector Prefab chrome on root; orange-bold for nested. CLI twins `--json` include `children` count. Host-first (WSCN hydrate still flattens). Variants shipped 2026-10-02.
 
 - **Unity Hierarchy + Inspector chrome** (2026-09-01) · 1:1 follow-up: crops + rules in `MEMORY/durable/unity-chrome/` / `.cursor/rules/wiimaker-editor.mdc` — Hierarchy search, + Create Empty, right-click Duplicate/Delete/Unparent, no per-row D/x; Inspector GameObject name+Tag, Transform Position/Rotation/Scale as XYZ DragValues, ⋮ Remove Component, full-width Add Component. Dark Pro only.
 
@@ -143,7 +145,7 @@ Global: `--json`
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
 | `entity overlaps` · `entity triggers` | `--name` [ `--other` ] · pairwise/list overlaps; `triggers <name>` lists entered triggers |
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
-| `entity create-prefab` · `entity instantiate-prefab` · `entity apply-prefab` · `entity revert-prefab` · `entity unpack-prefab` · `entity prefab-status` | apply writes asset; revert restores; status lists overrides |
+| `entity create-prefab` · `entity create-variant` · `entity instantiate-prefab` · `entity apply-prefab` · `entity revert-prefab` · `entity unpack-prefab` · `entity prefab-status` | create-variant `--from` base or `--name` instance + `--as-name`; apply writes variant/base asset; status lists overrides + `base`/`variant` |
 | `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` · `asset anim` · `asset list-anims` · `asset list-wavs` · `asset play --name` | `asset import` copies `.png` or `.wav`; `asset play` host oneshot (`--json` `skipped` if no device) |
 | `tilemap set` · `tilemap fill` · `tilemap stamp` · `tilemap from-ascii` · `tilemap get` · `tilemap set-palette` · `tilemap mask` | `--name --x --y --id` · `--ascii` / `--cells --width` · `from-ascii FILE` (`--map` `--resize`) · palette `--anim --fps --auto-tile id|solid|off --auto-sprites` · mask NESW · `--json` |
 | `sorting-layer list` · `sorting-layer add --name [--index]` · `sorting-layer rename --from --to` · `sorting-layer move --name --index` · `sorting-layer remove --name` | project Tags & Layers analogue on `game.toml`; rename/remove remap scenes + prefabs |
@@ -161,12 +163,12 @@ Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale �
 Bottom tabs: Project · Console
 Project: Search (filename / relative path) · collapsible folders (foldout + `#`) · Refresh · New scene · Set default · Build Settings…
 Console: Search (text + info/warn/error tags) · Info / Warn / Error toggles · Clear · Doctor · count `N messages` / `k / N messages`
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab instance **Apply** / **Revert** / **Unpack Completely** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · **Input** card (live stick / D-pad / A/B/Start / IR + Keyboard · Wiimote · IR · Classic · GCN · mouse aim; empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab / **Prefab Variant** instance **Apply** / **Revert** / **Unpack Completely** / **Create Prefab Variant…** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · **Input** card (live stick / D-pad / A/B/Start / IR + Keyboard · Wiimote · IR · Classic · GCN · mouse aim; empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Nested prefabs / prefab variants.** Motion gestures shipped 2026-09-30. IR pointer / sensor-bar aiming shipped 2026-09-29. Wii `World` + `render_world` shipped 2026-09-28. Parent rotation compose shipped 2026-09-26. Green PowerPC CI shipped 2026-09-27.
+**Animation state machine / Animator.** Prefab variants shipped 2026-10-02. Nested prefabs shipped 2026-10-01. Motion gestures shipped 2026-09-30. IR pointer / sensor-bar aiming shipped 2026-09-29.
 

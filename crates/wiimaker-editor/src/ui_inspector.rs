@@ -108,6 +108,7 @@ impl EditorApp {
         let mut prefab_apply = false;
         let mut prefab_revert = false;
         let mut prefab_unpack = false;
+        let mut prefab_create_variant = false;
 
         // Prefab Apply/Revert/Unpack on the instance root only. Orange-bold uses
         // prefab_tree_overrides paths (`field` on root, `ChildName/field` on nested).
@@ -126,11 +127,16 @@ impl EditorApp {
             .and_then(|e| e.prefab.clone())
             .filter(|s| !s.is_empty());
         let instance_root_name = instance_root_ent.map(|e| e.name.clone());
-        let loaded_prefab = prefab_link.as_deref().and_then(|src| {
+        let loaded_prefab_raw = prefab_link.as_deref().and_then(|src| {
             wiimaker_scene::resolve_prefab_asset(&self.game_dir, src)
                 .ok()
                 .and_then(|p| wiimaker_scene::load_prefab(&p).ok())
         });
+        let loaded_prefab = loaded_prefab_raw.as_ref().and_then(|raw| {
+            wiimaker_scene::resolve_prefab(&self.game_dir, raw).ok()
+        });
+        // Keep raw for variant chrome (base link lives on the asset, not resolved).
+        let loaded_prefab_meta = loaded_prefab_raw;
         let prefab_ov = match (&instance_root_name, &loaded_prefab) {
             (Some(root), Some(pf)) => {
                 wiimaker_scene::prefab_tree_overrides(&self.scene, root, pf)
@@ -163,12 +169,22 @@ impl EditorApp {
                 dirty |= ui.add(egui::DragValue::new(&mut ent.tag)).changed();
             }
         });
+        let is_variant_asset = loaded_prefab_meta.as_ref().is_some_and(|p| p.is_variant());
+        let variant_base_stem = loaded_prefab_meta
+            .as_ref()
+            .and_then(|p| p.base.as_deref())
+            .map(wiimaker_scene::prefab_stem);
         if is_prefab_instance {
             ui.add_space(4.0);
             theme::card_frame().show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    let title = if is_variant_asset {
+                        "Prefab Variant"
+                    } else {
+                        "Prefab"
+                    };
                     ui.label(
-                        RichText::new("Prefab")
+                        RichText::new(title)
                             .strong()
                             .size(12.0)
                             .color(theme::PREFAB_OVERRIDE),
@@ -180,6 +196,13 @@ impl EditorApp {
                         .size(12.0)
                         .color(theme::TEXT),
                     );
+                    if let Some(base) = &variant_base_stem {
+                        ui.label(
+                            RichText::new(format!("of {base}"))
+                                .size(11.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                    }
                     if !prefab_ov.is_empty() {
                         ui.label(
                             RichText::new(format!("{} overrides", prefab_ov.len()))
@@ -190,9 +213,14 @@ impl EditorApp {
                     }
                 });
                 ui.horizontal(|ui| {
+                    let apply_tip = if is_variant_asset {
+                        "Push overrides to the variant asset (not the base)"
+                    } else {
+                        "Push overrides to the prefab asset"
+                    };
                     if ui
                         .button("Apply")
-                        .on_hover_text("Push overrides to the prefab asset")
+                        .on_hover_text(apply_tip)
                         .clicked()
                     {
                         prefab_apply = true;
@@ -212,6 +240,19 @@ impl EditorApp {
                         prefab_unpack = true;
                     }
                 });
+                if !is_variant_asset {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button("Create Prefab Variant…")
+                            .on_hover_text(
+                                "Save a variant of this prefab with current overrides; relink instance",
+                            )
+                            .clicked()
+                        {
+                            prefab_create_variant = true;
+                        }
+                    });
+                }
             });
         }
         if rename_committed {
@@ -1582,6 +1623,13 @@ impl EditorApp {
             }
             if prefab_unpack {
                 self.unpack_selected_prefab(&sel);
+            }
+            if prefab_create_variant {
+                let base_stem = wiimaker_scene::prefab_stem(
+                    prefab_link.as_deref().unwrap_or(sel.as_str()),
+                );
+                let as_name = format!("{base_stem}_Variant");
+                self.create_variant_from_selected(&sel, &as_name);
             }
         } else {
             theme::card_frame().show(ui, |ui| {

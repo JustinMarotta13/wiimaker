@@ -50,6 +50,10 @@ impl Scene {
 /// Old single-entity `.prefab.json` files still load (no `children` key). Only the
 /// scene **instance root** carries `EntityData.prefab`; nested children are part of
 /// the instance and do not get their own link.
+///
+/// Prefab **variants** set [`Self::base`] to a base prefab path/stem and store
+/// [`Self::overrides`] (field paths vs the resolved base). Instantiate resolves
+/// base + overrides; Apply on a variant instance writes the variant asset (not the base).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Prefab {
     #[serde(flatten)]
@@ -57,6 +61,13 @@ pub struct Prefab {
     /// Descendants with `parent` links using prefab-local entity names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<EntityData>,
+    /// Base prefab this asset inherits from (variant). Absent = ordinary prefab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    /// Field paths overridden vs the resolved base (`Disc.color`, `Eye/Disc.radius`).
+    /// Only meaningful when `base` is set. Empty = identical to base at last save.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<String>,
 }
 
 impl Prefab {
@@ -64,12 +75,19 @@ impl Prefab {
         Self {
             entity,
             children: Vec::new(),
+            base: None,
+            overrides: Vec::new(),
         }
     }
 
     /// Root + children entity count.
     pub fn entity_count(&self) -> usize {
         1 + self.children.len()
+    }
+
+    /// True when this asset inherits from a base prefab.
+    pub fn is_variant(&self) -> bool {
+        self.base.as_ref().is_some_and(|s| !s.is_empty())
     }
 }
 

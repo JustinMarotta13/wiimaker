@@ -515,6 +515,24 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
+    /// Create a prefab variant inheriting from a base (`--from`) or from an instance (`--name`)
+    CreateVariant {
+        game: String,
+        /// Base prefab stem/path (create empty variant identical to base)
+        #[arg(long)]
+        from: Option<String>,
+        /// Prefab instance entity — variant captures current overrides vs its link
+        #[arg(long)]
+        name: Option<String>,
+        /// Variant file stem (required)
+        #[arg(long)]
+        as_name: String,
+        /// Relink the instance to the new variant (only with `--name`)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        relink: bool,
+        #[arg(long)]
+        scene: Option<String>,
+    },
     /// Instantiate a prefab into the scene (root + nested children)
     InstantiatePrefab {
         game: String,
