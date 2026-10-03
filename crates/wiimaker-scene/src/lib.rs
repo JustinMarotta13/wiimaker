@@ -25,23 +25,26 @@ pub use collider::{
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use gizmo::{constrain_translate, MoveHandleLayout, TranslateHandle};
 pub use hydrate::{
-    hydrate, hydrate_into, hydrate_into_with_catalog, hydrate_into_with_catalogs, hydrate_lenient,
+    hydrate, hydrate_into, hydrate_into_with_all_catalogs, hydrate_into_with_catalog,
+    hydrate_into_with_catalogs, hydrate_lenient, hydrate_lenient_with_all_catalogs,
     hydrate_lenient_with_catalog, hydrate_lenient_with_catalogs,
-    hydrate_lenient_with_sorting_layers, hydrate_with_catalog, hydrate_with_catalogs,
-    load_scene_into_world, sprite_effective_pivot, TextureMap,
+    hydrate_lenient_with_sorting_layers, hydrate_with_all_catalogs, hydrate_with_catalog,
+    hydrate_with_catalogs, load_scene_into_world, sprite_effective_pivot, TextureMap,
 };
 pub use mutate::{
-    add_component_animation, add_component_audio_source, add_component_camera, add_component_disc,
-    add_component_follow, add_component_grid_mover, add_component_sprite, add_component_text,
-    add_entity, apply_prefab, attach_prefab_instance, duplicate_entity, entity_to_prefab,
-    insert_entity_clone, instantiate_prefab, remove_component_animation,
-    remove_component_audio_source, remove_component_camera, remove_component_disc,
-    remove_component_follow, remove_component_grid_mover, remove_component_sprite,
-    remove_component_text, remove_entity, rename_entity, revert_prefab_instance,
-    set_component_enabled, set_entity_anim, set_entity_audio_source, set_entity_follow,
-    set_entity_grid_mover, set_entity_parent, set_entity_rotation_z, set_entity_scale,
-    set_entity_sprite_pivot, set_entity_text, set_entity_transform, set_entity_world_xy,
-    set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
+    add_component_animation, add_component_animator, add_component_audio_source,
+    add_component_camera, add_component_disc, add_component_follow, add_component_grid_mover,
+    add_component_sprite, add_component_text, add_entity, apply_prefab, attach_prefab_instance,
+    duplicate_entity, entity_to_prefab, insert_entity_clone, instantiate_prefab,
+    remove_component_animation, remove_component_animator, remove_component_audio_source,
+    remove_component_camera, remove_component_disc, remove_component_follow,
+    remove_component_grid_mover, remove_component_sprite, remove_component_text, remove_entity,
+    rename_entity, revert_prefab_instance, set_component_enabled, set_entity_anim,
+    set_entity_animator_bool, set_entity_animator_float, set_entity_audio_source,
+    set_entity_controller, set_entity_follow, set_entity_grid_mover, set_entity_parent,
+    set_entity_rotation_z, set_entity_scale, set_entity_sprite_pivot, set_entity_text,
+    set_entity_transform, set_entity_world_xy, set_scene_clear, unique_entity_name,
+    unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{
     pick_entity_at, pick_entity_at_with_catalog, pick_entity_at_with_catalog_and_layers,
@@ -49,10 +52,10 @@ pub use pick::{
 };
 pub use prefab::{
     collect_descendants, create_prefab_variant, find_prefab_instance_root,
-    load_prefab_for_instance, match_prefab_instance, normalize_prefab_source, prefab_asset_overrides,
-    prefab_local_name, prefab_overrides, prefab_stem, prefab_tree_overrides, refresh_variant_overrides,
-    resolve_prefab, resolve_prefab_asset, topo_prefab_children, variant_from_instance,
-    PrefabOverrides,
+    load_prefab_for_instance, match_prefab_instance, normalize_prefab_source,
+    prefab_asset_overrides, prefab_local_name, prefab_overrides, prefab_stem,
+    prefab_tree_overrides, refresh_variant_overrides, resolve_prefab, resolve_prefab_asset,
+    topo_prefab_children, variant_from_instance, PrefabOverrides,
 };
 pub use prefs::{
     apply_game_view, apply_project_view, apply_scene_view, editor_prefs_path, fitted_blit_rect,
@@ -69,9 +72,10 @@ pub use project::{
 pub use render::{render_world, render_world_ex};
 pub use scene::{
     display_sorting_layer, load_prefab, load_scene, save_prefab, save_scene, EntityData, Prefab,
-    Scene, SceneAnimation, SceneAudioSource, SceneAutoTile, SceneCamera, SceneCollider,
-    SceneColliderKind, SceneComponents, SceneDir, SceneDisc, SceneGridMover, SceneSprite,
-    SceneText, SceneTextAlign, SceneTilePalette, SceneTilemap, SceneTransform, DEFAULT_CLEAR_COLOR,
+    Scene, SceneAnimation, SceneAnimator, SceneAnimatorParam, SceneAudioSource, SceneAutoTile,
+    SceneCamera, SceneCollider, SceneColliderKind, SceneComponents, SceneDir, SceneDisc,
+    SceneGridMover, SceneSprite, SceneText, SceneTextAlign, SceneTilePalette, SceneTilemap,
+    SceneTransform, DEFAULT_CLEAR_COLOR,
 };
 pub use sorting::{
     add_sorting_layer, entity_max_sorting_key, list_sorting_layers, move_sorting_layer,

@@ -3,18 +3,20 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use serde::Serialize;
 use wiimaker_scene::{
-    add_component_animation, add_component_audio_source, add_component_camera,
-    add_component_collider, add_component_disc, add_component_follow, add_component_grid_mover,
-    add_component_sprite, add_component_text, add_component_tilemap, add_entity, apply_prefab,
-    attach_prefab_instance, create_prefab_variant, duplicate_entity, entities_overlap,
-    entity_overlaps, entity_to_prefab, entity_triggers_entered, instantiate_prefab, load_prefab,
-    load_prefab_for_instance, normalize_prefab_source, prefab_tree_overrides, refresh_variant_overrides,
-    remove_component_animation, remove_component_audio_source, remove_component_camera,
+    add_component_animation, add_component_animator, add_component_audio_source,
+    add_component_camera, add_component_collider, add_component_disc, add_component_follow,
+    add_component_grid_mover, add_component_sprite, add_component_text, add_component_tilemap,
+    add_entity, apply_prefab, attach_prefab_instance, create_prefab_variant, duplicate_entity,
+    entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered,
+    instantiate_prefab, load_prefab, load_prefab_for_instance, normalize_prefab_source,
+    prefab_tree_overrides, refresh_variant_overrides, remove_component_animation,
+    remove_component_animator, remove_component_audio_source, remove_component_camera,
     remove_component_collider, remove_component_disc, remove_component_follow,
     remove_component_grid_mover, remove_component_sprite, remove_component_text,
     remove_component_tilemap, remove_entity, rename_entity, resolve_prefab, resolve_prefab_asset,
     revert_prefab_instance, save_prefab, save_scene, set_component_enabled, set_entity_anim,
-    set_entity_audio_source, set_entity_follow, set_entity_grid_mover, set_entity_parent,
+    set_entity_animator_bool, set_entity_animator_float, set_entity_audio_source,
+    set_entity_controller, set_entity_follow, set_entity_grid_mover, set_entity_parent,
     set_entity_rotation_z, set_entity_scale, set_entity_sorting, set_entity_sprite_pivot,
     set_entity_text, set_entity_transform, unpack_prefab_instance, variant_from_instance,
     MutateOpts, Scene, SceneColliderKind, SceneDir, SceneTextAlign,
@@ -94,6 +96,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             pivot_x,
             pivot_y,
             clear_pivot,
+            controller,
             scene,
         } => {
             let (_gd, project, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -120,8 +123,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 && pivot_x.is_none()
                 && pivot_y.is_none()
                 && !clear_pivot
+                && controller.is_none()
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer --pivot-x --pivot-y --clear-pivot");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer --pivot-x --pivot-y --clear-pivot --controller");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -188,6 +192,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 }
                 set_entity_sprite_pivot(&mut sc, &name, pivot_x, pivot_y, clear_pivot)?;
             }
+            if let Some(ctrl) = controller {
+                set_entity_controller(&mut sc, &name, &ctrl)?;
+            }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("updated entity {name}"))
         }
@@ -221,6 +228,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             align,
             pivot_x,
             pivot_y,
+            controller,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -263,6 +271,11 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                         clip.ok_or_else(|| anyhow::anyhow!("--clip required for Animation"))?;
                     add_component_animation(&mut sc, &name, &clip, fps, r#loop)?;
                 }
+                "animator" => {
+                    let controller = controller
+                        .ok_or_else(|| anyhow::anyhow!("--controller required for Animator"))?;
+                    add_component_animator(&mut sc, &name, &controller)?;
+                }
                 "camera" => {
                     add_component_camera(&mut sc, &name, true)?;
                     if target.is_some() || lerp.is_some() {
@@ -300,7 +313,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     add_component_text(&mut sc, &name, &body, size, color, align)?;
                 }
                 other => {
-                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Camera|Follow|GridMover|AudioSource|Text)")
+                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Animator|Camera|Follow|GridMover|AudioSource|Text)")
                 }
             }
             save_scene(&path, &sc)?;
@@ -413,6 +426,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "tilemap" => remove_component_tilemap(&mut sc, &name)?,
                 "collider" => remove_component_collider(&mut sc, &name)?,
                 "animation" => remove_component_animation(&mut sc, &name)?,
+                "animator" => remove_component_animator(&mut sc, &name)?,
                 "camera" => remove_component_camera(&mut sc, &name)?,
                 "follow" => remove_component_follow(&mut sc, &name)?,
                 "gridmover" | "grid_mover" | "grid-mover" => {
@@ -543,6 +557,117 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("set anim {name} → {clip}"))
         }
+        EntityCmd::AnimatorSet {
+            game,
+            name,
+            bools,
+            floats,
+            triggers,
+            scene,
+        } => {
+            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            if bools.is_empty() && floats.is_empty() && triggers.is_empty() {
+                bail!("entity animator-set: pass --bool Name=true, --float Name=1, and/or --trigger Name");
+            }
+            for spec in bools {
+                let (pname, raw) = split_kv(&spec, "--bool")?;
+                let val = parse_bool_flag(&raw)?;
+                set_entity_animator_bool(&mut sc, &name, &pname, val)?;
+            }
+            for spec in floats {
+                let (pname, raw) = split_kv(&spec, "--float")?;
+                let val: f32 = raw.parse().map_err(|_| {
+                    anyhow::anyhow!("entity animator-set: --float '{spec}' value is not a number")
+                })?;
+                set_entity_animator_float(&mut sc, &name, &pname, val)?;
+            }
+            for spec in triggers {
+                set_entity_animator_bool(&mut sc, &name, spec.trim(), true)?;
+            }
+            save_scene(&path, &sc)?;
+            emit_ok(json, &format!("set animator params on {name}"))
+        }
+        EntityCmd::AnimatorStatus { game, name, scene } => {
+            let (gd, project, _path, sc) = open_scene(root, &game, scene.as_deref())?;
+            let ent = sc
+                .find_entity(&name)
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
+            let scene_a = ent
+                .components
+                .animator
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animator"))?;
+            let assets = project.assets_path(&gd);
+            let anims = wiimaker_assets::AnimClipCatalog::load_dir(&assets)?;
+            let controllers = wiimaker_assets::AnimatorControllerCatalog::load_dir(&assets)?;
+            let world = wiimaker_scene::hydrate_with_all_catalogs(
+                &sc,
+                &wiimaker_scene::TextureMap::new(),
+                None,
+                Some(&anims),
+                Some(&controllers),
+            )?;
+            let id = world
+                .find_by_name(&name)
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' not in world"))?;
+            let rt = world.animator(id);
+            #[derive(Serialize)]
+            struct ParamOut {
+                name: String,
+                #[serde(rename = "type")]
+                kind: String,
+                bool_value: bool,
+                float_value: f32,
+            }
+            #[derive(Serialize)]
+            struct Out {
+                ok: bool,
+                name: String,
+                controller: String,
+                state: String,
+                enabled: bool,
+                parameters: Vec<ParamOut>,
+            }
+            let parameters: Vec<ParamOut> = rt
+                .map(|a| {
+                    a.parameters
+                        .iter()
+                        .map(|p| ParamOut {
+                            name: p.name.clone(),
+                            kind: match p.kind {
+                                wiimaker_core::AnimatorParamKind::Bool => "Bool".into(),
+                                wiimaker_core::AnimatorParamKind::Float => "Float".into(),
+                                wiimaker_core::AnimatorParamKind::Trigger => "Trigger".into(),
+                            },
+                            bool_value: p.bool_value,
+                            float_value: p.float_value,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let state = rt.map(|a| a.state.clone()).unwrap_or_default();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Out {
+                        ok: true,
+                        name: name.clone(),
+                        controller: scene_a.controller.clone(),
+                        state,
+                        enabled: scene_a.enabled,
+                        parameters,
+                    })?
+                );
+            } else {
+                println!(
+                    "{name}: controller={} state={} params={}",
+                    scene_a.controller,
+                    rt.map(|a| a.state.as_str()).unwrap_or("?"),
+                    parameters.len()
+                );
+            }
+            Ok(())
+        }
         EntityCmd::Despawn { game, name, scene } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             remove_entity(&mut sc, &name)?;
@@ -659,7 +784,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 Ok(())
             }
         }
-                EntityCmd::InstantiatePrefab {
+        EntityCmd::InstantiatePrefab {
             game,
             prefab,
             x,
@@ -813,10 +938,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     .map(|b| format!(" (base {b})"))
                     .unwrap_or_default();
                 if overrides.is_empty() {
-                    println!(
-                        "{name} {kind} of {}{base_note}",
-                        source.unwrap_or_default()
-                    );
+                    println!("{name} {kind} of {}{base_note}", source.unwrap_or_default());
                 } else {
                     println!(
                         "{name} {kind} of {}{base_note} · {} overrides: {}",
@@ -848,4 +970,24 @@ fn instance_prefab_source(scene: &Scene, name: &str, explicit: Option<&str>) -> 
 
 fn resolve_prefab_path(game_dir: &Path, prefab: &str) -> Result<std::path::PathBuf> {
     resolve_prefab_asset(game_dir, prefab)
+}
+
+fn split_kv(spec: &str, flag: &str) -> Result<(String, String)> {
+    let spec = spec.trim();
+    let Some((k, v)) = spec.split_once('=') else {
+        bail!("{flag} expects Name=value, got '{spec}'");
+    };
+    let k = k.trim();
+    if k.is_empty() {
+        bail!("{flag} parameter name is empty");
+    }
+    Ok((k.to_string(), v.trim().to_string()))
+}
+
+fn parse_bool_flag(raw: &str) -> Result<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" => Ok(true),
+        "false" | "0" | "no" => Ok(false),
+        other => bail!("expected true/false, got '{other}'"),
+    }
 }

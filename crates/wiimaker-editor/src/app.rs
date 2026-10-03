@@ -3,7 +3,9 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use eframe::egui;
-use wiimaker_assets::{list_wav_clips, AnimClipCatalog, SpriteCatalog, WPack};
+use wiimaker_assets::{
+    list_wav_clips, AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog, WPack,
+};
 use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
 use wiimaker_host::{Framebuffer, HostAudio, PlayOutcome, TextureAtlas};
@@ -11,7 +13,7 @@ pub(crate) use wiimaker_play::PlayKind;
 use wiimaker_play::{apply_pad_keys, PadKeys, PlaySession, PlayStart};
 use wiimaker_scene::{
     add_build_scene, add_component_sprite, create_named_scene, diagnose, duplicate_entity,
-    find_game_dir, hydrate_lenient_with_sorting_layers, insert_entity_clone, list_scenes,
+    find_game_dir, hydrate_lenient_with_all_catalogs, insert_entity_clone, list_scenes,
     load_editor_prefs, load_project, load_scene, remove_build_scene, rename_entity,
     save_editor_prefs, save_scene, set_default_scene, EditorPrefs, EntityData, GameProject, Scene,
     Severity, TranslateHandle, UndoStack,
@@ -135,6 +137,7 @@ pub(crate) struct EditorApp {
     pub(crate) project_entries: Vec<ProjectEntry>,
     pub(crate) catalog: SpriteCatalog,
     pub(crate) anim_catalog: AnimClipCatalog,
+    pub(crate) controller_catalog: AnimatorControllerCatalog,
     pub(crate) wav_names: Vec<String>,
     pub(crate) host_audio: HostAudio,
     pub(crate) sprite_editor: Option<SpriteEditorState>,
@@ -229,6 +232,7 @@ impl EditorApp {
             project_entries: Vec::new(),
             catalog: SpriteCatalog::empty(),
             anim_catalog: AnimClipCatalog::empty(),
+            controller_catalog: AnimatorControllerCatalog::empty(),
             wav_names: Vec::new(),
             host_audio: HostAudio::new(),
             sprite_editor: None,
@@ -570,6 +574,7 @@ impl EditorApp {
 
         self.catalog = SpriteCatalog::load_dir(&assets, |stem| self.atlas.size_of(stem))?;
         self.anim_catalog = AnimClipCatalog::load_dir(&assets)?;
+        self.controller_catalog = AnimatorControllerCatalog::load_dir(&assets)?;
         self.wav_names = list_wav_clips(&assets).unwrap_or_default();
         self.refresh_project_tree();
         Ok(())
@@ -577,11 +582,12 @@ impl EditorApp {
 
     pub(crate) fn rehydrate(&mut self) {
         let layers = self.project.effective_sorting_layers();
-        self.world = hydrate_lenient_with_sorting_layers(
+        self.world = hydrate_lenient_with_all_catalogs(
             &self.scene,
             self.atlas.map(),
             Some(&self.catalog),
             Some(&self.anim_catalog),
+            Some(&self.controller_catalog),
             Some(&layers),
         );
     }
@@ -1306,8 +1312,10 @@ impl EditorApp {
                     let y = (pos.y - rect.min.y) / rect.height() * VIEW_H as f32;
                     wiimaker_core::apply_ir_aim(&mut self.live_input, x, y, true);
                     if shift {
-                        let nx = ((pos.x - rect.center().x) / (rect.width() * 0.5)).clamp(-1.0, 1.0);
-                        let ny = ((pos.y - rect.center().y) / (rect.height() * 0.5)).clamp(-1.0, 1.0);
+                        let nx =
+                            ((pos.x - rect.center().x) / (rect.width() * 0.5)).clamp(-1.0, 1.0);
+                        let ny =
+                            ((pos.y - rect.center().y) / (rect.height() * 0.5)).clamp(-1.0, 1.0);
                         let (ax, ay, az) = wiimaker_core::host_mouse_tilt_to_accel(nx, ny, 2.0);
                         wiimaker_core::apply_accel(&mut self.live_input, ax, ay, az, true);
                         motion_set = true;

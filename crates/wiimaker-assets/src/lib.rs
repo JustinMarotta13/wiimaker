@@ -14,11 +14,17 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
 
 mod anim;
+mod controller;
 mod font;
 mod sprites;
 mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
+pub use controller::{
+    is_any_state, list_animator_controllers, write_animator_controller, AnimatorControllerCatalog,
+    AnimatorControllerMeta, ControllerCondition, ControllerParam, ControllerParamType,
+    ControllerState, ControllerTransition,
+};
 pub use font::{
     atlas_image, atlas_rgba8, font8x8_c_header, glyph_bits, glyph_uv, map_char,
     write_font8x8_header, write_hud_font_png, FIRST_CHAR, FONT_ATLAS_H, FONT_ATLAS_W, FONT_CELL_PX,

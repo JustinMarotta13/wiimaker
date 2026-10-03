@@ -1,16 +1,16 @@
 use eframe::egui::{self, RichText};
 use wiimaker_scene::{
-    add_component_animation, add_component_audio_source, add_component_camera, add_component_collider,
-    add_component_disc, add_component_grid_mover, add_component_sprite, add_component_text,
-    add_component_tilemap, display_sorting_layer, remove_component_animation,
-    remove_component_audio_source, remove_component_camera, remove_component_collider,
-    remove_component_disc, remove_component_grid_mover, remove_component_sprite,
-    remove_component_text, remove_component_tilemap, save_project, set_component_enabled,
-    set_scene_clear, tilemap_resize, SceneColliderKind, SceneDir, SceneTextAlign,
-    DEFAULT_CLEAR_COLOR, DEFAULT_SORTING_LAYER,
+    add_component_animation, add_component_animator, add_component_audio_source,
+    add_component_camera, add_component_collider, add_component_disc, add_component_grid_mover,
+    add_component_sprite, add_component_text, add_component_tilemap, display_sorting_layer,
+    remove_component_animation, remove_component_animator, remove_component_audio_source,
+    remove_component_camera, remove_component_collider, remove_component_disc,
+    remove_component_grid_mover, remove_component_sprite, remove_component_text,
+    remove_component_tilemap, save_project, set_component_enabled, set_scene_clear, tilemap_resize,
+    SceneColliderKind, SceneDir, SceneTextAlign, DEFAULT_CLEAR_COLOR, DEFAULT_SORTING_LAYER,
 };
 
-use crate::app::EditorApp;
+use crate::app::{EditorApp, PlayMode};
 use crate::theme;
 use crate::ui_project::{file_kind_label, format_bytes};
 
@@ -66,6 +66,7 @@ impl EditorApp {
         let mut add_tilemap = false;
         let mut add_collider = false;
         let mut add_animation = false;
+        let mut add_animator = false;
         let mut add_camera = false;
         let mut add_grid_mover = false;
         let mut add_audio_source = false;
@@ -75,6 +76,7 @@ impl EditorApp {
         let mut remove_tilemap = false;
         let mut remove_collider = false;
         let mut remove_animation = false;
+        let mut remove_animator = false;
         let mut remove_camera = false;
         let mut remove_grid_mover = false;
         let mut remove_audio_source = false;
@@ -84,10 +86,13 @@ impl EditorApp {
         let mut toggle_tilemap: Option<bool> = None;
         let mut toggle_collider: Option<bool> = None;
         let mut toggle_animation: Option<bool> = None;
+        let mut toggle_animator: Option<bool> = None;
         let mut toggle_camera: Option<bool> = None;
         let mut toggle_grid_mover: Option<bool> = None;
         let mut toggle_audio_source: Option<bool> = None;
         let mut toggle_text: Option<bool> = None;
+        let mut live_anim_bool: Option<(String, bool)> = None;
+        let mut live_anim_float: Option<(String, f32)> = None;
         let mut preview_audio = false;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
         let mut use_brush: Option<(u16, bool)> = None;
@@ -132,15 +137,13 @@ impl EditorApp {
                 .ok()
                 .and_then(|p| wiimaker_scene::load_prefab(&p).ok())
         });
-        let loaded_prefab = loaded_prefab_raw.as_ref().and_then(|raw| {
-            wiimaker_scene::resolve_prefab(&self.game_dir, raw).ok()
-        });
+        let loaded_prefab = loaded_prefab_raw
+            .as_ref()
+            .and_then(|raw| wiimaker_scene::resolve_prefab(&self.game_dir, raw).ok());
         // Keep raw for variant chrome (base link lives on the asset, not resolved).
         let loaded_prefab_meta = loaded_prefab_raw;
         let prefab_ov = match (&instance_root_name, &loaded_prefab) {
-            (Some(root), Some(pf)) => {
-                wiimaker_scene::prefab_tree_overrides(&self.scene, root, pf)
-            }
+            (Some(root), Some(pf)) => wiimaker_scene::prefab_tree_overrides(&self.scene, root, pf),
             _ => wiimaker_scene::PrefabOverrides::default(),
         };
         let ov_child_owned: Option<String> = match (&instance_root_name, &loaded_prefab) {
@@ -156,9 +159,8 @@ impl EditorApp {
             ui.spacing_mut().item_spacing.x = 6.0;
             theme::cube_icon(ui, 18.0, theme::TEXT_MUTED);
             let name_w = (ui.available_width() - 8.0).max(80.0);
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.rename_draft).desired_width(name_w),
-            );
+            let resp =
+                ui.add(egui::TextEdit::singleline(&mut self.rename_draft).desired_width(name_w));
             if resp.lost_focus() {
                 rename_committed = true;
             }
@@ -264,7 +266,8 @@ impl EditorApp {
             .iter()
             .filter_map(|n| self.catalog.lookup(n).map(|r| (n.clone(), r.pivot)))
             .collect();
-        let entity_names: Vec<String> = self.scene.entities.iter().map(|e| e.name.clone()).collect();
+        let entity_names: Vec<String> =
+            self.scene.entities.iter().map(|e| e.name.clone()).collect();
         let layer_names: Vec<String> = self.project.effective_sorting_layers();
         let mut pending_sprite_tex: Option<(String, [f32; 2])> = None;
 
@@ -277,39 +280,41 @@ impl EditorApp {
             ui.add_space(4.0);
             let xform_hdr = theme::component_card_header(ui, "transform", xform_label, None, false);
             if xform_hdr.open {
-            theme::inspector_props().show(ui, |ui| {
-                dirty |= theme::vec3_row_ov(
-                    ui,
-                    "Position",
-                    &mut ent.transform.translation,
-                    1.0,
-                    prefab_ov.has(ov_child, "transform.position"),
-                );
-                let rot = ent.transform.rotation;
-                let mut euler = [
-                    0.0_f32,
-                    0.0_f32,
-                    (2.0 * rot[2] * rot[3]).atan2(rot[3] * rot[3] - rot[2] * rot[2]).to_degrees(),
-                ];
-                if theme::vec3_row_ov(
-                    ui,
-                    "Rotation",
-                    &mut euler,
-                    0.5,
-                    prefab_ov.has(ov_child, "transform.rotation"),
-                ) {
-                    let half = euler[2].to_radians() * 0.5;
-                    ent.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
-                    dirty = true;
-                }
-                dirty |= theme::vec3_row_ov(
-                    ui,
-                    "Scale",
-                    &mut ent.transform.scale,
-                    0.01,
-                    prefab_ov.has(ov_child, "transform.scale"),
-                );
-            });
+                theme::inspector_props().show(ui, |ui| {
+                    dirty |= theme::vec3_row_ov(
+                        ui,
+                        "Position",
+                        &mut ent.transform.translation,
+                        1.0,
+                        prefab_ov.has(ov_child, "transform.position"),
+                    );
+                    let rot = ent.transform.rotation;
+                    let mut euler = [
+                        0.0_f32,
+                        0.0_f32,
+                        (2.0 * rot[2] * rot[3])
+                            .atan2(rot[3] * rot[3] - rot[2] * rot[2])
+                            .to_degrees(),
+                    ];
+                    if theme::vec3_row_ov(
+                        ui,
+                        "Rotation",
+                        &mut euler,
+                        0.5,
+                        prefab_ov.has(ov_child, "transform.rotation"),
+                    ) {
+                        let half = euler[2].to_radians() * 0.5;
+                        ent.transform.rotation = [0.0, 0.0, half.sin(), half.cos()];
+                        dirty = true;
+                    }
+                    dirty |= theme::vec3_row_ov(
+                        ui,
+                        "Scale",
+                        &mut ent.transform.scale,
+                        0.01,
+                        prefab_ov.has(ov_child, "transform.scale"),
+                    );
+                });
             }
 
             ui.add_space(6.0);
@@ -329,79 +334,79 @@ impl EditorApp {
                     remove_sprite = true;
                 }
                 if hdr.open {
-                theme::inspector_props().show(ui, |ui| {
-                    let catalog_names = &catalog_names;
-                    let mut tex_changed = false;
-                    let mut new_tex = sp.texture.clone();
-                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
-                    egui::ComboBox::from_id_salt("sprite_tex")
-                        .selected_text(&sp.texture)
-                        .width(combo_w)
-                        .show_ui(ui, |ui| {
-                            for name in catalog_names {
-                                if ui.selectable_label(sp.texture == *name, name).clicked() {
-                                    new_tex = name.clone();
-                                    tex_changed = true;
+                    theme::inspector_props().show(ui, |ui| {
+                        let catalog_names = &catalog_names;
+                        let mut tex_changed = false;
+                        let mut new_tex = sp.texture.clone();
+                        let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                        egui::ComboBox::from_id_salt("sprite_tex")
+                            .selected_text(&sp.texture)
+                            .width(combo_w)
+                            .show_ui(ui, |ui| {
+                                for name in catalog_names {
+                                    if ui.selectable_label(sp.texture == *name, name).clicked() {
+                                        new_tex = name.clone();
+                                        tex_changed = true;
+                                    }
                                 }
+                            });
+                        if tex_changed {
+                            // Size looked up after borrow ends via pending.
+                            pending_sprite_tex = Some((new_tex, [0.0, 0.0]));
+                        }
+                        dirty |= theme::vec2_row_ov(
+                            ui,
+                            "Size",
+                            &mut sp.size,
+                            0.5,
+                            prefab_ov.has(ov_child, "Sprite.size"),
+                        );
+                        let catalog_pivot = catalog_pivot_by_name
+                            .get(&sp.texture)
+                            .copied()
+                            .unwrap_or([0.5, 0.5]);
+                        let mut pivot_edit = sp.pivot.unwrap_or(catalog_pivot);
+                        ui.horizontal(|ui| {
+                            let changed = theme::vec2_row_ov(
+                                ui,
+                                "Pivot",
+                                &mut pivot_edit,
+                                0.01,
+                                prefab_ov.has(ov_child, "Sprite.pivot"),
+                            );
+                            if changed {
+                                sp.pivot = Some(pivot_edit);
+                                dirty = true;
+                            }
+                            if sp.pivot.is_some()
+                                && ui
+                                    .add_sized([44.0, 18.0], egui::Button::new("Reset"))
+                                    .on_hover_text("Use catalog cell pivot")
+                                    .clicked()
+                            {
+                                sp.pivot = None;
+                                dirty = true;
                             }
                         });
-                    if tex_changed {
-                        // Size looked up after borrow ends via pending.
-                        pending_sprite_tex = Some((new_tex, [0.0, 0.0]));
-                    }
-                    dirty |= theme::vec2_row_ov(
-                        ui,
-                        "Size",
-                        &mut sp.size,
-                        0.5,
-                        prefab_ov.has(ov_child, "Sprite.size"),
-                    );
-                    let catalog_pivot = catalog_pivot_by_name
-                        .get(&sp.texture)
-                        .copied()
-                        .unwrap_or([0.5, 0.5]);
-                    let mut pivot_edit = sp.pivot.unwrap_or(catalog_pivot);
-                    ui.horizontal(|ui| {
-                        let changed = theme::vec2_row_ov(
+                        if sp.pivot.is_none() {
+                            theme::muted(
+                                ui,
+                                format!(
+                                    "catalog · {:.2}, {:.2}",
+                                    catalog_pivot[0], catalog_pivot[1]
+                                ),
+                            );
+                        }
+                        dirty |= sorting_layer_fields(
                             ui,
-                            "Pivot",
-                            &mut pivot_edit,
-                            0.01,
-                            prefab_ov.has(ov_child, "Sprite.pivot"),
+                            "sprite_sort",
+                            &layer_names,
+                            &mut sp.sorting_layer,
+                            &mut sp.z,
+                            prefab_ov.has(ov_child, "Sprite.sorting_layer"),
+                            prefab_ov.has(ov_child, "Sprite.z"),
                         );
-                        if changed {
-                            sp.pivot = Some(pivot_edit);
-                            dirty = true;
-                        }
-                        if sp.pivot.is_some()
-                            && ui
-                                .add_sized([44.0, 18.0], egui::Button::new("Reset"))
-                                .on_hover_text("Use catalog cell pivot")
-                                .clicked()
-                        {
-                            sp.pivot = None;
-                            dirty = true;
-                        }
                     });
-                    if sp.pivot.is_none() {
-                        theme::muted(
-                            ui,
-                            format!(
-                                "catalog · {:.2}, {:.2}",
-                                catalog_pivot[0], catalog_pivot[1]
-                            ),
-                        );
-                    }
-                    dirty |= sorting_layer_fields(
-                        ui,
-                        "sprite_sort",
-                        &layer_names,
-                        &mut sp.sorting_layer,
-                        &mut sp.z,
-                        prefab_ov.has(ov_child, "Sprite.sorting_layer"),
-                        prefab_ov.has(ov_child, "Sprite.z"),
-                    );
-                });
                 }
                 ui.add_space(4.0);
             }
@@ -424,64 +429,243 @@ impl EditorApp {
                 // Always expand Animation when agent-selected (screenshot OCR).
                 let force_open = std::env::var("WIIMAKER_EDITOR_SELECT").is_ok();
                 if hdr.open || force_open {
-                theme::inspector_props().show(ui, |ui| {
-                    let clip_names: Vec<String> = self.anim_catalog.names().to_vec();
-                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
-                    let mut clip_changed = false;
-                    let mut new_clip = a.clip.clone();
-                    egui::ComboBox::from_id_salt("anim_clip")
-                        .selected_text(if a.clip.is_empty() { "(none)" } else { &a.clip })
-                        .width(combo_w)
-                        .show_ui(ui, |ui| {
-                            for name in &clip_names {
-                                if ui.selectable_label(a.clip == *name, name).clicked() {
-                                    new_clip = name.clone();
-                                    clip_changed = true;
+                    theme::inspector_props().show(ui, |ui| {
+                        let clip_names: Vec<String> = self.anim_catalog.names().to_vec();
+                        let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                        let mut clip_changed = false;
+                        let mut new_clip = a.clip.clone();
+                        egui::ComboBox::from_id_salt("anim_clip")
+                            .selected_text(if a.clip.is_empty() { "(none)" } else { &a.clip })
+                            .width(combo_w)
+                            .show_ui(ui, |ui| {
+                                for name in &clip_names {
+                                    if ui.selectable_label(a.clip == *name, name).clicked() {
+                                        new_clip = name.clone();
+                                        clip_changed = true;
+                                    }
                                 }
-                            }
-                        });
-                    if clip_changed {
-                        a.clip = new_clip;
-                        dirty = true;
-                    }
-                    let mut use_override = a.fps.is_some();
-                    if ui.checkbox(&mut use_override, "Override FPS").changed() {
-                        if use_override {
-                            let default_fps = self
-                                .anim_catalog
-                                .lookup(&a.clip)
-                                .map(|m| m.fps)
-                                .unwrap_or(10.0);
-                            a.fps = Some(default_fps);
-                        } else {
-                            a.fps = None;
+                            });
+                        if clip_changed {
+                            a.clip = new_clip;
+                            dirty = true;
                         }
-                        dirty = true;
-                    }
-                    if let Some(fps) = a.fps.as_mut() {
-                        dirty |= theme::labeled_drag_ov(
-                            ui,
-                            "Fps",
-                            fps,
-                            0.25,
-                            prefab_ov.has(ov_child, "Animation.fps"),
-                        );
-                    } else if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
+                        let mut use_override = a.fps.is_some();
+                        if ui.checkbox(&mut use_override, "Override FPS").changed() {
+                            if use_override {
+                                let default_fps = self
+                                    .anim_catalog
+                                    .lookup(&a.clip)
+                                    .map(|m| m.fps)
+                                    .unwrap_or(10.0);
+                                a.fps = Some(default_fps);
+                            } else {
+                                a.fps = None;
+                            }
+                            dirty = true;
+                        }
+                        if let Some(fps) = a.fps.as_mut() {
+                            dirty |= theme::labeled_drag_ov(
+                                ui,
+                                "Fps",
+                                fps,
+                                0.25,
+                                prefab_ov.has(ov_child, "Animation.fps"),
+                            );
+                        } else if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
+                            ui.label(
+                                RichText::new(format!("clip fps · {:.1}", meta.fps))
+                                    .size(11.0)
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        }
+                        dirty |= ui.checkbox(&mut a.loop_, "Loop").changed();
+                        if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} cells · {}",
+                                    meta.cells.len(),
+                                    meta.cells.join(", ")
+                                ))
+                                .size(11.0)
+                                .color(theme::TEXT_DIM),
+                            );
+                        }
+                    });
+                }
+                ui.add_space(4.0);
+            }
+
+            if let Some(a) = ent.components.animator.as_mut() {
+                let hdr = theme::component_card_header_ov(
+                    ui,
+                    "animator",
+                    "Animator",
+                    Some(a.enabled),
+                    true,
+                    prefab_ov.component_at(ov_child, "Animator"),
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_animator = Some(en);
+                }
+                if hdr.remove {
+                    remove_animator = true;
+                }
+                if hdr.open {
+                    theme::inspector_props().show(ui, |ui| {
+                        let playing = self.play_mode != PlayMode::Edit;
+                        let (live_state, live_bools, live_floats): (
+                            String,
+                            Vec<(String, bool)>,
+                            Vec<(String, f32)>,
+                        ) = {
+                            let world: &wiimaker_core::world::World = if playing {
+                                self.play_session
+                                    .as_ref()
+                                    .and_then(|s| s.world())
+                                    .unwrap_or(&self.world)
+                            } else {
+                                &self.world
+                            };
+                            if let Some(an) =
+                                world.find_by_name(&sel).and_then(|id| world.animator(id))
+                            {
+                                let bools = an
+                                    .parameters
+                                    .iter()
+                                    .map(|p| (p.name.clone(), p.bool_value))
+                                    .collect();
+                                let floats = an
+                                    .parameters
+                                    .iter()
+                                    .map(|p| (p.name.clone(), p.float_value))
+                                    .collect();
+                                (an.state.clone(), bools, floats)
+                            } else {
+                                ("—".into(), Vec::new(), Vec::new())
+                            }
+                        };
+                        let names: Vec<String> = self.controller_catalog.names().to_vec();
+                        let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                        let mut ctrl_changed = false;
+                        let mut new_ctrl = a.controller.clone();
+                        ui.add_enabled_ui(!playing, |ui| {
+                            egui::ComboBox::from_id_salt("animator_controller")
+                                .selected_text(if a.controller.is_empty() {
+                                    "(none)"
+                                } else {
+                                    &a.controller
+                                })
+                                .width(combo_w)
+                                .show_ui(ui, |ui| {
+                                    for name in &names {
+                                        if ui
+                                            .selectable_label(a.controller == *name, name)
+                                            .clicked()
+                                        {
+                                            new_ctrl = name.clone();
+                                            ctrl_changed = true;
+                                        }
+                                    }
+                                });
+                        });
+                        if ctrl_changed {
+                            a.controller = new_ctrl;
+                            dirty = true;
+                        }
                         ui.label(
-                            RichText::new(format!("clip fps · {:.1}", meta.fps))
+                            RichText::new(format!("State · {live_state}"))
                                 .size(11.0)
                                 .color(theme::TEXT_MUTED),
                         );
-                    }
-                    dirty |= ui.checkbox(&mut a.loop_, "Loop").changed();
-                    if let Some(meta) = self.anim_catalog.lookup(&a.clip) {
-                        ui.label(
-                            RichText::new(format!("{} cells · {}", meta.cells.len(), meta.cells.join(", ")))
-                                .size(11.0)
-                                .color(theme::TEXT_DIM),
-                        );
-                    }
-                });
+                        if let Some(meta) = self.controller_catalog.lookup(&a.controller) {
+                            for st in &meta.states {
+                                ui.label(
+                                    RichText::new(format!("{}  ·  {}", st.name, st.clip))
+                                        .size(11.0)
+                                        .color(theme::TEXT_DIM),
+                                );
+                            }
+                            ui.add_space(2.0);
+                            for p in &meta.parameters {
+                                match p.kind {
+                                    wiimaker_assets::ControllerParamType::Bool
+                                    | wiimaker_assets::ControllerParamType::Trigger => {
+                                        let mut val = live_bools
+                                            .iter()
+                                            .find(|(n, _)| n == &p.name)
+                                            .map(|(_, v)| *v)
+                                            .or_else(|| {
+                                                a.parameters
+                                                    .iter()
+                                                    .find(|o| o.name == p.name)
+                                                    .and_then(|o| o.bool_value)
+                                            })
+                                            .unwrap_or(p.default_bool());
+                                        let label = if matches!(
+                                            p.kind,
+                                            wiimaker_assets::ControllerParamType::Trigger
+                                        ) {
+                                            format!("{} (Trigger)", p.name)
+                                        } else {
+                                            p.name.clone()
+                                        };
+                                        if ui.checkbox(&mut val, label).changed() {
+                                            if playing {
+                                                live_anim_bool = Some((p.name.clone(), val));
+                                            } else {
+                                                let ov = a.param_mut(&p.name);
+                                                ov.bool_value = Some(val);
+                                                dirty = true;
+                                            }
+                                        }
+                                    }
+                                    wiimaker_assets::ControllerParamType::Float => {
+                                        let mut val = live_floats
+                                            .iter()
+                                            .find(|(n, _)| n == &p.name)
+                                            .map(|(_, v)| *v)
+                                            .or_else(|| {
+                                                a.parameters
+                                                    .iter()
+                                                    .find(|o| o.name == p.name)
+                                                    .and_then(|o| o.float_value)
+                                            })
+                                            .unwrap_or(p.default_float());
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                RichText::new(&p.name)
+                                                    .size(12.0)
+                                                    .color(theme::TEXT),
+                                            );
+                                            if ui
+                                                .add(
+                                                    egui::DragValue::new(&mut val)
+                                                        .speed(0.05)
+                                                        .max_decimals(3),
+                                                )
+                                                .changed()
+                                            {
+                                                if playing {
+                                                    live_anim_float = Some((p.name.clone(), val));
+                                                } else {
+                                                    let ov = a.param_mut(&p.name);
+                                                    ov.float_value = Some(val);
+                                                    dirty = true;
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        } else if a.controller.is_empty() {
+                            theme::muted(ui, "Assign a .controller.json asset");
+                        } else {
+                            theme::muted(
+                                ui,
+                                &format!("missing assets/{}.controller.json", a.controller),
+                            );
+                        }
+                    });
                 }
                 ui.add_space(4.0);
             }
@@ -502,24 +686,24 @@ impl EditorApp {
                     remove_disc = true;
                 }
                 if hdr.open {
-                theme::inspector_props().show(ui, |ui| {
-                    dirty |= theme::labeled_drag_ov(
-                        ui,
-                        "Radius",
-                        &mut d.radius,
-                        0.5,
-                        prefab_ov.has(ov_child, "Disc.radius"),
-                    );
-                    dirty |= sorting_layer_fields(
-                        ui,
-                        "disc_sort",
-                        &layer_names,
-                        &mut d.sorting_layer,
-                        &mut d.z,
-                        prefab_ov.has(ov_child, "Disc.sorting_layer"),
-                        prefab_ov.has(ov_child, "Disc.z"),
-                    );
-                });
+                    theme::inspector_props().show(ui, |ui| {
+                        dirty |= theme::labeled_drag_ov(
+                            ui,
+                            "Radius",
+                            &mut d.radius,
+                            0.5,
+                            prefab_ov.has(ov_child, "Disc.radius"),
+                        );
+                        dirty |= sorting_layer_fields(
+                            ui,
+                            "disc_sort",
+                            &layer_names,
+                            &mut d.sorting_layer,
+                            &mut d.z,
+                            prefab_ov.has(ov_child, "Disc.sorting_layer"),
+                            prefab_ov.has(ov_child, "Disc.z"),
+                        );
+                    });
                 }
             }
 
@@ -539,271 +723,275 @@ impl EditorApp {
                     remove_tilemap = true;
                 }
                 if hdr.open {
-                theme::inspector_props().show(ui, |ui| {
-                    let mut w = tm.width;
-                    let mut h = tm.height;
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("grid").size(11.0).color(theme::TEXT_MUTED));
-                        let w_ch = ui.add(egui::DragValue::new(&mut w).range(1..=256).prefix("w "));
-                        let h_ch = ui.add(egui::DragValue::new(&mut h).range(1..=256).prefix("h "));
-                        if (w_ch.changed() || h_ch.changed()) && (w != tm.width || h != tm.height) {
-                            pending_tm_resize = Some((w, h));
-                        }
-                    });
-                    dirty |= theme::labeled_drag_ov(
-                        ui,
-                        "Cell",
-                        &mut tm.cell,
-                        0.25,
-                        prefab_ov.has(ov_child, "Tilemap.cell"),
-                    );
-                    dirty |= theme::vec2_row_ov(
-                        ui,
-                        "Origin",
-                        &mut tm.origin,
-                        1.0,
-                        prefab_ov.has(ov_child, "Tilemap.origin"),
-                    );
-                    dirty |= sorting_layer_fields(
-                        ui,
-                        "tilemap_sort",
-                        &layer_names,
-                        &mut tm.sorting_layer,
-                        &mut tm.z,
-                        prefab_ov.has(ov_child, "Tilemap.sorting_layer"),
-                        prefab_ov.has(ov_child, "Tilemap.z"),
-                    );
-                    let occupied = tm.cells.iter().filter(|c| **c != 0).count();
-                    ui.label(
-                        RichText::new(format!(
-                            "{occupied} occupied · {} solid",
-                            tm.solid.iter().filter(|s| **s != 0).count()
-                        ))
-                        .size(11.0)
-                        .color(theme::TEXT_DIM),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(RichText::new("Palette").size(12.0).color(theme::TEXT_MUTED));
-                    let catalog_names = &catalog_names;
-                    let clip_names: Vec<String> = self.anim_catalog.names().to_vec();
-                    for (pi, pal) in tm.palette.iter_mut().enumerate() {
+                    theme::inspector_props().show(ui, |ui| {
+                        let mut w = tm.width;
+                        let mut h = tm.height;
                         ui.horizontal(|ui| {
-                            ui.add(
-                                egui::DragValue::new(&mut pal.id)
-                                    // `u16` like CLI `--id`; 0 is empty. 1..=32 clamped 99 → 32.
-                                    .range(1..=u16::MAX)
-                                    .prefix("id "),
-                            );
-                            let mut col = egui::Color32::from_rgba_unmultiplied(
-                                pal.color[0],
-                                pal.color[1],
-                                pal.color[2],
-                                pal.color[3],
-                            );
-                            if ui.color_edit_button_srgba(&mut col).changed() {
-                                pal.color = [col.r(), col.g(), col.b(), col.a()];
-                                dirty = true;
-                            }
-                            paint_autotile_badge(ui, pal.auto_tile.is_some());
-                            if ui.small_button("Brush").clicked() {
-                                use_brush = Some((pal.id, true));
+                            ui.label(RichText::new("grid").size(11.0).color(theme::TEXT_MUTED));
+                            let w_ch =
+                                ui.add(egui::DragValue::new(&mut w).range(1..=256).prefix("w "));
+                            let h_ch =
+                                ui.add(egui::DragValue::new(&mut h).range(1..=256).prefix("h "));
+                            if (w_ch.changed() || h_ch.changed())
+                                && (w != tm.width || h != tm.height)
+                            {
+                                pending_tm_resize = Some((w, h));
                             }
                         });
-                        let mut sprite = pal.sprite.clone().unwrap_or_default();
-                        let combo_w = (ui.available_width() - 8.0).clamp(80.0, 200.0);
-                        let mut tex_changed = false;
-                        egui::ComboBox::from_id_salt(format!("tm_pal_{pi}_{}", pal.id))
-                            .selected_text(if sprite.is_empty() {
-                                "(color quad)"
-                            } else {
-                                sprite.as_str()
-                            })
-                            .width(combo_w)
-                            .show_ui(ui, |ui| {
-                                if ui
-                                    .selectable_label(sprite.is_empty(), "(color quad)")
-                                    .clicked()
-                                {
-                                    sprite.clear();
-                                    tex_changed = true;
+                        dirty |= theme::labeled_drag_ov(
+                            ui,
+                            "Cell",
+                            &mut tm.cell,
+                            0.25,
+                            prefab_ov.has(ov_child, "Tilemap.cell"),
+                        );
+                        dirty |= theme::vec2_row_ov(
+                            ui,
+                            "Origin",
+                            &mut tm.origin,
+                            1.0,
+                            prefab_ov.has(ov_child, "Tilemap.origin"),
+                        );
+                        dirty |= sorting_layer_fields(
+                            ui,
+                            "tilemap_sort",
+                            &layer_names,
+                            &mut tm.sorting_layer,
+                            &mut tm.z,
+                            prefab_ov.has(ov_child, "Tilemap.sorting_layer"),
+                            prefab_ov.has(ov_child, "Tilemap.z"),
+                        );
+                        let occupied = tm.cells.iter().filter(|c| **c != 0).count();
+                        ui.label(
+                            RichText::new(format!(
+                                "{occupied} occupied · {} solid",
+                                tm.solid.iter().filter(|s| **s != 0).count()
+                            ))
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                        );
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("Palette").size(12.0).color(theme::TEXT_MUTED));
+                        let catalog_names = &catalog_names;
+                        let clip_names: Vec<String> = self.anim_catalog.names().to_vec();
+                        for (pi, pal) in tm.palette.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::DragValue::new(&mut pal.id)
+                                        // `u16` like CLI `--id`; 0 is empty. 1..=32 clamped 99 → 32.
+                                        .range(1..=u16::MAX)
+                                        .prefix("id "),
+                                );
+                                let mut col = egui::Color32::from_rgba_unmultiplied(
+                                    pal.color[0],
+                                    pal.color[1],
+                                    pal.color[2],
+                                    pal.color[3],
+                                );
+                                if ui.color_edit_button_srgba(&mut col).changed() {
+                                    pal.color = [col.r(), col.g(), col.b(), col.a()];
+                                    dirty = true;
                                 }
-                                for name in catalog_names {
-                                    if ui.selectable_label(sprite == *name, name).clicked() {
-                                        sprite = name.clone();
-                                        tex_changed = true;
-                                    }
+                                paint_autotile_badge(ui, pal.auto_tile.is_some());
+                                if ui.small_button("Brush").clicked() {
+                                    use_brush = Some((pal.id, true));
                                 }
                             });
-                        if tex_changed {
-                            pal.sprite = if sprite.is_empty() {
-                                None
-                            } else {
-                                Some(sprite)
-                            };
-                            dirty = true;
-                        }
-
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Anim").size(11.0).color(theme::TEXT_MUTED));
-                            let mut anim = pal.anim.clone().unwrap_or_default();
-                            let mut anim_changed = false;
-                            egui::ComboBox::from_id_salt(format!("tm_pal_anim_{pi}"))
-                                .selected_text(if anim.is_empty() {
-                                    "(none)"
+                            let mut sprite = pal.sprite.clone().unwrap_or_default();
+                            let combo_w = (ui.available_width() - 8.0).clamp(80.0, 200.0);
+                            let mut tex_changed = false;
+                            egui::ComboBox::from_id_salt(format!("tm_pal_{pi}_{}", pal.id))
+                                .selected_text(if sprite.is_empty() {
+                                    "(color quad)"
                                 } else {
-                                    anim.as_str()
+                                    sprite.as_str()
                                 })
                                 .width(combo_w)
                                 .show_ui(ui, |ui| {
-                                    if ui.selectable_label(anim.is_empty(), "(none)").clicked()
+                                    if ui
+                                        .selectable_label(sprite.is_empty(), "(color quad)")
+                                        .clicked()
                                     {
-                                        anim.clear();
-                                        anim_changed = true;
+                                        sprite.clear();
+                                        tex_changed = true;
                                     }
-                                    for name in &clip_names {
-                                        if ui.selectable_label(anim == *name, name).clicked() {
-                                            anim = name.clone();
-                                            anim_changed = true;
+                                    for name in catalog_names {
+                                        if ui.selectable_label(sprite == *name, name).clicked() {
+                                            sprite = name.clone();
+                                            tex_changed = true;
                                         }
                                     }
                                 });
-                            if anim_changed {
-                                pal.anim = if anim.is_empty() { None } else { Some(anim) };
-                                dirty = true;
-                            }
-                        });
-                        if pal.anim_clip().is_some() {
-                            let mut use_override = pal.anim_fps.is_some();
-                            if ui.checkbox(&mut use_override, "Override FPS").changed() {
-                                if use_override {
-                                    let default_fps = pal
-                                        .anim
-                                        .as_ref()
-                                        .and_then(|c| self.anim_catalog.lookup(c))
-                                        .map(|m| m.fps)
-                                        .unwrap_or(10.0);
-                                    pal.anim_fps = Some(default_fps);
+                            if tex_changed {
+                                pal.sprite = if sprite.is_empty() {
+                                    None
                                 } else {
-                                    pal.anim_fps = None;
-                                }
+                                    Some(sprite)
+                                };
                                 dirty = true;
                             }
-                            if let Some(fps) = pal.anim_fps.as_mut() {
-                                dirty |= theme::labeled_drag(ui, "Fps", fps, 0.25);
-                            }
-                        }
 
-                        let rule_label = match pal.auto_tile {
-                            None => "Off",
-                            Some(wiimaker_scene::SceneAutoTile::Id) => "Same id",
-                            Some(wiimaker_scene::SceneAutoTile::Solid) => "Solid",
-                        };
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new("Auto Tile")
-                                    .size(11.0)
-                                    .color(theme::TEXT_MUTED),
-                            );
-                            egui::ComboBox::from_id_salt(format!("tm_pal_auto_{pi}"))
-                                .selected_text(rule_label)
-                                .width(100.0)
-                                .show_ui(ui, |ui| {
-                                    if ui
-                                        .selectable_label(pal.auto_tile.is_none(), "Off")
-                                        .clicked()
-                                    {
-                                        pal.auto_tile = None;
-                                        dirty = true;
-                                    }
-                                    if ui
-                                        .selectable_label(
-                                            pal.auto_tile
-                                                == Some(wiimaker_scene::SceneAutoTile::Id),
-                                            "Same id",
-                                        )
-                                        .clicked()
-                                    {
-                                        pal.auto_tile = Some(wiimaker_scene::SceneAutoTile::Id);
-                                        dirty = true;
-                                    }
-                                    if ui
-                                        .selectable_label(
-                                            pal.auto_tile
-                                                == Some(wiimaker_scene::SceneAutoTile::Solid),
-                                            "Solid",
-                                        )
-                                        .clicked()
-                                    {
-                                        pal.auto_tile =
-                                            Some(wiimaker_scene::SceneAutoTile::Solid);
-                                        dirty = true;
-                                    }
-                                });
-                        });
-                        if pal.auto_tile.is_some() {
-                            ui.label(
-                                RichText::new("NESW bitmask · N=1 E=2 S=4 W=8")
-                                    .size(10.0)
-                                    .color(theme::TEXT_DIM),
-                            );
-                            let mut variants = pal.auto_sprites.join(",");
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new("Variants")
-                                        .size(11.0)
-                                        .color(theme::TEXT_MUTED),
-                                );
-                                if ui
-                                    .add(
-                                        egui::TextEdit::singleline(&mut variants)
-                                            .desired_width(combo_w)
-                                            .hint_text("{sprite}_{mask}"),
-                                    )
-                                    .changed()
-                                {
-                                    pal.auto_sprites = if variants.trim().is_empty() {
-                                        Vec::new()
+                                ui.label(RichText::new("Anim").size(11.0).color(theme::TEXT_MUTED));
+                                let mut anim = pal.anim.clone().unwrap_or_default();
+                                let mut anim_changed = false;
+                                egui::ComboBox::from_id_salt(format!("tm_pal_anim_{pi}"))
+                                    .selected_text(if anim.is_empty() {
+                                        "(none)"
                                     } else {
-                                        variants
-                                            .split(',')
-                                            .map(|s| s.trim().to_string())
-                                            .collect()
-                                    };
+                                        anim.as_str()
+                                    })
+                                    .width(combo_w)
+                                    .show_ui(ui, |ui| {
+                                        if ui.selectable_label(anim.is_empty(), "(none)").clicked()
+                                        {
+                                            anim.clear();
+                                            anim_changed = true;
+                                        }
+                                        for name in &clip_names {
+                                            if ui.selectable_label(anim == *name, name).clicked() {
+                                                anim = name.clone();
+                                                anim_changed = true;
+                                            }
+                                        }
+                                    });
+                                if anim_changed {
+                                    pal.anim = if anim.is_empty() { None } else { Some(anim) };
                                     dirty = true;
                                 }
                             });
-                        }
-                    }
-                    if ui.small_button("+ palette id").clicked() {
-                        let next = tm.palette.iter().map(|p| p.id).max().unwrap_or(0) + 1;
-                        tm.palette.push(wiimaker_scene::SceneTilePalette::new(next));
-                        dirty = true;
-                    }
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new("Import ASCII")
-                            .size(12.0)
-                            .color(theme::TEXT_MUTED),
-                    );
-                    if ascii_files.is_empty() {
-                        theme::muted(ui, "Drop a .txt maze into Project, then Import");
-                    } else {
-                        theme::muted(ui, "# wall · . empty · 1-9 id · resizes grid");
-                        for rel in &ascii_files {
-                            let label = rel
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("map.txt");
-                            if ui
-                                .button(format!("Import {label}"))
-                                .on_hover_text("tilemap from-ascii — same helper as the CLI")
-                                .clicked()
-                            {
-                                pending_ascii_import = Some(rel.clone());
+                            if pal.anim_clip().is_some() {
+                                let mut use_override = pal.anim_fps.is_some();
+                                if ui.checkbox(&mut use_override, "Override FPS").changed() {
+                                    if use_override {
+                                        let default_fps = pal
+                                            .anim
+                                            .as_ref()
+                                            .and_then(|c| self.anim_catalog.lookup(c))
+                                            .map(|m| m.fps)
+                                            .unwrap_or(10.0);
+                                        pal.anim_fps = Some(default_fps);
+                                    } else {
+                                        pal.anim_fps = None;
+                                    }
+                                    dirty = true;
+                                }
+                                if let Some(fps) = pal.anim_fps.as_mut() {
+                                    dirty |= theme::labeled_drag(ui, "Fps", fps, 0.25);
+                                }
+                            }
+
+                            let rule_label = match pal.auto_tile {
+                                None => "Off",
+                                Some(wiimaker_scene::SceneAutoTile::Id) => "Same id",
+                                Some(wiimaker_scene::SceneAutoTile::Solid) => "Solid",
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("Auto Tile")
+                                        .size(11.0)
+                                        .color(theme::TEXT_MUTED),
+                                );
+                                egui::ComboBox::from_id_salt(format!("tm_pal_auto_{pi}"))
+                                    .selected_text(rule_label)
+                                    .width(100.0)
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_label(pal.auto_tile.is_none(), "Off")
+                                            .clicked()
+                                        {
+                                            pal.auto_tile = None;
+                                            dirty = true;
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                pal.auto_tile
+                                                    == Some(wiimaker_scene::SceneAutoTile::Id),
+                                                "Same id",
+                                            )
+                                            .clicked()
+                                        {
+                                            pal.auto_tile = Some(wiimaker_scene::SceneAutoTile::Id);
+                                            dirty = true;
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                pal.auto_tile
+                                                    == Some(wiimaker_scene::SceneAutoTile::Solid),
+                                                "Solid",
+                                            )
+                                            .clicked()
+                                        {
+                                            pal.auto_tile =
+                                                Some(wiimaker_scene::SceneAutoTile::Solid);
+                                            dirty = true;
+                                        }
+                                    });
+                            });
+                            if pal.auto_tile.is_some() {
+                                ui.label(
+                                    RichText::new("NESW bitmask · N=1 E=2 S=4 W=8")
+                                        .size(10.0)
+                                        .color(theme::TEXT_DIM),
+                                );
+                                let mut variants = pal.auto_sprites.join(",");
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Variants")
+                                            .size(11.0)
+                                            .color(theme::TEXT_MUTED),
+                                    );
+                                    if ui
+                                        .add(
+                                            egui::TextEdit::singleline(&mut variants)
+                                                .desired_width(combo_w)
+                                                .hint_text("{sprite}_{mask}"),
+                                        )
+                                        .changed()
+                                    {
+                                        pal.auto_sprites = if variants.trim().is_empty() {
+                                            Vec::new()
+                                        } else {
+                                            variants
+                                                .split(',')
+                                                .map(|s| s.trim().to_string())
+                                                .collect()
+                                        };
+                                        dirty = true;
+                                    }
+                                });
                             }
                         }
-                    }
-                });
+                        if ui.small_button("+ palette id").clicked() {
+                            let next = tm.palette.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+                            tm.palette.push(wiimaker_scene::SceneTilePalette::new(next));
+                            dirty = true;
+                        }
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new("Import ASCII")
+                                .size(12.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                        if ascii_files.is_empty() {
+                            theme::muted(ui, "Drop a .txt maze into Project, then Import");
+                        } else {
+                            theme::muted(ui, "# wall · . empty · 1-9 id · resizes grid");
+                            for rel in &ascii_files {
+                                let label = rel
+                                    .file_name()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or("map.txt");
+                                if ui
+                                    .button(format!("Import {label}"))
+                                    .on_hover_text("tilemap from-ascii — same helper as the CLI")
+                                    .clicked()
+                                {
+                                    pending_ascii_import = Some(rel.clone());
+                                }
+                            }
+                        }
+                    });
                 }
             }
 
@@ -823,67 +1011,67 @@ impl EditorApp {
                     remove_collider = true;
                 }
                 if hdr.open {
-                theme::inspector_props().show(ui, |ui| {
-                    let kind_label = match c.kind {
-                        SceneColliderKind::Aabb => "Aabb",
-                        SceneColliderKind::Circle => "Circle",
-                    };
-                    egui::ComboBox::from_id_salt("collider_kind")
-                        .selected_text(kind_label)
-                        .width(120.0)
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(c.kind == SceneColliderKind::Aabb, "Aabb")
-                                .clicked()
-                            {
-                                c.kind = SceneColliderKind::Aabb;
-                                dirty = true;
+                    theme::inspector_props().show(ui, |ui| {
+                        let kind_label = match c.kind {
+                            SceneColliderKind::Aabb => "Aabb",
+                            SceneColliderKind::Circle => "Circle",
+                        };
+                        egui::ComboBox::from_id_salt("collider_kind")
+                            .selected_text(kind_label)
+                            .width(120.0)
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_label(c.kind == SceneColliderKind::Aabb, "Aabb")
+                                    .clicked()
+                                {
+                                    c.kind = SceneColliderKind::Aabb;
+                                    dirty = true;
+                                }
+                                if ui
+                                    .selectable_label(c.kind == SceneColliderKind::Circle, "Circle")
+                                    .clicked()
+                                {
+                                    c.kind = SceneColliderKind::Circle;
+                                    dirty = true;
+                                }
+                            });
+                        match c.kind {
+                            SceneColliderKind::Aabb => {
+                                dirty |= theme::vec2_row_ov(
+                                    ui,
+                                    "Size",
+                                    &mut c.size,
+                                    0.5,
+                                    prefab_ov.has(ov_child, "Collider.size"),
+                                );
                             }
-                            if ui
-                                .selectable_label(c.kind == SceneColliderKind::Circle, "Circle")
-                                .clicked()
-                            {
-                                c.kind = SceneColliderKind::Circle;
-                                dirty = true;
+                            SceneColliderKind::Circle => {
+                                dirty |= theme::labeled_drag_ov(
+                                    ui,
+                                    "Radius",
+                                    &mut c.radius,
+                                    0.5,
+                                    prefab_ov.has(ov_child, "Collider.radius"),
+                                );
                             }
+                        }
+                        dirty |= ui.checkbox(&mut c.solid, "solid").changed();
+                        // trigger is independent of solid (Unity): trigger=true never blocks via overlap_solid.
+                        dirty |= ui.checkbox(&mut c.trigger, "Is Trigger").changed();
+                        ui.horizontal(|ui| {
+                            ui.label("Filter Tag");
+                            let r = ui.add(egui::DragValue::new(&mut c.filter_tag));
+                            r.clone().on_hover_text("0 = any");
+                            dirty |= r.changed();
                         });
-                    match c.kind {
-                        SceneColliderKind::Aabb => {
-                            dirty |= theme::vec2_row_ov(
-                                ui,
-                                "Size",
-                                &mut c.size,
-                                0.5,
-                                prefab_ov.has(ov_child, "Collider.size"),
-                            );
-                        }
-                        SceneColliderKind::Circle => {
-                            dirty |= theme::labeled_drag_ov(
-                                ui,
-                                "Radius",
-                                &mut c.radius,
-                                0.5,
-                                prefab_ov.has(ov_child, "Collider.radius"),
-                            );
-                        }
-                    }
-                    dirty |= ui.checkbox(&mut c.solid, "solid").changed();
-                    // trigger is independent of solid (Unity): trigger=true never blocks via overlap_solid.
-                    dirty |= ui.checkbox(&mut c.trigger, "Is Trigger").changed();
-                    ui.horizontal(|ui| {
-                        ui.label("Filter Tag");
-                        let r = ui.add(egui::DragValue::new(&mut c.filter_tag));
-                        r.clone().on_hover_text("0 = any");
-                        dirty |= r.changed();
+                        dirty |= theme::vec2_row_ov(
+                            ui,
+                            "Offset",
+                            &mut c.offset,
+                            0.5,
+                            prefab_ov.has(ov_child, "Collider.offset"),
+                        );
                     });
-                    dirty |= theme::vec2_row_ov(
-                        ui,
-                        "Offset",
-                        &mut c.offset,
-                        0.5,
-                        prefab_ov.has(ov_child, "Collider.offset"),
-                    );
-                });
                 }
             }
 
@@ -903,58 +1091,55 @@ impl EditorApp {
                     remove_camera = true;
                 }
                 if hdr.open {
-                theme::inspector_props().show(ui, |ui| {
-                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
-                    let current = cam.follow.clone().unwrap_or_default();
-                    let label = if current.is_empty() {
-                        "(none)"
-                    } else {
-                        current.as_str()
-                    };
-                    let mut new_follow = cam.follow.clone();
-                    let mut follow_changed = false;
-                    egui::ComboBox::from_id_salt("camera_follow")
-                        .selected_text(label)
-                        .width(combo_w)
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(current.is_empty(), "(none)")
-                                .clicked()
-                            {
-                                new_follow = None;
-                                follow_changed = true;
-                            }
-                            for name in &entity_names {
-                                if name == &sel {
-                                    continue;
-                                }
-                                if ui
-                                    .selectable_label(current.as_str() == name, name)
-                                    .clicked()
-                                {
-                                    new_follow = Some(name.clone());
+                    theme::inspector_props().show(ui, |ui| {
+                        let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                        let current = cam.follow.clone().unwrap_or_default();
+                        let label = if current.is_empty() {
+                            "(none)"
+                        } else {
+                            current.as_str()
+                        };
+                        let mut new_follow = cam.follow.clone();
+                        let mut follow_changed = false;
+                        egui::ComboBox::from_id_salt("camera_follow")
+                            .selected_text(label)
+                            .width(combo_w)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(current.is_empty(), "(none)").clicked() {
+                                    new_follow = None;
                                     follow_changed = true;
                                 }
-                            }
-                        });
-                    if follow_changed {
-                        cam.follow = new_follow;
-                        dirty = true;
-                    }
-                    dirty |= theme::labeled_drag_ov(
-                        ui,
-                        "Lerp",
-                        &mut cam.lerp,
-                        0.01,
-                        prefab_ov.has(ov_child, "Camera.lerp"),
-                    );
-                    if cam.lerp < 0.0 {
-                        cam.lerp = 0.0;
-                    }
-                    if cam.lerp > 1.0 {
-                        cam.lerp = 1.0;
-                    }
-                });
+                                for name in &entity_names {
+                                    if name == &sel {
+                                        continue;
+                                    }
+                                    if ui
+                                        .selectable_label(current.as_str() == name, name)
+                                        .clicked()
+                                    {
+                                        new_follow = Some(name.clone());
+                                        follow_changed = true;
+                                    }
+                                }
+                            });
+                        if follow_changed {
+                            cam.follow = new_follow;
+                            dirty = true;
+                        }
+                        dirty |= theme::labeled_drag_ov(
+                            ui,
+                            "Lerp",
+                            &mut cam.lerp,
+                            0.01,
+                            prefab_ov.has(ov_child, "Camera.lerp"),
+                        );
+                        if cam.lerp < 0.0 {
+                            cam.lerp = 0.0;
+                        }
+                        if cam.lerp > 1.0 {
+                            cam.lerp = 1.0;
+                        }
+                    });
                 }
                 ui.add_space(4.0);
             }
@@ -975,68 +1160,70 @@ impl EditorApp {
                     remove_grid_mover = true;
                 }
                 if hdr.open {
-                theme::inspector_props().show(ui, |ui| {
-                    dirty |= theme::labeled_drag_ov(
-                        ui,
-                        "Cell",
-                        &mut g.cell,
-                        0.25,
-                        prefab_ov.has(ov_child, "GridMover.cell"),
-                    );
-                    if g.cell < 0.01 {
-                        g.cell = 0.01;
-                    }
-                    dirty |= theme::labeled_drag_ov(
-                        ui,
-                        "Speed",
-                        &mut g.speed,
-                        0.5,
-                        prefab_ov.has(ov_child, "GridMover.speed"),
-                    );
-                    if g.speed < 0.0 {
-                        g.speed = 0.0;
-                    }
-                    let current = g.queued_dir;
-                    let label = match current {
-                        None => "(none)",
-                        Some(SceneDir::Up) => "Up",
-                        Some(SceneDir::Down) => "Down",
-                        Some(SceneDir::Left) => "Left",
-                        Some(SceneDir::Right) => "Right",
-                    };
-                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
-                    let mut new_q = current;
-                    let mut q_changed = false;
-                    egui::ComboBox::from_id_salt("grid_queued_dir")
-                        .selected_text(label)
-                        .width(combo_w)
-                        .show_ui(ui, |ui| {
-                            if ui.selectable_label(current.is_none(), "(none)").clicked() {
-                                new_q = None;
-                                q_changed = true;
-                            }
-                            for (d, name) in [
-                                (SceneDir::Up, "Up"),
-                                (SceneDir::Down, "Down"),
-                                (SceneDir::Left, "Left"),
-                                (SceneDir::Right, "Right"),
-                            ] {
-                                if ui.selectable_label(current == Some(d), name).clicked() {
-                                    new_q = Some(d);
+                    theme::inspector_props().show(ui, |ui| {
+                        dirty |= theme::labeled_drag_ov(
+                            ui,
+                            "Cell",
+                            &mut g.cell,
+                            0.25,
+                            prefab_ov.has(ov_child, "GridMover.cell"),
+                        );
+                        if g.cell < 0.01 {
+                            g.cell = 0.01;
+                        }
+                        dirty |= theme::labeled_drag_ov(
+                            ui,
+                            "Speed",
+                            &mut g.speed,
+                            0.5,
+                            prefab_ov.has(ov_child, "GridMover.speed"),
+                        );
+                        if g.speed < 0.0 {
+                            g.speed = 0.0;
+                        }
+                        let current = g.queued_dir;
+                        let label = match current {
+                            None => "(none)",
+                            Some(SceneDir::Up) => "Up",
+                            Some(SceneDir::Down) => "Down",
+                            Some(SceneDir::Left) => "Left",
+                            Some(SceneDir::Right) => "Right",
+                        };
+                        let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                        let mut new_q = current;
+                        let mut q_changed = false;
+                        egui::ComboBox::from_id_salt("grid_queued_dir")
+                            .selected_text(label)
+                            .width(combo_w)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(current.is_none(), "(none)").clicked() {
+                                    new_q = None;
                                     q_changed = true;
                                 }
-                            }
-                        });
-                    if q_changed {
-                        g.queued_dir = new_q;
-                        dirty = true;
-                    }
-                    ui.label(
-                        RichText::new("4-way only · diagonals use horizontal · reverse is immediate")
+                                for (d, name) in [
+                                    (SceneDir::Up, "Up"),
+                                    (SceneDir::Down, "Down"),
+                                    (SceneDir::Left, "Left"),
+                                    (SceneDir::Right, "Right"),
+                                ] {
+                                    if ui.selectable_label(current == Some(d), name).clicked() {
+                                        new_q = Some(d);
+                                        q_changed = true;
+                                    }
+                                }
+                            });
+                        if q_changed {
+                            g.queued_dir = new_q;
+                            dirty = true;
+                        }
+                        ui.label(
+                            RichText::new(
+                                "4-way only · diagonals use horizontal · reverse is immediate",
+                            )
                             .size(11.0)
                             .color(theme::TEXT_DIM),
-                    );
-                });
+                        );
+                    });
                 }
                 ui.add_space(4.0);
             }
@@ -1057,62 +1244,59 @@ impl EditorApp {
                     remove_audio_source = true;
                 }
                 if hdr.open {
-                theme::inspector_props().show(ui, |ui| {
-                    let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
-                    let mut clip_changed = false;
-                    let mut new_clip = a.clip.clone();
-                    egui::ComboBox::from_id_salt("audio_clip")
-                        .selected_text(if a.clip.is_empty() { "(none)" } else { &a.clip })
-                        .width(combo_w)
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(a.clip.is_empty(), "(none)")
-                                .clicked()
-                            {
-                                new_clip.clear();
-                                clip_changed = true;
-                            }
-                            for name in &self.wav_names {
-                                if ui.selectable_label(a.clip == *name, name).clicked() {
-                                    new_clip = name.clone();
+                    theme::inspector_props().show(ui, |ui| {
+                        let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                        let mut clip_changed = false;
+                        let mut new_clip = a.clip.clone();
+                        egui::ComboBox::from_id_salt("audio_clip")
+                            .selected_text(if a.clip.is_empty() { "(none)" } else { &a.clip })
+                            .width(combo_w)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(a.clip.is_empty(), "(none)").clicked() {
+                                    new_clip.clear();
                                     clip_changed = true;
                                 }
-                            }
-                        });
-                    if clip_changed {
-                        a.clip = new_clip;
-                        dirty = true;
-                    }
-                    dirty |= theme::labeled_drag_ov(
-                        ui,
-                        "Volume",
-                        &mut a.volume,
-                        0.01,
-                        prefab_ov.has(ov_child, "AudioSource.volume"),
-                    );
-                    if a.volume < 0.0 {
-                        a.volume = 0.0;
-                    }
-                    if a.volume > 1.0 {
-                        a.volume = 1.0;
-                    }
-                    dirty |= ui.checkbox(&mut a.play_on_awake, "Play On Awake").changed();
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("Play").color(theme::TEXT))
-                                .fill(theme::ACCENT_DIM),
-                        )
-                        .on_hover_text("Host oneshot preview")
-                        .clicked()
-                    {
-                        preview_audio = true;
-                    }
-                    ui.label(
-                        RichText::new("Host + Wii ASND PCM16 oneshot")
-                            .size(11.0)
-                            .color(theme::TEXT_DIM),
-                    );
-                });
+                                for name in &self.wav_names {
+                                    if ui.selectable_label(a.clip == *name, name).clicked() {
+                                        new_clip = name.clone();
+                                        clip_changed = true;
+                                    }
+                                }
+                            });
+                        if clip_changed {
+                            a.clip = new_clip;
+                            dirty = true;
+                        }
+                        dirty |= theme::labeled_drag_ov(
+                            ui,
+                            "Volume",
+                            &mut a.volume,
+                            0.01,
+                            prefab_ov.has(ov_child, "AudioSource.volume"),
+                        );
+                        if a.volume < 0.0 {
+                            a.volume = 0.0;
+                        }
+                        if a.volume > 1.0 {
+                            a.volume = 1.0;
+                        }
+                        dirty |= ui.checkbox(&mut a.play_on_awake, "Play On Awake").changed();
+                        if ui
+                            .add(
+                                egui::Button::new(RichText::new("Play").color(theme::TEXT))
+                                    .fill(theme::ACCENT_DIM),
+                            )
+                            .on_hover_text("Host oneshot preview")
+                            .clicked()
+                        {
+                            preview_audio = true;
+                        }
+                        ui.label(
+                            RichText::new("Host + Wii ASND PCM16 oneshot")
+                                .size(11.0)
+                                .color(theme::TEXT_DIM),
+                        );
+                    });
                 }
                 ui.add_space(4.0);
             }
@@ -1169,10 +1353,7 @@ impl EditorApp {
                                 prefab_ov.has(ov_child, "Text.color"),
                             );
                             let mut col = egui::Color32::from_rgba_unmultiplied(
-                                t.color[0],
-                                t.color[1],
-                                t.color[2],
-                                t.color[3],
+                                t.color[0], t.color[1], t.color[2], t.color[3],
                             );
                             if ui.color_edit_button_srgba(&mut col).changed() {
                                 t.color = [col.r(), col.g(), col.b(), col.a()];
@@ -1198,10 +1379,7 @@ impl EditorApp {
                                         SceneTextAlign::Right,
                                     ] {
                                         if ui
-                                            .selectable_label(
-                                                current == a,
-                                                a.to_runtime().as_str(),
-                                            )
+                                            .selectable_label(current == a, a.to_runtime().as_str())
                                             .clicked()
                                         {
                                             picked = a;
@@ -1237,6 +1415,7 @@ impl EditorApp {
             let missing_tilemap = ent.components.tilemap.is_none();
             let missing_collider = ent.components.collider.is_none();
             let missing_animation = ent.components.animation.is_none();
+            let missing_animator = ent.components.animator.is_none();
             let missing_camera = ent.components.camera.is_none();
             let missing_grid_mover = ent.components.grid_mover.is_none();
             let missing_audio_source = ent.components.audio_source.is_none();
@@ -1247,64 +1426,69 @@ impl EditorApp {
                 egui::vec2(add_w, 28.0),
                 egui::Layout::top_down(egui::Align::Center),
                 |ui| {
-            ui.set_min_width(add_w);
-            ui.menu_button(
-                RichText::new("Add Component").strong().color(theme::TEXT),
-                |ui| {
-                    if missing_sprite && ui.button("Sprite").clicked() {
-                        add_sprite = true;
-                        ui.close_menu();
-                    }
-                    if missing_disc && ui.button("Disc").clicked() {
-                        add_disc = true;
-                        ui.close_menu();
-                    }
-                    if missing_tilemap && ui.button("Tilemap").clicked() {
-                        add_tilemap = true;
-                        ui.close_menu();
-                    }
-                    if missing_collider && ui.button("Collider").clicked() {
-                        add_collider = true;
-                        ui.close_menu();
-                    }
-                    if missing_animation && ui.button("Animation").clicked() {
-                        add_animation = true;
-                        ui.close_menu();
-                    }
-                    if missing_camera && ui.button("Camera").clicked() {
-                        add_camera = true;
-                        ui.close_menu();
-                    }
-                    if missing_grid_mover && ui.button("GridMover").clicked() {
-                        add_grid_mover = true;
-                        ui.close_menu();
-                    }
-                    if missing_audio_source && ui.button("AudioSource").clicked() {
-                        add_audio_source = true;
-                        ui.close_menu();
-                    }
-                    if missing_text && ui.button("Text").clicked() {
-                        add_text = true;
-                        ui.close_menu();
-                    }
-                    if !missing_sprite
-                        && !missing_disc
-                        && !missing_tilemap
-                        && !missing_collider
-                        && !missing_animation
-                        && !missing_camera
-                        && !missing_grid_mover
-                        && !missing_audio_source
-                        && !missing_text
-                    {
-                        ui.label(
-                            RichText::new("All components present")
-                                .size(12.0)
-                                .color(theme::TEXT_MUTED),
-                        );
-                    }
-                },
-            );
+                    ui.set_min_width(add_w);
+                    ui.menu_button(
+                        RichText::new("Add Component").strong().color(theme::TEXT),
+                        |ui| {
+                            if missing_sprite && ui.button("Sprite").clicked() {
+                                add_sprite = true;
+                                ui.close_menu();
+                            }
+                            if missing_disc && ui.button("Disc").clicked() {
+                                add_disc = true;
+                                ui.close_menu();
+                            }
+                            if missing_tilemap && ui.button("Tilemap").clicked() {
+                                add_tilemap = true;
+                                ui.close_menu();
+                            }
+                            if missing_collider && ui.button("Collider").clicked() {
+                                add_collider = true;
+                                ui.close_menu();
+                            }
+                            if missing_animation && ui.button("Animation").clicked() {
+                                add_animation = true;
+                                ui.close_menu();
+                            }
+                            if missing_animator && ui.button("Animator").clicked() {
+                                add_animator = true;
+                                ui.close_menu();
+                            }
+                            if missing_camera && ui.button("Camera").clicked() {
+                                add_camera = true;
+                                ui.close_menu();
+                            }
+                            if missing_grid_mover && ui.button("GridMover").clicked() {
+                                add_grid_mover = true;
+                                ui.close_menu();
+                            }
+                            if missing_audio_source && ui.button("AudioSource").clicked() {
+                                add_audio_source = true;
+                                ui.close_menu();
+                            }
+                            if missing_text && ui.button("Text").clicked() {
+                                add_text = true;
+                                ui.close_menu();
+                            }
+                            if !missing_sprite
+                                && !missing_disc
+                                && !missing_tilemap
+                                && !missing_collider
+                                && !missing_animation
+                                && !missing_animator
+                                && !missing_camera
+                                && !missing_grid_mover
+                                && !missing_audio_source
+                                && !missing_text
+                            {
+                                ui.label(
+                                    RichText::new("All components present")
+                                        .size(12.0)
+                                        .color(theme::TEXT_MUTED),
+                                );
+                            }
+                        },
+                    );
                 },
             );
         }
@@ -1428,7 +1612,8 @@ impl EditorApp {
                 })
                 .unwrap_or((SceneColliderKind::Aabb, [32.0, 32.0], 16.0));
             self.push_undo();
-            let _ = add_component_collider(&mut self.scene, &sel, kind, size, radius, true, false, 0);
+            let _ =
+                add_component_collider(&mut self.scene, &sel, kind, size, radius, true, false, 0);
             self.sync_baseline();
             self.mark_dirty();
         }
@@ -1478,6 +1663,62 @@ impl EditorApp {
                 self.mark_dirty();
             } else {
                 let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if add_animator {
+            let ctrl = self
+                .controller_catalog
+                .names()
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "player".into());
+            self.push_undo();
+            let _ = add_component_animator(&mut self.scene, &sel, &ctrl);
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_animator {
+            self.push_undo();
+            if remove_component_animator(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_animator {
+            self.push_undo();
+            if set_component_enabled(&mut self.scene, &sel, "animator", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some((pname, val)) = live_anim_bool {
+            if self.play_mode != PlayMode::Edit {
+                if self.play_session.as_ref().is_some_and(|s| s.is_plugin()) {
+                    if let Some(w) = self.play_session.as_mut().and_then(|s| s.world_mut()) {
+                        if let Some(id) = w.find_by_name(&sel) {
+                            w.set_animator_bool(id, &pname, val);
+                        }
+                    }
+                } else if let Some(id) = self.world.find_by_name(&sel) {
+                    self.world.set_animator_bool(id, &pname, val);
+                }
+            }
+        }
+        if let Some((pname, val)) = live_anim_float {
+            if self.play_mode != PlayMode::Edit {
+                if self.play_session.as_ref().is_some_and(|s| s.is_plugin()) {
+                    if let Some(w) = self.play_session.as_mut().and_then(|s| s.world_mut()) {
+                        if let Some(id) = w.find_by_name(&sel) {
+                            w.set_animator_float(id, &pname, val);
+                        }
+                    }
+                } else if let Some(id) = self.world.find_by_name(&sel) {
+                    self.world.set_animator_float(id, &pname, val);
+                }
             }
         }
         if add_camera {
@@ -1625,9 +1866,8 @@ impl EditorApp {
                 self.unpack_selected_prefab(&sel);
             }
             if prefab_create_variant {
-                let base_stem = wiimaker_scene::prefab_stem(
-                    prefab_link.as_deref().unwrap_or(sel.as_str()),
-                );
+                let base_stem =
+                    wiimaker_scene::prefab_stem(prefab_link.as_deref().unwrap_or(sel.as_str()));
                 let as_name = format!("{base_stem}_Variant");
                 self.create_variant_from_selected(&sel, &as_name);
             }
@@ -1636,7 +1876,10 @@ impl EditorApp {
                 if ui.button("Save as Prefab…").clicked() {
                     self.save_entity_as_prefab(&sel);
                 }
-                theme::muted(ui, "Writes assets/prefabs/<name>.prefab.json (includes Hierarchy children)");
+                theme::muted(
+                    ui,
+                    "Writes assets/prefabs/<name>.prefab.json (includes Hierarchy children)",
+                );
             });
         }
     }
@@ -1755,11 +1998,7 @@ impl EditorApp {
                             .color(theme::TEXT_DIM)
                             .monospace(),
                     );
-                    ui.label(
-                        RichText::new("Invalid")
-                            .size(11.0)
-                            .color(theme::TEXT_DIM),
-                    );
+                    ui.label(RichText::new("Invalid").size(11.0).color(theme::TEXT_DIM));
                 }
             });
             ui.horizontal(|ui| {
@@ -1787,11 +2026,7 @@ impl EditorApp {
                             .color(theme::TEXT_DIM)
                             .monospace(),
                     );
-                    ui.label(
-                        RichText::new("Invalid")
-                            .size(11.0)
-                            .color(theme::TEXT_DIM),
-                    );
+                    ui.label(RichText::new("Invalid").size(11.0).color(theme::TEXT_DIM));
                 }
             });
             ui.horizontal(|ui| {
@@ -1829,11 +2064,7 @@ impl EditorApp {
                     }
                 }
                 if !any {
-                    ui.label(
-                        RichText::new("—")
-                            .size(11.0)
-                            .color(theme::TEXT_DIM),
-                    );
+                    ui.label(RichText::new("—").size(11.0).color(theme::TEXT_DIM));
                 }
             });
             ui.label(
@@ -1999,9 +2230,7 @@ impl EditorApp {
                 }
             } else if ext == "wav" {
                 if ui
-                    .add(
-                        egui::Button::new(RichText::new("Play").strong()).fill(theme::ACCENT_DIM),
-                    )
+                    .add(egui::Button::new(RichText::new("Play").strong()).fill(theme::ACCENT_DIM))
                     .on_hover_text("Preview this WAV on the host")
                     .clicked()
                 {
@@ -2009,7 +2238,10 @@ impl EditorApp {
                         self.preview_wav_clip(stem, 1.0);
                     }
                 }
-                theme::muted(ui, "PCM16 mono/stereo oneshot · cooked into .wpack for Wii ASND");
+                theme::muted(
+                    ui,
+                    "PCM16 mono/stereo oneshot · cooked into .wpack for Wii ASND",
+                );
             } else if ext == "txt" {
                 theme::muted(ui, "# wall · . / space / 0 empty · 1-9 palette id");
                 ui.add_space(4.0);
@@ -2093,8 +2325,8 @@ impl EditorApp {
                     {
                         move_to = Some((name.clone(), i + 1));
                     }
-                    let can_remove = !name.eq_ignore_ascii_case(DEFAULT_SORTING_LAYER)
-                        && layers.len() > 1;
+                    let can_remove =
+                        !name.eq_ignore_ascii_case(DEFAULT_SORTING_LAYER) && layers.len() > 1;
                     if ui
                         .add_enabled(can_remove, egui::Button::new("–").small())
                         .on_hover_text("Remove (assignments → Default)")

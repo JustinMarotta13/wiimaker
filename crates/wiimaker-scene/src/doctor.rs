@@ -7,7 +7,10 @@ use serde::Serialize;
 
 use crate::project::GameProject;
 use crate::scene::{load_scene, Scene};
-use wiimaker_assets::{inspect_wav, list_anim_clips, list_wav_clips, AnimClipMeta, SpriteCatalog};
+use wiimaker_assets::{
+    inspect_wav, list_anim_clips, list_animator_controllers, list_wav_clips, AnimClipMeta,
+    AnimatorControllerMeta, SpriteCatalog,
+};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -99,6 +102,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
     }
 
     let anim_names = list_anim_clips(&assets).unwrap_or_default();
+    let controller_names = list_animator_controllers(&assets).unwrap_or_default();
     let wav_names = list_wav_clips(&assets).unwrap_or_default();
     for wname in &wav_names {
         let path = assets.join(format!("{wname}.wav"));
@@ -136,12 +140,35 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
             }),
         }
     }
+    for cname in &controller_names {
+        let path = AnimatorControllerMeta::path(&assets, cname);
+        match AnimatorControllerMeta::load(&path) {
+            Ok(meta) => {
+                for s in &meta.states {
+                    if !anim_names.iter().any(|n| n == &s.clip) {
+                        issues.push(Issue {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "controller '{cname}': state '{}' clip '{}' missing (expected assets/{}.anim.json)",
+                                s.name, s.clip, s.clip
+                            ),
+                        });
+                    }
+                }
+            }
+            Err(e) => issues.push(Issue {
+                severity: Severity::Error,
+                message: format!("controller '{cname}': {e}"),
+            }),
+        }
+    }
 
     if let Some(scene) = &scene {
         check_scene_refs(
             scene,
             &sprite_names,
             &anim_names,
+            &controller_names,
             &wav_names,
             &assets,
             &project.effective_sorting_layers(),
@@ -247,6 +274,7 @@ fn check_scene_refs(
     scene: &Scene,
     sprites: &[String],
     anims: &[String],
+    controllers: &[String],
     wavs: &[String],
     assets: &Path,
     sorting_layers: &[String],
@@ -391,6 +419,22 @@ fn check_scene_refs(
                         }
                     }
                 }
+            }
+        }
+        if let Some(a) = &ent.components.animator {
+            if a.controller.is_empty() {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!("entity '{}': Animator has empty controller name", ent.name),
+                });
+            } else if !controllers.iter().any(|n| n == &a.controller) {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "entity '{}': Animator controller '{}' missing (expected assets/{}.controller.json)",
+                        ent.name, a.controller, a.controller
+                    ),
+                });
             }
         }
         if let Some(cam) = &ent.components.camera {

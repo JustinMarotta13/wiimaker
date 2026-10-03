@@ -592,9 +592,17 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Text"))?;
             t.enabled = enabled;
         }
+        "animator" => {
+            let a = ent
+                .components
+                .animator
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animator"))?;
+            a.enabled = enabled;
+        }
         other => {
             bail!(
-                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|GridMover|AudioSource|Text)"
+                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Animator|Camera|GridMover|AudioSource|Text)"
             )
         }
     }
@@ -671,6 +679,87 @@ pub fn set_entity_anim(
             });
         }
     }
+    Ok(())
+}
+
+pub fn add_component_animator(scene: &mut Scene, name: &str, controller: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let enabled = ent
+        .components
+        .animator
+        .as_ref()
+        .map(|a| a.enabled)
+        .unwrap_or(true);
+    let parameters = ent
+        .components
+        .animator
+        .as_ref()
+        .map(|a| a.parameters.clone())
+        .unwrap_or_default();
+    ent.components.animator = Some(crate::scene::SceneAnimator {
+        controller: controller.to_string(),
+        parameters,
+        enabled,
+    });
+    Ok(())
+}
+
+pub fn remove_component_animator(scene: &mut Scene, name: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    if ent.components.animator.is_none() {
+        bail!("entity '{name}' has no Animator");
+    }
+    ent.components.animator = None;
+    Ok(())
+}
+
+pub fn set_entity_controller(scene: &mut Scene, name: &str, controller: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    match ent.components.animator.as_mut() {
+        Some(a) => {
+            a.controller = controller.to_string();
+            a.enabled = true;
+        }
+        None => {
+            ent.components.animator = Some(crate::scene::SceneAnimator::new(controller));
+        }
+    }
+    Ok(())
+}
+
+pub fn set_entity_animator_bool(
+    scene: &mut Scene,
+    name: &str,
+    param: &str,
+    value: bool,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let a = ent
+        .components
+        .animator
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animator"))?;
+    let p = a.param_mut(param);
+    p.bool_value = Some(value);
+    p.float_value = None;
+    Ok(())
+}
+
+pub fn set_entity_animator_float(
+    scene: &mut Scene,
+    name: &str,
+    param: &str,
+    value: f32,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let a = ent
+        .components
+        .animator
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animator"))?;
+    let p = a.param_mut(param);
+    p.float_value = Some(value);
+    p.bool_value = None;
     Ok(())
 }
 

@@ -6,6 +6,7 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod animator;
 pub mod app;
 pub mod audio;
 pub mod collider;
@@ -23,6 +24,10 @@ pub mod time;
 pub mod wiimote_map;
 pub mod world;
 
+pub use animator::{
+    Animator, AnimatorCondition, AnimatorParam, AnimatorParamKind, AnimatorState,
+    AnimatorTransition,
+};
 pub use app::{App, FrameCtx};
 pub use audio::{queue_awake_audio, AudioSource, Oneshot};
 pub use collider::{
@@ -31,9 +36,9 @@ pub use collider::{
 };
 pub use color::Rgba8;
 pub use draw::{DrawCmd, DrawList, MeshId, Rect, TextureId};
-pub use render::{render_world, render_world_ex};
 pub use grid_mover::{cardinal, cell_center, step_grid_movers, Dir, GridMover, CARDINAL_DEADZONE};
 pub use input::{Button, Gesture, Input, Stick, SHAKE_DELTA_G, SWING_G};
+pub use render::{render_world, render_world_ex};
 pub use sorting::{
     cmp_sorting, default_sorting_layer_index, default_sorting_layers,
     is_default_sorting_layer_name, sorting_layer_index, DEFAULT_SORTING_LAYER,

@@ -1,5 +1,6 @@
-//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/AudioSource/Text).
+//! Entity store with Unity-shaped components (Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/Animator/AudioSource/Text).
 
+use crate::animator::Animator;
 use crate::audio::{AudioSource, Oneshot};
 use crate::collider::Collider;
 use crate::color::Rgba8;
@@ -180,7 +181,7 @@ mod alloc_types {
 use alloc_types::{String, Vec};
 
 #[derive(Clone, Debug)]
-struct Slot {
+pub(crate) struct Slot {
     live: bool,
     name: String,
     transform: Transform,
@@ -192,6 +193,7 @@ struct Slot {
     tilemap: Option<Tilemap>,
     collider: Option<Collider>,
     animation: Option<Animation>,
+    pub(crate) animator: Option<Animator>,
     grid_mover: Option<GridMover>,
     audio_source: Option<AudioSource>,
     text: Option<Text>,
@@ -239,6 +241,7 @@ impl World {
             slot.tilemap = None;
             slot.collider = None;
             slot.animation = None;
+            slot.animator = None;
             slot.grid_mover = None;
             slot.audio_source = None;
             slot.text = None;
@@ -257,6 +260,7 @@ impl World {
             tilemap: None,
             collider: None,
             animation: None,
+            animator: None,
             grid_mover: None,
             audio_source: None,
             text: None,
@@ -636,11 +640,11 @@ impl World {
         core::mem::take(&mut self.pending_oneshots)
     }
 
-    fn slot(&self, id: EntityId) -> Option<&Slot> {
+    pub(crate) fn slot(&self, id: EntityId) -> Option<&Slot> {
         self.slots.get(id.0 as usize).filter(|s| s.live)
     }
 
-    fn slot_mut(&mut self, id: EntityId) -> Option<&mut Slot> {
+    pub(crate) fn slot_mut(&mut self, id: EntityId) -> Option<&mut Slot> {
         self.slots.get_mut(id.0 as usize).filter(|s| s.live)
     }
 }

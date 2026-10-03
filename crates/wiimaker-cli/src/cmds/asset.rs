@@ -4,8 +4,10 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use wiimaker_assets::{
-    inspect_wav, list_anim_clips, list_wav_clips, resolve_wav, set_sprite_pivot, slice_sheet,
-    spawn_wav_player, write_anim_clip, SpriteCatalog,
+    inspect_wav, list_anim_clips, list_animator_controllers, list_wav_clips, resolve_wav,
+    set_sprite_pivot, slice_sheet, spawn_wav_player, write_anim_clip, write_animator_controller,
+    AnimatorControllerMeta, ControllerCondition, ControllerParam, ControllerParamType,
+    ControllerState, ControllerTransition, SpriteCatalog,
 };
 use wiimaker_scene::{find_game_dir, load_project};
 
@@ -57,9 +59,7 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             let dest = match ext.as_str() {
                 "wav" => assets.join(format!("{stem}.wav")),
                 "png" | "" => assets.join(format!("{stem}.png")),
-                other => anyhow::bail!(
-                    "asset import: expected .png or .wav, got .{other}"
-                ),
+                other => anyhow::bail!("asset import: expected .png or .wav, got .{other}"),
             };
             fs::copy(&path, &dest)
                 .with_context(|| format!("copy {} → {}", path.display(), dest.display()))?;
@@ -223,6 +223,75 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             }
             Ok(())
         }
+        AssetCmd::Controller {
+            game,
+            name,
+            default_state,
+            states,
+            params,
+            transition,
+            stdin,
+        } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let meta = if stdin {
+                let mut buf = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+                    .context("read controller JSON from stdin")?;
+                serde_json::from_str(&buf).context("parse controller JSON from stdin")?
+            } else {
+                parse_controller_flags(default_state, states, params, transition)?
+            };
+            let (path, meta) = write_animator_controller(&assets, &name, meta)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    path: String,
+                    name: String,
+                    #[serde(rename = "default")]
+                    default_state: String,
+                    states: usize,
+                    parameters: usize,
+                    transitions: usize,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Out {
+                        path: path.display().to_string(),
+                        name,
+                        default_state: meta.default_state,
+                        states: meta.states.len(),
+                        parameters: meta.parameters.len(),
+                        transitions: meta.transitions.len(),
+                    })?
+                );
+            } else {
+                println!(
+                    "wrote controller {} ({} states, {} params, {} transitions) → {}",
+                    name,
+                    meta.states.len(),
+                    meta.parameters.len(),
+                    meta.transitions.len(),
+                    path.display()
+                );
+            }
+            Ok(())
+        }
+        AssetCmd::ListControllers { game } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let names = list_animator_controllers(&assets)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&names)?);
+            } else {
+                for n in names {
+                    println!("{n}");
+                }
+            }
+            Ok(())
+        }
         AssetCmd::ListWavs { game } => {
             let game_dir = find_game_dir(root, &game)?;
             let project = load_project(&game_dir)?;
@@ -296,4 +365,119 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn parse_controller_flags(
+    default_state: Option<String>,
+    states: Option<String>,
+    params: Vec<String>,
+    transitions: Vec<String>,
+) -> Result<AnimatorControllerMeta> {
+    let states_spec = states.ok_or_else(|| {
+        anyhow::anyhow!("asset controller: pass --states Name:clip,... or --stdin")
+    })?;
+    let mut parsed_states = Vec::new();
+    for part in states_spec.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (sname, clip) = part
+            .split_once(':')
+            .ok_or_else(|| anyhow::anyhow!("--states entry '{part}' must be Name:clip"))?;
+        parsed_states.push(ControllerState {
+            name: sname.trim().to_string(),
+            clip: clip.trim().to_string(),
+            speed: 1.0,
+        });
+    }
+    if parsed_states.is_empty() {
+        anyhow::bail!("asset controller: --states must list at least one Name:clip");
+    }
+    let default_state = default_state.unwrap_or_else(|| parsed_states[0].name.clone());
+    let mut parameters = Vec::new();
+    for spec in params {
+        // Name:Bool=false  or Name:Float=0
+        let spec = spec.trim();
+        let (head, def) = spec.split_once('=').unwrap_or((spec, ""));
+        let (pname, ty) = head.split_once(':').ok_or_else(|| {
+            anyhow::anyhow!("--param '{spec}' must be Name:Bool[=false] or Name:Float[=0]")
+        })?;
+        let kind = ControllerParamType::parse(ty)
+            .ok_or_else(|| anyhow::anyhow!("--param '{spec}' unknown type (Bool|Float|Trigger)"))?;
+        let default = if def.is_empty() {
+            None
+        } else {
+            match kind {
+                ControllerParamType::Float => {
+                    let n: f64 = def
+                        .trim()
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("--param '{spec}' default is not a number"))?;
+                    Some(serde_json::json!(n))
+                }
+                ControllerParamType::Bool | ControllerParamType::Trigger => {
+                    let b = match def.trim().to_ascii_lowercase().as_str() {
+                        "true" | "1" | "yes" => true,
+                        "false" | "0" | "no" => false,
+                        other => anyhow::bail!("--param '{spec}' bool default '{other}'"),
+                    };
+                    Some(serde_json::json!(b))
+                }
+            }
+        };
+        parameters.push(ControllerParam {
+            name: pname.trim().to_string(),
+            kind,
+            default,
+        });
+    }
+    let mut parsed_transitions = Vec::new();
+    for spec in transitions {
+        // Idle>Walk:Moving=true
+        let spec = spec.trim();
+        let (edge, conds) = spec.split_once(':').unwrap_or((spec, ""));
+        let (from, to) = edge.split_once('>').ok_or_else(|| {
+            anyhow::anyhow!("--transition '{spec}' must be From>To[:Param=value,...]")
+        })?;
+        let mut conditions = Vec::new();
+        if !conds.is_empty() {
+            for c in conds.split(',') {
+                let c = c.trim();
+                if c.is_empty() {
+                    continue;
+                }
+                let (param, val) = c.split_once('=').ok_or_else(|| {
+                    anyhow::anyhow!("--transition condition '{c}' must be Param=value")
+                })?;
+                let val = val.trim();
+                let mut cc = ControllerCondition {
+                    param: param.trim().to_string(),
+                    ..Default::default()
+                };
+                if val.eq_ignore_ascii_case("true") {
+                    cc.equals = Some(serde_json::json!(true));
+                } else if val.eq_ignore_ascii_case("false") {
+                    cc.equals = Some(serde_json::json!(false));
+                } else if let Ok(n) = val.parse::<f64>() {
+                    cc.equals = Some(serde_json::json!(n));
+                } else {
+                    anyhow::bail!("--transition condition '{c}' value must be bool or number");
+                }
+                conditions.push(cc);
+            }
+        }
+        parsed_transitions.push(ControllerTransition {
+            from: from.trim().to_string(),
+            to: to.trim().to_string(),
+            conditions,
+            has_exit_time: false,
+        });
+    }
+    Ok(AnimatorControllerMeta {
+        default_state,
+        parameters,
+        states: parsed_states,
+        transitions: parsed_transitions,
+    })
 }

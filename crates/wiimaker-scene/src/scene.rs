@@ -327,6 +327,8 @@ pub struct SceneComponents {
     pub collider: Option<SceneCollider>,
     #[serde(default, rename = "Animation", skip_serializing_if = "Option::is_none")]
     pub animation: Option<SceneAnimation>,
+    #[serde(default, rename = "Animator", skip_serializing_if = "Option::is_none")]
+    pub animator: Option<SceneAnimator>,
     #[serde(default, rename = "GridMover", skip_serializing_if = "Option::is_none")]
     pub grid_mover: Option<SceneGridMover>,
     #[serde(
@@ -791,6 +793,58 @@ impl SceneAnimation {
             clip: clip.into(),
             ..Default::default()
         }
+    }
+}
+
+/// Animator controller player. `controller` is `assets/<stem>.controller.json`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SceneAnimator {
+    pub controller: String,
+    /// Overrides of controller parameter defaults (authoring / CLI).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<SceneAnimatorParam>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+}
+
+/// Persisted parameter override on a scene Animator.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SceneAnimatorParam {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "bool")]
+    pub bool_value: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "float")]
+    pub float_value: Option<f32>,
+}
+
+impl Default for SceneAnimator {
+    fn default() -> Self {
+        Self {
+            controller: String::new(),
+            parameters: Vec::new(),
+            enabled: true,
+        }
+    }
+}
+
+impl SceneAnimator {
+    pub fn new(controller: impl Into<String>) -> Self {
+        Self {
+            controller: controller.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn param_mut(&mut self, name: &str) -> &mut SceneAnimatorParam {
+        if let Some(i) = self.parameters.iter().position(|p| p.name == name) {
+            return &mut self.parameters[i];
+        }
+        self.parameters.push(SceneAnimatorParam {
+            name: name.to_string(),
+            bool_value: None,
+            float_value: None,
+        });
+        self.parameters.last_mut().unwrap()
     }
 }
 

@@ -4,7 +4,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
-use wiimaker_assets::{AnimClipCatalog, SpriteCatalog};
+use wiimaker_assets::{AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog};
+use wiimaker_core::animator::{
+    Animator, AnimatorCondition, AnimatorParam, AnimatorParamKind, AnimatorState,
+    AnimatorTransition,
+};
 use wiimaker_core::collider::{Collider, ColliderKind};
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::{Rect, TextureId};
@@ -74,6 +78,18 @@ pub fn hydrate_with_catalogs(
     Ok(world)
 }
 
+pub fn hydrate_with_all_catalogs(
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+    controllers: Option<&AnimatorControllerCatalog>,
+) -> Result<World> {
+    let mut world = World::new();
+    hydrate_into_with_all_catalogs(&mut world, scene, textures, catalog, anims, controllers)?;
+    Ok(world)
+}
+
 pub fn hydrate_into(world: &mut World, scene: &Scene, textures: &TextureMap) -> Result<()> {
     hydrate_into_with_catalog(world, scene, textures, None)
 }
@@ -94,9 +110,20 @@ pub fn hydrate_into_with_catalogs(
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
 ) -> Result<()> {
+    hydrate_into_with_all_catalogs(world, scene, textures, catalog, anims, None)
+}
+
+pub fn hydrate_into_with_all_catalogs(
+    world: &mut World,
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+    controllers: Option<&AnimatorControllerCatalog>,
+) -> Result<()> {
     world.clear();
     for ent in &scene.entities {
-        spawn_entity(world, scene, ent, textures, catalog, anims)?;
+        spawn_entity(world, scene, ent, textures, catalog, anims, controllers)?;
     }
     Ok(())
 }
@@ -122,7 +149,9 @@ pub fn load_scene_into_world(
     let rel = crate::project::resolve_scene_rel(game_dir, key)?;
     let scene = crate::scene::load_scene(&game_dir.join(&rel))?;
     world.set_sorting_layers(project.effective_sorting_layers());
-    hydrate_into_with_catalogs(world, &scene, textures, catalog, anims)?;
+    let controllers =
+        AnimatorControllerCatalog::load_dir(&project.assets_path(game_dir)).unwrap_or_default();
+    hydrate_into_with_all_catalogs(world, &scene, textures, catalog, anims, Some(&controllers))?;
     Ok(scene.clear_rgba())
 }
 
@@ -133,6 +162,7 @@ fn spawn_entity(
     textures: &TextureMap,
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
+    controllers: Option<&AnimatorControllerCatalog>,
 ) -> Result<()> {
     let xf = scene
         .world_transform(&ent.name)
@@ -216,6 +246,21 @@ fn spawn_entity(
                     Some(Animation::new(a.clip.clone(), Vec::new(), fps, loop_)),
                 );
             }
+        }
+    }
+
+    if let Some(a) = &ent.components.animator {
+        if a.enabled {
+            apply_scene_animator(
+                world,
+                id,
+                a,
+                controllers,
+                anims,
+                textures,
+                catalog,
+                ent.components.sprite.as_ref().and_then(|s| s.pivot),
+            );
         }
     }
 
@@ -333,7 +378,7 @@ pub fn hydrate_lenient_with_catalogs(
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
 ) -> World {
-    hydrate_lenient_with_sorting_layers(scene, textures, catalog, anims, None)
+    hydrate_lenient_with_all_catalogs(scene, textures, catalog, anims, None, None)
 }
 
 /// Like [`hydrate_lenient_with_catalogs`], but resolve Sorting Layers from `game.toml`.
@@ -342,6 +387,18 @@ pub fn hydrate_lenient_with_sorting_layers(
     textures: &TextureMap,
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
+    sorting_layers: Option<&[String]>,
+) -> World {
+    hydrate_lenient_with_all_catalogs(scene, textures, catalog, anims, None, sorting_layers)
+}
+
+/// Lenient hydrate with sprite clips, animator controllers, and sorting layers.
+pub fn hydrate_lenient_with_all_catalogs(
+    scene: &Scene,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+    controllers: Option<&AnimatorControllerCatalog>,
     sorting_layers: Option<&[String]>,
 ) -> World {
     let mut world = World::new();
@@ -411,6 +468,20 @@ pub fn hydrate_lenient_with_sorting_layers(
                     );
                 }
                 world.set_animation(id, Some(anim));
+            }
+        }
+        if let Some(a) = &ent.components.animator {
+            if a.enabled {
+                apply_scene_animator(
+                    &mut world,
+                    id,
+                    a,
+                    controllers,
+                    anims,
+                    textures,
+                    catalog,
+                    ent.components.sprite.as_ref().and_then(|s| s.pivot),
+                );
             }
         }
         if let Some(g) = &ent.components.grid_mover {
@@ -555,6 +626,132 @@ fn resolve_animation(
         .unwrap_or(10.0);
     let loop_ = a.loop_;
     (cells, fps, loop_)
+}
+
+fn apply_scene_animator(
+    world: &mut World,
+    id: wiimaker_core::world::EntityId,
+    scene_a: &crate::scene::SceneAnimator,
+    controllers: Option<&AnimatorControllerCatalog>,
+    anims: Option<&AnimClipCatalog>,
+    textures: &TextureMap,
+    catalog: Option<&SpriteCatalog>,
+    lock_pivot: Option<[f32; 2]>,
+) {
+    let mut rt = Animator::new(scene_a.controller.clone());
+    if let Some(meta) = controllers.and_then(|c| c.lookup(&scene_a.controller)) {
+        for p in &meta.parameters {
+            let mut rp = match p.kind {
+                wiimaker_assets::ControllerParamType::Bool => {
+                    AnimatorParam::bool_param(&p.name, p.default_bool())
+                }
+                wiimaker_assets::ControllerParamType::Float => {
+                    AnimatorParam::float_param(&p.name, p.default_float())
+                }
+                wiimaker_assets::ControllerParamType::Trigger => {
+                    AnimatorParam::trigger_param(&p.name)
+                }
+            };
+            if let Some(ov) = scene_a.parameters.iter().find(|o| o.name == p.name) {
+                if let Some(b) = ov.bool_value {
+                    rp.bool_value = b;
+                }
+                if let Some(f) = ov.float_value {
+                    rp.float_value = f;
+                    if rp.kind == AnimatorParamKind::Bool {
+                        rp.bool_value = f != 0.0;
+                    }
+                }
+            }
+            rt.parameters.push(rp);
+        }
+        for s in &meta.states {
+            let clip = anims.and_then(|c| c.lookup(&s.clip));
+            rt.states.push(AnimatorState {
+                name: s.name.clone(),
+                clip: s.clip.clone(),
+                speed: if s.speed > 0.0 { s.speed } else { 1.0 },
+                cells: clip.map(|m| m.cells.clone()).unwrap_or_default(),
+                fps: clip.map(|m| m.fps).filter(|f| *f > 0.0).unwrap_or(10.0),
+                loop_: clip.map(|m| m.loop_).unwrap_or(true),
+            });
+        }
+        for t in &meta.transitions {
+            rt.transitions.push(AnimatorTransition {
+                from: t.from.clone(),
+                from_any: wiimaker_assets::is_any_state(&t.from),
+                to: t.to.clone(),
+                conditions: t
+                    .conditions
+                    .iter()
+                    .map(|c| runtime_condition(c, &rt.parameters))
+                    .collect(),
+                has_exit_time: t.has_exit_time,
+            });
+        }
+        rt.state = meta.default_state.clone();
+    }
+    world.set_animator(id, Some(rt));
+    let state = world
+        .animator(id)
+        .map(|a| a.state.clone())
+        .unwrap_or_default();
+    if !state.is_empty() {
+        world.apply_animator_state(id, &state);
+        if let Some(cell) = world
+            .animation(id)
+            .and_then(|a| a.cell_name().map(|s| s.to_string()))
+        {
+            apply_animation_cell(world, id, &cell, textures, catalog, lock_pivot);
+        }
+    }
+}
+
+fn runtime_condition(
+    c: &wiimaker_assets::ControllerCondition,
+    params: &[AnimatorParam],
+) -> AnimatorCondition {
+    let kind = params.iter().find(|p| p.name == c.param).map(|p| p.kind);
+    if let Some(g) = c.greater {
+        return AnimatorCondition::FloatGreater {
+            param: c.param.clone(),
+            value: g,
+        };
+    }
+    if let Some(l) = c.less {
+        return AnimatorCondition::FloatLess {
+            param: c.param.clone(),
+            value: l,
+        };
+    }
+    if let Some(eq) = &c.equals {
+        if let Some(b) = eq.as_bool() {
+            if kind == Some(AnimatorParamKind::Trigger) && b {
+                return AnimatorCondition::Trigger {
+                    param: c.param.clone(),
+                };
+            }
+            return AnimatorCondition::BoolEq {
+                param: c.param.clone(),
+                value: b,
+            };
+        }
+        if let Some(n) = eq.as_f64() {
+            return AnimatorCondition::FloatEq {
+                param: c.param.clone(),
+                value: n as f32,
+            };
+        }
+    }
+    if kind == Some(AnimatorParamKind::Trigger) {
+        return AnimatorCondition::Trigger {
+            param: c.param.clone(),
+        };
+    }
+    AnimatorCondition::BoolEq {
+        param: c.param.clone(),
+        value: true,
+    }
 }
 
 fn apply_scene_camera(
