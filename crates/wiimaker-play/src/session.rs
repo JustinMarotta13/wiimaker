@@ -110,6 +110,10 @@ impl PlaySession {
         self.kind == PlayKind::Plugin
     }
 
+    pub fn world_mut(&mut self) -> Option<&mut World> {
+        self.plugin.as_mut().and_then(|p| p.world_mut())
+    }
+
     pub fn take_logs(&mut self) -> Vec<String> {
         std::mem::take(&mut self.logs)
     }

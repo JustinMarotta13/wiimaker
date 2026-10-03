@@ -3,14 +3,14 @@
 use std::path::Path;
 
 use anyhow::Result;
-use wiimaker_assets::{AnimClipCatalog, SpriteCatalog};
+use wiimaker_assets::{AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog};
 use wiimaker_core::collider::move_and_collide;
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::input::Input;
 use wiimaker_core::math::Vec2;
 use wiimaker_core::world::{World, SCREEN_H, SCREEN_W};
 use wiimaker_scene::{
-    animate_world, hydrate_lenient_with_sorting_layers, load_project, load_scene_into_world, Scene,
+    animate_world, hydrate_lenient_with_all_catalogs, load_project, load_scene_into_world, Scene,
     TextureMap,
 };
 
@@ -100,14 +100,17 @@ pub fn hydrate_play_world(
     anims: &AnimClipCatalog,
 ) -> Result<Rgba8> {
     let project = load_project(game_dir)?;
+    let controllers =
+        AnimatorControllerCatalog::load_dir(&project.assets_path(game_dir)).unwrap_or_default();
     if let Some(json) = scene_json.map(str::trim).filter(|s| !s.is_empty()) {
         let scene: Scene = serde_json::from_str(json)?;
         let layers = project.effective_sorting_layers();
-        *world = hydrate_lenient_with_sorting_layers(
+        *world = hydrate_lenient_with_all_catalogs(
             &scene,
             textures,
             Some(catalog),
             Some(anims),
+            Some(&controllers),
             Some(&layers),
         );
         Ok(scene.clear_rgba())

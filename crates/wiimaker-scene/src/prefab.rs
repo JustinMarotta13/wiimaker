@@ -305,11 +305,8 @@ pub fn topo_prefab_children(prefab: &Prefab) -> Vec<&EntityData> {
 /// Diff two prefab assets (root fields unprefixed; children as `Child/field`).
 pub fn prefab_asset_overrides(variant: &Prefab, base: &Prefab) -> PrefabOverrides {
     let mut fields = prefab_overrides(&variant.entity, &base.entity).fields;
-    let base_children: HashMap<&str, &EntityData> = base
-        .children
-        .iter()
-        .map(|c| (c.name.as_str(), c))
-        .collect();
+    let base_children: HashMap<&str, &EntityData> =
+        base.children.iter().map(|c| (c.name.as_str(), c)).collect();
     let mut seen = HashSet::new();
     for child in &variant.children {
         seen.insert(child.name.as_str());
@@ -600,13 +597,26 @@ fn copy_entity_field(dest: &mut EntityData, src: &EntityData, field: &str) {
             }
         }
         "Tilemap" => dest.components.tilemap = src.components.tilemap.clone(),
-        "Tilemap.cell" | "Tilemap.origin" | "Tilemap.size" | "Tilemap.cells" | "Tilemap.solid"
-        | "Tilemap.palette" | "Tilemap.z" | "Tilemap.sorting_layer" | "Tilemap.enabled" => {
+        "Tilemap.cell"
+        | "Tilemap.origin"
+        | "Tilemap.size"
+        | "Tilemap.cells"
+        | "Tilemap.solid"
+        | "Tilemap.palette"
+        | "Tilemap.z"
+        | "Tilemap.sorting_layer"
+        | "Tilemap.enabled" => {
             dest.components.tilemap = src.components.tilemap.clone();
         }
         "Collider" => dest.components.collider = src.components.collider.clone(),
-        "Collider.kind" | "Collider.size" | "Collider.radius" | "Collider.offset"
-        | "Collider.solid" | "Collider.trigger" | "Collider.filter_tag" | "Collider.enabled" => {
+        "Collider.kind"
+        | "Collider.size"
+        | "Collider.radius"
+        | "Collider.offset"
+        | "Collider.solid"
+        | "Collider.trigger"
+        | "Collider.filter_tag"
+        | "Collider.enabled" => {
             if let (Some(d), Some(s)) = (&mut dest.components.collider, &src.components.collider) {
                 match field {
                     "Collider.kind" => d.kind = s.kind,
@@ -648,6 +658,25 @@ fn copy_entity_field(dest: &mut EntityData, src: &EntityData, field: &str) {
                 d.enabled = s.enabled;
             }
         }
+        "Animator" => dest.components.animator = src.components.animator.clone(),
+        "Animator.controller" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.animator, &src.components.animator) {
+                d.controller = s.controller.clone();
+            } else {
+                dest.components.animator = src.components.animator.clone();
+            }
+        }
+        "Animator.parameters" | "Animator.enabled" => {
+            if let (Some(d), Some(s)) = (&mut dest.components.animator, &src.components.animator) {
+                match field {
+                    "Animator.parameters" => d.parameters = s.parameters.clone(),
+                    "Animator.enabled" => d.enabled = s.enabled,
+                    _ => {}
+                }
+            } else {
+                dest.components.animator = src.components.animator.clone();
+            }
+        }
         "GridMover" => dest.components.grid_mover = src.components.grid_mover.clone(),
         "GridMover.cell" | "GridMover.speed" | "GridMover.queued_dir" | "GridMover.enabled" => {
             if let (Some(d), Some(s)) =
@@ -665,7 +694,9 @@ fn copy_entity_field(dest: &mut EntityData, src: &EntityData, field: &str) {
             }
         }
         "AudioSource" => dest.components.audio_source = src.components.audio_source.clone(),
-        "AudioSource.clip" | "AudioSource.volume" | "AudioSource.play_on_awake"
+        "AudioSource.clip"
+        | "AudioSource.volume"
+        | "AudioSource.play_on_awake"
         | "AudioSource.enabled" => {
             if let (Some(d), Some(s)) = (
                 &mut dest.components.audio_source,
@@ -758,6 +789,21 @@ fn push_components(out: &mut Vec<String>, a: &SceneComponents, b: &SceneComponen
             }
         }
         (Some(_), None) | (None, Some(_)) => out.push("Animation".into()),
+        (None, None) => {}
+    }
+    match (&a.animator, &b.animator) {
+        (Some(i), Some(p)) => {
+            if i.controller != p.controller {
+                out.push("Animator.controller".into());
+            }
+            if i.parameters != p.parameters {
+                out.push("Animator.parameters".into());
+            }
+            if i.enabled != p.enabled {
+                out.push("Animator.enabled".into());
+            }
+        }
+        (Some(_), None) | (None, Some(_)) => out.push("Animator".into()),
         (None, None) => {}
     }
     match (&a.grid_mover, &b.grid_mover) {
@@ -1070,7 +1116,8 @@ mod tests {
 
     #[test]
     fn old_single_entity_prefab_json_loads() {
-        let json = r#"{"name":"Ghost","transform":{"translation":[1.0,2.0,0.0]},"components":{},"tag":0}"#;
+        let json =
+            r#"{"name":"Ghost","transform":{"translation":[1.0,2.0,0.0]},"components":{},"tag":0}"#;
         let pf: Prefab = serde_json::from_str(json).unwrap();
         assert_eq!(pf.entity.name, "Ghost");
         assert!(pf.children.is_empty());
@@ -1191,7 +1238,8 @@ mod tests {
 
     #[test]
     fn old_prefab_without_base_still_loads() {
-        let json = r#"{"name":"Ghost","transform":{"translation":[1.0,2.0,0.0]},"components":{},"tag":0}"#;
+        let json =
+            r#"{"name":"Ghost","transform":{"translation":[1.0,2.0,0.0]},"components":{},"tag":0}"#;
         let pf: Prefab = serde_json::from_str(json).unwrap();
         assert!(!pf.is_variant());
         assert!(pf.base.is_none());
@@ -1227,7 +1275,10 @@ mod tests {
         assert!(text.contains("\"overrides\""), "{text}");
         let back: Prefab = serde_json::from_str(&text).unwrap();
         assert!(back.is_variant());
-        assert_eq!(back.base.as_deref(), Some("assets/prefabs/ghost.prefab.json"));
+        assert_eq!(
+            back.base.as_deref(),
+            Some("assets/prefabs/ghost.prefab.json")
+        );
         assert_eq!(back.overrides, vec!["Disc.color".to_string()]);
     }
 }

@@ -13,6 +13,7 @@ use crate::hydrate::TextureMap;
 /// Tile palettes with `anim` clips advance [`wiimaker_core::tilemap::TileVisual`] frames.
 /// Call from host `App::update` and editor Play (tile palettes also tick in Edit mode).
 pub fn animate_world(world: &mut World, catalog: &SpriteCatalog, textures: &TextureMap, dt: f32) {
+    world.tick_animators(dt);
     world.tick_tilemaps(dt);
     let ids: Vec<_> = world.iter_entities().collect();
     for id in ids {

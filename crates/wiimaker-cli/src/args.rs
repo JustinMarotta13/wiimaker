@@ -323,6 +323,9 @@ pub enum EntityCmd {
         /// Clear Sprite pivot override (fall back to catalog).
         #[arg(long)]
         clear_pivot: bool,
+        /// Animator controller stem (`assets/<stem>.controller.json`)
+        #[arg(long)]
+        controller: Option<String>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -330,7 +333,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Camera, Follow, GridMover, AudioSource, or Text
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Animator, Camera, Follow, GridMover, AudioSource, or Text
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -408,6 +411,9 @@ pub enum EntityCmd {
         /// Sprite pivot Y override (normalized)
         #[arg(long)]
         pivot_y: Option<f32>,
+        /// Animator controller stem (`assets/<stem>.controller.json`)
+        #[arg(long)]
+        controller: Option<String>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -449,7 +455,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, Follow, GridMover, AudioSource, or Text (Follow removal clears fields; use entity set --follow "" to clear)
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Animator, Camera, Follow, GridMover, AudioSource, or Text (Follow removal clears fields; use entity set --follow "" to clear)
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -459,7 +465,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Camera, GridMover, AudioSource, or Text
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Animator, Camera, GridMover, AudioSource, or Text
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,
@@ -494,6 +500,31 @@ pub enum EntityCmd {
         fps: Option<f32>,
         #[arg(long, action = clap::ArgAction::Set)]
         r#loop: Option<bool>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Set Animator parameters (`--bool Moving=true`, `--float Speed=1`, `--trigger Jump`)
+    AnimatorSet {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// Bool parameter `Name=true|false` (repeatable)
+        #[arg(long = "bool")]
+        bools: Vec<String>,
+        /// Float parameter `Name=1.0` (repeatable)
+        #[arg(long = "float")]
+        floats: Vec<String>,
+        /// Trigger parameter name (repeatable; stored as bool true)
+        #[arg(long = "trigger")]
+        triggers: Vec<String>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Report Animator controller, state, and parameters (`--json`)
+    AnimatorStatus {
+        game: String,
+        #[arg(long)]
+        name: String,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -634,6 +665,31 @@ pub enum AssetCmd {
     },
     /// List `*.anim.json` clip stems
     ListAnims {
+        game: String,
+    },
+    /// Create / overwrite `assets/<name>.controller.json`
+    Controller {
+        game: String,
+        /// Controller stem (e.g. player)
+        name: String,
+        /// Default state name
+        #[arg(long = "default")]
+        default_state: Option<String>,
+        /// States `Name:clip` comma-separated (e.g. Idle:idle,Walk:walk)
+        #[arg(long)]
+        states: Option<String>,
+        /// Parameter `Name:Bool=false` or `Name:Float=0` (repeatable)
+        #[arg(long = "param")]
+        params: Vec<String>,
+        /// Transition `From>To:Param=true` (repeatable). Prefix From with Any for any-state.
+        #[arg(long)]
+        transition: Vec<String>,
+        /// Read a full controller JSON from stdin
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// List `*.controller.json` stems
+    ListControllers {
         game: String,
     },
     /// List `*.wav` clip stems under assets/

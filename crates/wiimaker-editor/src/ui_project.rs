@@ -679,6 +679,8 @@ pub(crate) fn file_kind_label(rel: &Path, is_dir: bool) -> &'static str {
         "Sprite sheet meta"
     } else if name.ends_with(".anim.json") {
         "Animation clip"
+    } else if name.ends_with(".controller.json") {
+        "Animator controller"
     } else if name == "game.toml" {
         "Project"
     } else {
