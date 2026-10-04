@@ -31,7 +31,9 @@ pub enum TimelineTrackKind {
 pub struct TimelineClipRuntime {
     pub start: f32,
     pub end: f32,
-    /// Activation: desired active flag while inside the clip.
+    /// Activation: GameObject flag while the playhead is inside this clip.
+    /// `true` = appear (entity is off outside every clip on this binding).
+    /// `false` = hide for the window, then restore the pre-timeline flag.
     pub active: bool,
     /// Animation stem (`*.anim.json`).
     pub clip: String,
@@ -267,6 +269,19 @@ impl World {
         }
     }
 
+    /// Apply playing directors at the current playhead (no audio). Used after
+    /// hydrate so `play_on_awake` Activation/`Transform` match `time == 0`.
+    pub fn apply_playing_timelines(&mut self) {
+        let ids: Vec<_> = self.iter_entities().collect();
+        for id in ids {
+            let Some(t) = self.director(id).and_then(|d| d.playing.then_some(d.time)) else {
+                continue;
+            };
+            self.ensure_timeline_baselines(id);
+            self.apply_director(id, -1.0, t, false);
+        }
+    }
+
     fn ensure_timeline_baselines(&mut self, id: EntityId) {
         let ready = self.director(id).is_some_and(|d| d.baselines_ready);
         if !ready && self.director(id).is_some() {
@@ -387,11 +402,15 @@ impl World {
         }
         for name in names {
             let mut inside: Option<bool> = None;
+            let mut has_appear = false;
             for track in tracks {
                 if track.kind != TimelineTrackKind::Activation || track.binding != name {
                     continue;
                 }
                 for clip in &track.clips {
+                    if clip.active {
+                        has_appear = true;
+                    }
                     if clip.contains(time) {
                         inside = Some(clip.active);
                     }
@@ -402,11 +421,13 @@ impl World {
                 .find(|b| b.name == name)
                 .map(|b| b.active)
                 .unwrap_or(true);
-            // Inside a clip: `active` is the desired GameObject flag.
-            // Outside every clip: restore the pre-timeline flag (so `active:
-            // false` can hide during the clip without leaving the entity off).
+            // Appear (`active: true`): off until the first clip, off after the
+            // last clip, off on Stop at t=0. Hide (`active: false` only): off
+            // while inside, restore the capture flag outside. Scene JSON has no
+            // GameObject inactive bit, so appear cannot rely on that snapshot.
+            let outside = if has_appear { false } else { baseline };
             if let Some(eid) = self.find_by_name(&name) {
-                self.set_active(eid, inside.unwrap_or(baseline));
+                self.set_active(eid, inside.unwrap_or(outside));
             }
         }
     }
@@ -723,13 +744,13 @@ mod tests {
     }
 
     #[test]
-    fn activation_false_hides_inside_clip_and_stop_restores() {
+    fn activation_appear_and_hide_without_manual_inactive() {
         let mut world = World::new();
         let ghost = world.spawn_named("IntroGhost", Transform::default());
         let hud = world.spawn_named("Hud", Transform::default());
-        world.set_active(ghost, false);
+        assert!(world.is_active(ghost), "scene-like spawn starts active");
         let dir = world.spawn_named("Cutscene", Transform::default());
-        let mut d = PlayableDirector::new("intro", 4.0, true, false);
+        let mut d = PlayableDirector::new("intro", 5.0, true, false);
         d.tracks.push(track(
             "Appear",
             TimelineTrackKind::Activation,
@@ -744,10 +765,13 @@ mod tests {
         ));
         world.set_director(dir, Some(d));
         world.capture_timeline_baselines();
+        world.apply_playing_timelines();
 
-        world.set_timeline_time(dir, 0.0);
-        assert!(!world.is_active(ghost), "outside appear: authored inactive");
-        assert!(world.is_active(hud), "outside hide: authored active");
+        assert!(!world.is_active(ghost), "appear: off before 0.5s");
+        assert!(world.is_active(hud), "hide-only: on before the clip");
+
+        world.set_timeline_time(dir, 0.2);
+        assert!(!world.is_active(ghost));
 
         world.set_timeline_time(dir, 1.5);
         assert!(world.is_active(ghost), "inside appear clip");
@@ -763,8 +787,14 @@ mod tests {
             "clip end is inclusive; still inside appear"
         );
 
+        world.set_timeline_time(dir, 4.5);
+        assert!(
+            !world.is_active(ghost),
+            "after the last appear clip the entity stays off"
+        );
+
         world.stop_timeline(dir);
-        assert!(!world.is_active(ghost), "stop at t=0 restores inactive");
+        assert!(!world.is_active(ghost), "Stop at t=0 is still before 0.5s");
         assert!(world.is_active(hud), "stop restores HUD");
     }
 
