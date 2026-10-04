@@ -72,6 +72,10 @@ wiimaker editor prefs my-game --json
 wiimaker editor play-status my-game --json   # in-editor Play backend (plugin vs WASD fallback)
 wiimaker asset import my-game ./beep.wav
 wiimaker asset play my-game --name beep
+wiimaker asset timeline my-game intro --duration 4 --track 'GhostAppear:Activation:IntroGhost:0.5-4:true' --track 'CamSlide:Transform:MainCamera:0-2:320,240>400,240'
+wiimaker asset list-timelines my-game --json
+wiimaker entity add-component my-game --name Director PlayableDirector --timeline intro --play-on-awake true --loop false
+wiimaker entity timeline-status my-game --name Director --json
 wiimaker entity add-component my-game --name Player AudioSource --clip beep --volume 1 --play-on-awake false
 # or: wiimaker entity set my-game --name Player --audio-clip beep --volume 0.8 --play-on-awake true
 wiimaker entity add my-game --name Player --sprite hero_2 --x 320 --y 240

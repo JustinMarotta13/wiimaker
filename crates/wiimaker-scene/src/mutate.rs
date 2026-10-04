@@ -600,9 +600,17 @@ pub fn set_component_enabled(
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animator"))?;
             a.enabled = enabled;
         }
+        "playabledirector" | "playable_director" | "playable-director" | "timeline" => {
+            let d = ent
+                .components
+                .playable_director
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no PlayableDirector"))?;
+            d.enabled = enabled;
+        }
         other => {
             bail!(
-                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Animator|Camera|GridMover|AudioSource|Text)"
+                "unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Animator|PlayableDirector|Camera|GridMover|AudioSource|Text)"
             )
         }
     }
@@ -701,6 +709,64 @@ pub fn add_component_animator(scene: &mut Scene, name: &str, controller: &str) -
         parameters,
         enabled,
     });
+    Ok(())
+}
+
+pub fn add_component_playable_director(
+    scene: &mut Scene,
+    name: &str,
+    timeline: &str,
+    play_on_awake: bool,
+    loop_: bool,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let enabled = ent
+        .components
+        .playable_director
+        .as_ref()
+        .map(|d| d.enabled)
+        .unwrap_or(true);
+    ent.components.playable_director = Some(crate::scene::ScenePlayableDirector {
+        timeline: timeline.to_string(),
+        play_on_awake,
+        loop_,
+        enabled,
+    });
+    Ok(())
+}
+
+pub fn remove_component_playable_director(scene: &mut Scene, name: &str) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    if ent.components.playable_director.is_none() {
+        bail!("entity '{name}' has no PlayableDirector");
+    }
+    ent.components.playable_director = None;
+    Ok(())
+}
+
+pub fn set_entity_playable_director(
+    scene: &mut Scene,
+    name: &str,
+    timeline: Option<&str>,
+    play_on_awake: Option<bool>,
+    loop_: Option<bool>,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    if ent.components.playable_director.is_none() {
+        ent.components.playable_director = Some(crate::scene::ScenePlayableDirector::new(
+            timeline.unwrap_or(""),
+        ));
+    }
+    let d = ent.components.playable_director.as_mut().unwrap();
+    if let Some(t) = timeline {
+        d.timeline = t.to_string();
+    }
+    if let Some(v) = play_on_awake {
+        d.play_on_awake = v;
+    }
+    if let Some(v) = loop_ {
+        d.loop_ = v;
+    }
     Ok(())
 }
 

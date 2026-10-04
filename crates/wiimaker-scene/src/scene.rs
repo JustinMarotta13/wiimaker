@@ -329,6 +329,12 @@ pub struct SceneComponents {
     pub animation: Option<SceneAnimation>,
     #[serde(default, rename = "Animator", skip_serializing_if = "Option::is_none")]
     pub animator: Option<SceneAnimator>,
+    #[serde(
+        default,
+        rename = "PlayableDirector",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub playable_director: Option<ScenePlayableDirector>,
     #[serde(default, rename = "GridMover", skip_serializing_if = "Option::is_none")]
     pub grid_mover: Option<SceneGridMover>,
     #[serde(
@@ -823,6 +829,43 @@ impl Default for SceneAnimator {
             controller: String::new(),
             parameters: Vec::new(),
             enabled: true,
+        }
+    }
+}
+
+/// Unity PlayableDirector. `timeline` is `assets/<stem>.timeline.json`.
+/// Host/editor only (not baked into WSCN).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScenePlayableDirector {
+    pub timeline: String,
+    #[serde(
+        default = "default_true",
+        rename = "play_on_awake",
+        skip_serializing_if = "is_true"
+    )]
+    pub play_on_awake: bool,
+    #[serde(default, rename = "loop", skip_serializing_if = "is_false")]
+    pub loop_: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+}
+
+impl Default for ScenePlayableDirector {
+    fn default() -> Self {
+        Self {
+            timeline: String::new(),
+            play_on_awake: true,
+            loop_: false,
+            enabled: true,
+        }
+    }
+}
+
+impl ScenePlayableDirector {
+    pub fn new(timeline: impl Into<String>) -> Self {
+        Self {
+            timeline: timeline.into(),
+            ..Default::default()
         }
     }
 }

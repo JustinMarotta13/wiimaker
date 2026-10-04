@@ -150,6 +150,10 @@ impl EditorApp {
                             self.focus_tab(EditorTab::Console);
                             ui.close_menu();
                         }
+                        if ui.button("Timeline").clicked() {
+                            self.focus_tab(EditorTab::Timeline);
+                            ui.close_menu();
+                        }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -170,10 +174,8 @@ impl EditorApp {
                 ui.set_clip_rect(full);
                 let _ = ui.allocate_rect(full, egui::Sense::hover());
                 let play_w = 120.0;
-                let mid = egui::Rect::from_center_size(
-                    full.center(),
-                    egui::vec2(play_w, full.height()),
-                );
+                let mid =
+                    egui::Rect::from_center_size(full.center(), egui::vec2(play_w, full.height()));
                 let left = egui::Rect::from_min_max(
                     full.left_top(),
                     egui::pos2(mid.left() - 4.0, full.bottom()),
@@ -210,22 +212,27 @@ impl EditorApp {
                         {
                             self.build_and_run_wii();
                         }
-                        theme::icon_menu_button(ui, "toolbar_overflow", theme::MenuIcon::Ellipsis, |ui| {
-                            if ui.button("Cook assets...").clicked() {
-                                self.cook();
-                            }
-                            if ui.button("Doctor").clicked() {
-                                self.doctor();
-                            }
-                            if ui.button("Refresh assets").clicked() {
-                                if let Err(e) = self.reload_assets() {
-                                    self.status = format!("refresh failed: {e}");
-                                } else {
-                                    self.rehydrate();
-                                    self.status = "assets refreshed".into();
+                        theme::icon_menu_button(
+                            ui,
+                            "toolbar_overflow",
+                            theme::MenuIcon::Ellipsis,
+                            |ui| {
+                                if ui.button("Cook assets...").clicked() {
+                                    self.cook();
                                 }
-                            }
-                        });
+                                if ui.button("Doctor").clicked() {
+                                    self.doctor();
+                                }
+                                if ui.button("Refresh assets").clicked() {
+                                    if let Err(e) = self.reload_assets() {
+                                        self.status = format!("refresh failed: {e}");
+                                    } else {
+                                        self.rehydrate();
+                                        self.status = "assets refreshed".into();
+                                    }
+                                }
+                            },
+                        );
                     });
                 });
 

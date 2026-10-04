@@ -326,6 +326,12 @@ pub enum EntityCmd {
         /// Animator controller stem (`assets/<stem>.controller.json`)
         #[arg(long)]
         controller: Option<String>,
+        /// PlayableDirector timeline stem (`assets/<stem>.timeline.json`)
+        #[arg(long)]
+        timeline: Option<String>,
+        /// PlayableDirector loop (creates the component if missing)
+        #[arg(long = "loop", action = clap::ArgAction::Set)]
+        timeline_loop: Option<bool>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -333,7 +339,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Animator, Camera, Follow, GridMover, AudioSource, or Text
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Trigger, Animation, Animator, PlayableDirector, Camera, Follow, GridMover, AudioSource, or Text
         kind: String,
         #[arg(long)]
         texture: Option<String>,
@@ -372,9 +378,9 @@ pub enum EntityCmd {
         /// Animation fps override (omit to use clip file)
         #[arg(long)]
         fps: Option<f32>,
-        /// Animation loop (default true)
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-        r#loop: bool,
+        /// Animation loop (default true). PlayableDirector loop (default false) shares this flag.
+        #[arg(long, action = clap::ArgAction::Set)]
+        r#loop: Option<bool>,
         /// Follow target entity name (`Follow` / `Camera`)
         #[arg(long)]
         target: Option<String>,
@@ -390,9 +396,9 @@ pub enum EntityCmd {
         /// AudioSource volume 0..1 (default 1)
         #[arg(long, default_value_t = 1.0)]
         volume: f32,
-        /// AudioSource play-on-awake
-        #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
-        play_on_awake: bool,
+        /// AudioSource play-on-awake (default false). PlayableDirector play-on-awake (default true).
+        #[arg(long, action = clap::ArgAction::Set)]
+        play_on_awake: Option<bool>,
         /// HUD Text string (default "Text")
         #[arg(long)]
         text: Option<String>,
@@ -414,6 +420,9 @@ pub enum EntityCmd {
         /// Animator controller stem (`assets/<stem>.controller.json`)
         #[arg(long)]
         controller: Option<String>,
+        /// PlayableDirector timeline stem (`assets/<stem>.timeline.json`)
+        #[arg(long)]
+        timeline: Option<String>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -455,7 +464,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Animator, Camera, Follow, GridMover, AudioSource, or Text (Follow removal clears fields; use entity set --follow "" to clear)
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Animator, PlayableDirector, Camera, Follow, GridMover, AudioSource, or Text (Follow removal clears fields; use entity set --follow "" to clear)
         kind: String,
         #[arg(long)]
         scene: Option<String>,
@@ -465,7 +474,7 @@ pub enum EntityCmd {
         game: String,
         #[arg(long)]
         name: String,
-        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Animator, Camera, GridMover, AudioSource, or Text
+        /// Component kind: Sprite, Disc, Tilemap, Collider, Animation, Animator, PlayableDirector, Camera, GridMover, AudioSource, or Text
         kind: String,
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: bool,
@@ -522,6 +531,30 @@ pub enum EntityCmd {
     },
     /// Report Animator controller, state, and parameters (`--json`)
     AnimatorStatus {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Start a PlayableDirector (hydrate, `playing: true`). `--json` reports transport.
+    TimelinePlay {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Stop a PlayableDirector and snap time to 0. `--json` reports transport.
+    TimelineStop {
+        game: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Report PlayableDirector time, playing, finished, and timeline stem (`--json`)
+    TimelineStatus {
         game: String,
         #[arg(long)]
         name: String,
@@ -690,6 +723,27 @@ pub enum AssetCmd {
     },
     /// List `*.controller.json` stems
     ListControllers {
+        game: String,
+    },
+    /// Create / overwrite `assets/<name>.timeline.json`
+    Timeline {
+        game: String,
+        /// Timeline stem (e.g. intro)
+        name: String,
+        #[arg(long, default_value_t = 4.0)]
+        duration: f32,
+        /// Track `Name:Kind:Binding:start-end:payload` (repeatable).
+        /// Activation payload `true|false`. Animation payload is a clip stem.
+        /// Audio payload `stem` or `stem:volume`. Transform payload `x,y>x,y`.
+        /// Binding `-` is unbound.
+        #[arg(long = "track")]
+        tracks: Vec<String>,
+        /// Read a full timeline JSON from stdin
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// List `*.timeline.json` stems
+    ListTimelines {
         game: String,
     },
     /// List `*.wav` clip stems under assets/

@@ -10,6 +10,7 @@ use crate::math::{Quat, Vec2, Vec3};
 use crate::sorting::{default_sorting_layer_index, default_sorting_layers};
 use crate::text::Text;
 use crate::tilemap::Tilemap;
+use crate::timeline::PlayableDirector;
 
 /// Host / scene framebuffer size (Wii VI analogue for v0 ortho).
 pub const SCREEN_W: f32 = 640.0;
@@ -146,6 +147,8 @@ pub struct Animation {
     pub time: f32,
     /// Current cell index into `cells`.
     pub frame: usize,
+    /// When true, [`crate::world::World::tick_timelines`] owns `time` (do not add `dt`).
+    pub hold_time: bool,
 }
 
 impl Animation {
@@ -157,6 +160,7 @@ impl Animation {
             loop_,
             time: 0.0,
             frame: 0,
+            hold_time: false,
         }
     }
 
@@ -194,6 +198,9 @@ pub(crate) struct Slot {
     collider: Option<Collider>,
     animation: Option<Animation>,
     pub(crate) animator: Option<Animator>,
+    pub(crate) director: Option<PlayableDirector>,
+    /// GameObject active. Activation tracks set this; render skips inactive entities.
+    active: bool,
     grid_mover: Option<GridMover>,
     audio_source: Option<AudioSource>,
     text: Option<Text>,
@@ -242,6 +249,8 @@ impl World {
             slot.collider = None;
             slot.animation = None;
             slot.animator = None;
+            slot.director = None;
+            slot.active = true;
             slot.grid_mover = None;
             slot.audio_source = None;
             slot.text = None;
@@ -261,6 +270,8 @@ impl World {
             collider: None,
             animation: None,
             animator: None,
+            director: None,
+            active: true,
             grid_mover: None,
             audio_source: None,
             text: None,
@@ -562,6 +573,31 @@ impl World {
     pub fn set_animation(&mut self, id: EntityId, animation: Option<Animation>) {
         if let Some(slot) = self.slot_mut(id) {
             slot.animation = animation;
+        }
+    }
+
+    /// GameObject active flag. Inactive entities are omitted from [`crate::render::render_world`].
+    pub fn is_active(&self, id: EntityId) -> bool {
+        self.slot(id).is_some_and(|s| s.active)
+    }
+
+    pub fn set_active(&mut self, id: EntityId, active: bool) {
+        if let Some(slot) = self.slot_mut(id) {
+            slot.active = active;
+        }
+    }
+
+    pub fn director(&self, id: EntityId) -> Option<&PlayableDirector> {
+        self.slot(id).and_then(|s| s.director.as_ref())
+    }
+
+    pub fn director_mut(&mut self, id: EntityId) -> Option<&mut PlayableDirector> {
+        self.slot_mut(id).and_then(|s| s.director.as_mut())
+    }
+
+    pub fn set_director(&mut self, id: EntityId, director: Option<PlayableDirector>) {
+        if let Some(slot) = self.slot_mut(id) {
+            slot.director = director;
         }
     }
 

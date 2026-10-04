@@ -67,6 +67,7 @@ impl EditorApp {
         let mut add_collider = false;
         let mut add_animation = false;
         let mut add_animator = false;
+        let mut add_director = false;
         let mut add_camera = false;
         let mut add_grid_mover = false;
         let mut add_audio_source = false;
@@ -77,6 +78,7 @@ impl EditorApp {
         let mut remove_collider = false;
         let mut remove_animation = false;
         let mut remove_animator = false;
+        let mut remove_director = false;
         let mut remove_camera = false;
         let mut remove_grid_mover = false;
         let mut remove_audio_source = false;
@@ -87,6 +89,10 @@ impl EditorApp {
         let mut toggle_collider: Option<bool> = None;
         let mut toggle_animation: Option<bool> = None;
         let mut toggle_animator: Option<bool> = None;
+        let mut toggle_director: Option<bool> = None;
+        let mut director_play = false;
+        let mut director_stop = false;
+        let mut director_scrub: Option<f32> = None;
         let mut toggle_camera: Option<bool> = None;
         let mut toggle_grid_mover: Option<bool> = None;
         let mut toggle_audio_source: Option<bool> = None;
@@ -664,6 +670,108 @@ impl EditorApp {
                                 ui,
                                 &format!("missing assets/{}.controller.json", a.controller),
                             );
+                        }
+                    });
+                }
+                ui.add_space(4.0);
+            }
+
+            if let Some(d) = ent.components.playable_director.as_mut() {
+                let hdr = theme::component_card_header_ov(
+                    ui,
+                    "playable_director",
+                    "Playable Director",
+                    Some(d.enabled),
+                    true,
+                    prefab_ov.component_at(ov_child, "PlayableDirector"),
+                );
+                if let Some(en) = hdr.toggle {
+                    toggle_director = Some(en);
+                }
+                if hdr.remove {
+                    remove_director = true;
+                }
+                if hdr.open {
+                    theme::inspector_props().show(ui, |ui| {
+                        let names: Vec<String> = self.timeline_catalog.names().to_vec();
+                        let (live_time, live_playing, live_finished) = {
+                            let world: &wiimaker_core::world::World =
+                                if self.play_mode != PlayMode::Edit {
+                                    self.play_session
+                                        .as_ref()
+                                        .and_then(|s| s.world())
+                                        .unwrap_or(&self.world)
+                                } else {
+                                    &self.world
+                                };
+                            world
+                                .find_by_name(&sel)
+                                .and_then(|id| world.director(id))
+                                .map(|dir| (dir.time, dir.playing, dir.finished))
+                                .unwrap_or((0.0, false, false))
+                        };
+                        let combo_w = (ui.available_width() - 8.0).clamp(100.0, 220.0);
+                        ui.horizontal(|ui| {
+                            theme::inspector_label_ov(
+                                ui,
+                                "Timeline",
+                                prefab_ov.has(ov_child, "PlayableDirector.timeline"),
+                            );
+                            egui::ComboBox::from_id_salt("director_timeline")
+                                .width(combo_w)
+                                .selected_text(if d.timeline.is_empty() {
+                                    "None".to_string()
+                                } else {
+                                    d.timeline.clone()
+                                })
+                                .show_ui(ui, |ui| {
+                                    if names.is_empty() {
+                                        ui.label(
+                                            RichText::new("No .timeline.json assets")
+                                                .color(theme::TEXT_MUTED),
+                                        );
+                                    }
+                                    for n in &names {
+                                        if ui.selectable_label(d.timeline == *n, n).clicked() {
+                                            d.timeline = n.clone();
+                                            dirty = true;
+                                        }
+                                    }
+                                });
+                        });
+                        dirty |= ui.checkbox(&mut d.play_on_awake, "Play On Awake").changed();
+                        dirty |= ui.checkbox(&mut d.loop_, "Loop").changed();
+                        let duration = self
+                            .timeline_catalog
+                            .lookup(&d.timeline)
+                            .map(|m| m.duration)
+                            .unwrap_or(1.0)
+                            .max(0.001);
+                        ui.label(
+                            RichText::new(format!(
+                                "{:.2} / {:.2}s  {}{}",
+                                live_time,
+                                duration,
+                                if live_playing { "Playing" } else { "Stopped" },
+                                if live_finished { " · Finished" } else { "" }
+                            ))
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui.button("Play").clicked() {
+                                director_play = true;
+                            }
+                            if ui.button("Stop").clicked() {
+                                director_stop = true;
+                            }
+                        });
+                        let mut scrub = live_time.clamp(0.0, duration);
+                        if ui
+                            .add(egui::Slider::new(&mut scrub, 0.0..=duration).text("Time"))
+                            .changed()
+                        {
+                            director_scrub = Some(scrub);
                         }
                     });
                 }
@@ -1416,6 +1524,7 @@ impl EditorApp {
             let missing_collider = ent.components.collider.is_none();
             let missing_animation = ent.components.animation.is_none();
             let missing_animator = ent.components.animator.is_none();
+            let missing_director = ent.components.playable_director.is_none();
             let missing_camera = ent.components.camera.is_none();
             let missing_grid_mover = ent.components.grid_mover.is_none();
             let missing_audio_source = ent.components.audio_source.is_none();
@@ -1454,6 +1563,10 @@ impl EditorApp {
                                 add_animator = true;
                                 ui.close_menu();
                             }
+                            if missing_director && ui.button("Playable Director").clicked() {
+                                add_director = true;
+                                ui.close_menu();
+                            }
                             if missing_camera && ui.button("Camera").clicked() {
                                 add_camera = true;
                                 ui.close_menu();
@@ -1476,6 +1589,7 @@ impl EditorApp {
                                 && !missing_collider
                                 && !missing_animation
                                 && !missing_animator
+                                && !missing_director
                                 && !missing_camera
                                 && !missing_grid_mover
                                 && !missing_audio_source
@@ -1492,6 +1606,15 @@ impl EditorApp {
                 },
             );
         }
+
+        self.apply_director_transport(
+            &sel,
+            crate::ui_timeline::DirectorTransport {
+                play: director_play,
+                stop: director_stop,
+                scrub: director_scrub,
+            },
+        );
 
         if let Some((tex, _)) = pending_sprite_tex {
             let size = self
@@ -1659,6 +1782,44 @@ impl EditorApp {
         if let Some(en) = toggle_animation {
             self.push_undo();
             if set_component_enabled(&mut self.scene, &sel, "animation", en).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if add_director {
+            let stem = self
+                .timeline_catalog
+                .names()
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "intro".into());
+            self.push_undo();
+            let _ = wiimaker_scene::add_component_playable_director(
+                &mut self.scene,
+                &sel,
+                &stem,
+                true,
+                false,
+            );
+            self.sync_baseline();
+            self.mark_dirty();
+        }
+        if remove_director {
+            self.push_undo();
+            if wiimaker_scene::remove_component_playable_director(&mut self.scene, &sel).is_ok() {
+                self.sync_baseline();
+                self.mark_dirty();
+            } else {
+                let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some(en) = toggle_director {
+            self.push_undo();
+            if wiimaker_scene::set_component_enabled(&mut self.scene, &sel, "PlayableDirector", en)
+                .is_ok()
+            {
                 self.sync_baseline();
                 self.mark_dirty();
             } else {
@@ -2131,6 +2292,9 @@ impl EditorApp {
             self.ui_inspector_environment(ui);
             ui.add_space(8.0);
             self.ui_inspector_input(ui);
+        }
+        if rel.to_string_lossy().ends_with(".timeline.json") {
+            self.ui_timeline_asset_inspector(ui, &rel);
         }
 
         ui.add_space(8.0);

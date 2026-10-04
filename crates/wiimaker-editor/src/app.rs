@@ -4,7 +4,8 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use eframe::egui;
 use wiimaker_assets::{
-    list_wav_clips, AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog, WPack,
+    list_wav_clips, AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog, TimelineCatalog,
+    WPack,
 };
 use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
@@ -138,6 +139,9 @@ pub(crate) struct EditorApp {
     pub(crate) catalog: SpriteCatalog,
     pub(crate) anim_catalog: AnimClipCatalog,
     pub(crate) controller_catalog: AnimatorControllerCatalog,
+    pub(crate) timeline_catalog: TimelineCatalog,
+    /// Edit-mode Timeline window transport (Play advances directors without Play Mode).
+    pub(crate) timeline_preview: bool,
     pub(crate) wav_names: Vec<String>,
     pub(crate) host_audio: HostAudio,
     pub(crate) sprite_editor: Option<SpriteEditorState>,
@@ -233,6 +237,8 @@ impl EditorApp {
             catalog: SpriteCatalog::empty(),
             anim_catalog: AnimClipCatalog::empty(),
             controller_catalog: AnimatorControllerCatalog::empty(),
+            timeline_catalog: TimelineCatalog::empty(),
+            timeline_preview: false,
             wav_names: Vec::new(),
             host_audio: HostAudio::new(),
             sprite_editor: None,
@@ -575,6 +581,7 @@ impl EditorApp {
         self.catalog = SpriteCatalog::load_dir(&assets, |stem| self.atlas.size_of(stem))?;
         self.anim_catalog = AnimClipCatalog::load_dir(&assets)?;
         self.controller_catalog = AnimatorControllerCatalog::load_dir(&assets)?;
+        self.timeline_catalog = TimelineCatalog::load_dir(&assets)?;
         self.wav_names = list_wav_clips(&assets).unwrap_or_default();
         self.refresh_project_tree();
         Ok(())
@@ -589,6 +596,7 @@ impl EditorApp {
             Some(&self.anim_catalog),
             Some(&self.controller_catalog),
             Some(&layers),
+            Some(&self.timeline_catalog),
         );
     }
 
@@ -1220,6 +1228,7 @@ impl EditorApp {
     pub(crate) fn play(&mut self) {
         match self.play_mode {
             PlayMode::Edit => {
+                self.timeline_preview = false;
                 self.prepare_assets();
                 self.rehydrate();
                 let scene_json = serde_json::to_string(&self.scene).ok();
@@ -1547,6 +1556,23 @@ impl eframe::App for EditorApp {
             ctx.request_repaint();
         } else if self.play_mode == PlayMode::Edit {
             let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
+            if self.timeline_preview {
+                self.world.tick_timelines(dt);
+                let ids: Vec<_> = self.world.iter_entities().collect();
+                for id in ids {
+                    wiimaker_scene::apply_animation_frame(
+                        &mut self.world,
+                        &self.catalog,
+                        self.atlas.map(),
+                        id,
+                    );
+                }
+                let assets = self.project.assets_path(&self.game_dir);
+                for err in self.host_audio.play_world(&mut self.world, &assets) {
+                    self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
+                }
+                ctx.request_repaint();
+            }
             if self.world.tick_tilemaps(dt) {
                 ctx.request_repaint();
             }

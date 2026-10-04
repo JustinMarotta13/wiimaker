@@ -187,6 +187,14 @@ impl EditorApp {
             {
                 self.open_sprite_editor_stem = Some(stem);
             }
+        } else if name.ends_with(".timeline.json") {
+            self.focus_tab(crate::dock::EditorTab::Timeline);
+            if let Some(stem) = name
+                .strip_suffix(".timeline.json")
+                .map(|s| s.rsplit(['/', '\\']).next().unwrap_or(s))
+            {
+                self.status = format!("timeline · {stem}");
+            }
         } else if name.ends_with(".anim.json") {
             if let Some(stem) = entry.rel.file_stem().and_then(|s| s.to_str()) {
                 self.status = format!("anim clip · {stem}");
@@ -681,6 +689,8 @@ pub(crate) fn file_kind_label(rel: &Path, is_dir: bool) -> &'static str {
         "Animation clip"
     } else if name.ends_with(".controller.json") {
         "Animator controller"
+    } else if name.ends_with(".timeline.json") {
+        "Timeline"
     } else if name == "game.toml" {
         "Project"
     } else {

@@ -14,6 +14,7 @@ use crate::hydrate::TextureMap;
 /// Call from host `App::update` and editor Play (tile palettes also tick in Edit mode).
 pub fn animate_world(world: &mut World, catalog: &SpriteCatalog, textures: &TextureMap, dt: f32) {
     world.tick_animators(dt);
+    world.tick_timelines(dt);
     world.tick_tilemaps(dt);
     let ids: Vec<_> = world.iter_entities().collect();
     for id in ids {
@@ -25,10 +26,19 @@ pub fn animate_world(world: &mut World, catalog: &SpriteCatalog, textures: &Text
             continue;
         }
         let n = anim.cells.len();
-        anim.time += dt;
+        let hold = anim.hold_time;
+        if !hold {
+            anim.time += dt;
+        }
         let frame_dur = 1.0 / anim.fps;
         let mut idx = (anim.time / frame_dur) as usize;
-        if anim.loop_ {
+        if hold {
+            if anim.loop_ {
+                idx %= n;
+            } else if idx >= n {
+                idx = n - 1;
+            }
+        } else if anim.loop_ {
             idx %= n;
             // Keep time bounded so it does not grow forever.
             let cycle = frame_dur * n as f32;

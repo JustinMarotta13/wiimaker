@@ -21,6 +21,7 @@ pub mod sorting;
 pub mod text;
 pub mod tilemap;
 pub mod time;
+pub mod timeline;
 pub mod wiimote_map;
 pub mod world;
 
@@ -50,6 +51,9 @@ pub use tilemap::{
     AutoTileMatch, TileVisual, Tilemap, AUTOTILE_E, AUTOTILE_N, AUTOTILE_S, AUTOTILE_W,
 };
 pub use time::Clock;
+pub use timeline::{
+    PlayableDirector, TimelineClipRuntime, TimelineTrackKind, TimelineTrackRuntime,
+};
 #[cfg(feature = "std")]
 pub use wiimote_map::format_input_status;
 pub use wiimote_map::{

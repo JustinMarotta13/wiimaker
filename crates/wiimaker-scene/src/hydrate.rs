@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
-use wiimaker_assets::{AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog};
+use wiimaker_assets::{AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog, TimelineCatalog};
 use wiimaker_core::animator::{
     Animator, AnimatorCondition, AnimatorParam, AnimatorParamKind, AnimatorState,
     AnimatorTransition,
@@ -14,6 +14,7 @@ use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::{Rect, TextureId};
 use wiimaker_core::math::Vec2;
 use wiimaker_core::tilemap::{TileVisual, Tilemap};
+use wiimaker_core::timeline::{PlayableDirector, TimelineClipRuntime, TimelineTrackRuntime};
 use wiimaker_core::world::{Animation, Camera, Disc, Follow, Sprite, World};
 use wiimaker_core::AudioSource;
 use wiimaker_core::GridMover;
@@ -86,7 +87,15 @@ pub fn hydrate_with_all_catalogs(
     controllers: Option<&AnimatorControllerCatalog>,
 ) -> Result<World> {
     let mut world = World::new();
-    hydrate_into_with_all_catalogs(&mut world, scene, textures, catalog, anims, controllers)?;
+    hydrate_into_with_all_catalogs(
+        &mut world,
+        scene,
+        textures,
+        catalog,
+        anims,
+        controllers,
+        None,
+    )?;
     Ok(world)
 }
 
@@ -110,7 +119,7 @@ pub fn hydrate_into_with_catalogs(
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
 ) -> Result<()> {
-    hydrate_into_with_all_catalogs(world, scene, textures, catalog, anims, None)
+    hydrate_into_with_all_catalogs(world, scene, textures, catalog, anims, None, None)
 }
 
 pub fn hydrate_into_with_all_catalogs(
@@ -120,11 +129,22 @@ pub fn hydrate_into_with_all_catalogs(
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
     controllers: Option<&AnimatorControllerCatalog>,
+    timelines: Option<&TimelineCatalog>,
 ) -> Result<()> {
     world.clear();
     for ent in &scene.entities {
-        spawn_entity(world, scene, ent, textures, catalog, anims, controllers)?;
+        spawn_entity(
+            world,
+            scene,
+            ent,
+            textures,
+            catalog,
+            anims,
+            controllers,
+            timelines,
+        )?;
     }
+    world.capture_timeline_baselines();
     Ok(())
 }
 
@@ -151,7 +171,16 @@ pub fn load_scene_into_world(
     world.set_sorting_layers(project.effective_sorting_layers());
     let controllers =
         AnimatorControllerCatalog::load_dir(&project.assets_path(game_dir)).unwrap_or_default();
-    hydrate_into_with_all_catalogs(world, &scene, textures, catalog, anims, Some(&controllers))?;
+    let timelines = TimelineCatalog::load_dir(&project.assets_path(game_dir)).unwrap_or_default();
+    hydrate_into_with_all_catalogs(
+        world,
+        &scene,
+        textures,
+        catalog,
+        anims,
+        Some(&controllers),
+        Some(&timelines),
+    )?;
     Ok(scene.clear_rgba())
 }
 
@@ -163,6 +192,7 @@ fn spawn_entity(
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
     controllers: Option<&AnimatorControllerCatalog>,
+    timelines: Option<&TimelineCatalog>,
 ) -> Result<()> {
     let xf = scene
         .world_transform(&ent.name)
@@ -261,6 +291,12 @@ fn spawn_entity(
                 catalog,
                 ent.components.sprite.as_ref().and_then(|s| s.pivot),
             );
+        }
+    }
+
+    if let Some(d) = &ent.components.playable_director {
+        if d.enabled {
+            apply_scene_director(world, id, d, timelines, anims);
         }
     }
 
@@ -378,7 +414,7 @@ pub fn hydrate_lenient_with_catalogs(
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
 ) -> World {
-    hydrate_lenient_with_all_catalogs(scene, textures, catalog, anims, None, None)
+    hydrate_lenient_with_all_catalogs(scene, textures, catalog, anims, None, None, None)
 }
 
 /// Like [`hydrate_lenient_with_catalogs`], but resolve Sorting Layers from `game.toml`.
@@ -389,7 +425,7 @@ pub fn hydrate_lenient_with_sorting_layers(
     anims: Option<&AnimClipCatalog>,
     sorting_layers: Option<&[String]>,
 ) -> World {
-    hydrate_lenient_with_all_catalogs(scene, textures, catalog, anims, None, sorting_layers)
+    hydrate_lenient_with_all_catalogs(scene, textures, catalog, anims, None, sorting_layers, None)
 }
 
 /// Lenient hydrate with sprite clips, animator controllers, and sorting layers.
@@ -400,6 +436,7 @@ pub fn hydrate_lenient_with_all_catalogs(
     anims: Option<&AnimClipCatalog>,
     controllers: Option<&AnimatorControllerCatalog>,
     sorting_layers: Option<&[String]>,
+    timelines: Option<&TimelineCatalog>,
 ) -> World {
     let mut world = World::new();
     if let Some(layers) = sorting_layers {
@@ -484,6 +521,11 @@ pub fn hydrate_lenient_with_all_catalogs(
                 );
             }
         }
+        if let Some(d) = &ent.components.playable_director {
+            if d.enabled {
+                apply_scene_director(&mut world, id, d, timelines, anims);
+            }
+        }
         if let Some(g) = &ent.components.grid_mover {
             if g.enabled {
                 world.set_grid_mover(id, Some(scene_grid_mover_to_runtime(g)));
@@ -501,6 +543,7 @@ pub fn hydrate_lenient_with_all_catalogs(
             }
         }
     }
+    world.capture_timeline_baselines();
     world
 }
 
@@ -705,6 +748,69 @@ fn apply_scene_animator(
             apply_animation_cell(world, id, &cell, textures, catalog, lock_pivot);
         }
     }
+}
+
+fn apply_scene_director(
+    world: &mut World,
+    id: wiimaker_core::world::EntityId,
+    scene_d: &crate::scene::ScenePlayableDirector,
+    timelines: Option<&TimelineCatalog>,
+    anims: Option<&AnimClipCatalog>,
+) {
+    let meta = timelines.and_then(|c| c.lookup(&scene_d.timeline));
+    let duration = meta.map(|m| m.duration).unwrap_or(0.0);
+    let mut rt = PlayableDirector::new(
+        scene_d.timeline.clone(),
+        duration,
+        scene_d.play_on_awake,
+        scene_d.loop_,
+    );
+    if let Some(meta) = meta {
+        for track in &meta.tracks {
+            let binding = track.binding.clone().unwrap_or_default();
+            let kind = match track.kind {
+                wiimaker_assets::TimelineTrackKind::Activation => {
+                    wiimaker_core::TimelineTrackKind::Activation
+                }
+                wiimaker_assets::TimelineTrackKind::Animation => {
+                    wiimaker_core::TimelineTrackKind::Animation
+                }
+                wiimaker_assets::TimelineTrackKind::Audio => {
+                    wiimaker_core::TimelineTrackKind::Audio
+                }
+                wiimaker_assets::TimelineTrackKind::Transform => {
+                    wiimaker_core::TimelineTrackKind::Transform
+                }
+            };
+            let mut clips = Vec::new();
+            for c in &track.clips {
+                let anim = c
+                    .clip
+                    .as_deref()
+                    .and_then(|stem| anims.and_then(|cat| cat.lookup(stem)));
+                clips.push(TimelineClipRuntime {
+                    start: c.start,
+                    end: c.end,
+                    active: c.active.unwrap_or(true),
+                    clip: c.clip.clone().unwrap_or_default(),
+                    cells: anim.map(|m| m.cells.clone()).unwrap_or_default(),
+                    fps: anim.map(|m| m.fps).filter(|f| *f > 0.0).unwrap_or(10.0),
+                    loop_clip: anim.map(|m| m.loop_).unwrap_or(true),
+                    audio: c.audio.clone().unwrap_or_default(),
+                    volume: c.volume.unwrap_or(1.0),
+                    from: c.from.unwrap_or([0.0, 0.0]),
+                    to: c.to.unwrap_or([0.0, 0.0]),
+                });
+            }
+            rt.tracks.push(TimelineTrackRuntime {
+                name: track.name.clone(),
+                kind,
+                binding,
+                clips,
+            });
+        }
+    }
+    world.set_director(id, Some(rt));
 }
 
 fn runtime_condition(
