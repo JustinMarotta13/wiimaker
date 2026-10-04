@@ -242,16 +242,27 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 };
                 set_entity_grid_mover(&mut sc, &name, cell, speed, q)?;
             }
-            if audio_clip.is_some()
-                || volume.is_some()
-                || (play_on_awake.is_some() && timeline.is_none() && timeline_loop.is_none())
-            {
+            let has_director = sc
+                .find_entity(&name)
+                .and_then(|e| e.components.playable_director.as_ref())
+                .is_some();
+            let has_audio = sc
+                .find_entity(&name)
+                .and_then(|e| e.components.audio_source.as_ref())
+                .is_some();
+            // `--play-on-awake` is shared with PlayableDirector. Only touch
+            // AudioSource when the entity already has one, or when there is no
+            // director (legacy AudioSource-only `entity set`).
+            let audio_play_on_awake = play_on_awake.filter(|_| {
+                (has_audio || !has_director) && timeline.is_none() && timeline_loop.is_none()
+            });
+            if audio_clip.is_some() || volume.is_some() || audio_play_on_awake.is_some() {
                 set_entity_audio_source(
                     &mut sc,
                     &name,
                     audio_clip.as_deref(),
                     volume,
-                    play_on_awake,
+                    audio_play_on_awake,
                 )?;
             }
             if text.is_some() || size.is_some() || color.is_some() || align.is_some() {
@@ -279,10 +290,6 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 set_entity_controller(&mut sc, &name, &ctrl)?;
             }
             if timeline.is_some() || play_on_awake.is_some() || timeline_loop.is_some() {
-                let has_director = sc
-                    .find_entity(&name)
-                    .and_then(|e| e.components.playable_director.as_ref())
-                    .is_some();
                 if timeline.is_some() || timeline_loop.is_some() || has_director {
                     set_entity_playable_director(
                         &mut sc,

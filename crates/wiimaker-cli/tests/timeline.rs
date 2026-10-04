@@ -6,8 +6,11 @@ use std::process::Command;
 
 use wiimaker_scene::{add_entity, save_project, save_scene, GameProject, MutateOpts, Scene};
 
-fn tmp_game() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("wiimaker-cli-timeline-{}", std::process::id()));
+fn tmp_game(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "wiimaker-cli-timeline-{}-{tag}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("assets")).unwrap();
     fs::create_dir_all(dir.join("scenes")).unwrap();
@@ -29,7 +32,7 @@ fn wiimaker() -> Command {
 
 #[test]
 fn timeline_asset_and_director_status_json() {
-    let dir = tmp_game();
+    let dir = tmp_game("status");
     let game = dir.to_str().unwrap();
 
     let wrote = wiimaker()
@@ -141,5 +144,63 @@ fn timeline_asset_and_director_status_json() {
         set.status.success(),
         "set: {}",
         String::from_utf8_lossy(&set.stderr)
+    );
+}
+
+#[test]
+fn director_play_on_awake_does_not_insert_audio_source() {
+    let dir = tmp_game("poa");
+    let game = dir.to_str().unwrap();
+
+    let add = wiimaker()
+        .args([
+            "entity",
+            "add-component",
+            game,
+            "--name",
+            "Director",
+            "PlayableDirector",
+            "--timeline",
+            "intro",
+            "--json",
+        ])
+        .output()
+        .expect("add");
+    assert!(
+        add.status.success(),
+        "add-component: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let set = wiimaker()
+        .args([
+            "entity",
+            "set",
+            game,
+            "--name",
+            "Director",
+            "--play-on-awake",
+            "false",
+            "--json",
+        ])
+        .output()
+        .expect("set");
+    assert!(
+        set.status.success(),
+        "entity set --play-on-awake: {}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let scene = wiimaker_scene::load_scene(&dir.join("scenes/main.scene.json")).unwrap();
+    let ent = scene.find_entity("Director").expect("Director");
+    let d = ent
+        .components
+        .playable_director
+        .as_ref()
+        .expect("PlayableDirector");
+    assert!(!d.play_on_awake, "director play_on_awake should be false");
+    assert!(
+        ent.components.audio_source.is_none(),
+        "director-only entity must not gain an AudioSource"
     );
 }

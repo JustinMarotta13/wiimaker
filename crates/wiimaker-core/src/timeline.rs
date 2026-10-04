@@ -84,6 +84,13 @@ struct AnimBaseline {
     released: bool,
 }
 
+/// Pre-timeline GameObject active flag for Activation tracks.
+#[derive(Clone, Debug)]
+struct ActiveBaseline {
+    name: String,
+    active: bool,
+}
+
 /// Unity PlayableDirector. Authored stem + live transport + baked tracks.
 #[derive(Clone, Debug)]
 pub struct PlayableDirector {
@@ -99,6 +106,7 @@ pub struct PlayableDirector {
     fired: Vec<u32>,
     xy_base: Vec<XyBaseline>,
     anim_base: Vec<AnimBaseline>,
+    active_base: Vec<ActiveBaseline>,
     baselines_ready: bool,
 }
 
@@ -121,6 +129,7 @@ impl PlayableDirector {
             fired: Vec::new(),
             xy_base: Vec::new(),
             anim_base: Vec::new(),
+            active_base: Vec::new(),
             baselines_ready: false,
         }
     }
@@ -271,6 +280,7 @@ impl World {
         };
         let mut xy = Vec::new();
         let mut anims = Vec::new();
+        let mut actives = Vec::new();
         for track in &tracks {
             if track.binding.is_empty() {
                 continue;
@@ -314,11 +324,22 @@ impl World {
                     });
                 }
             }
+            if track.kind == TimelineTrackKind::Activation
+                && !actives
+                    .iter()
+                    .any(|b: &ActiveBaseline| b.name == track.binding)
+            {
+                actives.push(ActiveBaseline {
+                    name: track.binding.clone(),
+                    active: self.is_active(eid),
+                });
+            }
         }
         if let Some(d) = self.director_mut(id) {
             if !d.baselines_ready {
                 d.xy_base = xy;
                 d.anim_base = anims;
+                d.active_base = actives;
                 d.baselines_ready = true;
             }
         }
@@ -336,8 +357,12 @@ impl World {
             .director(id)
             .map(|d| d.anim_base.clone())
             .unwrap_or_default();
+        let active_base = self
+            .director(id)
+            .map(|d| d.active_base.clone())
+            .unwrap_or_default();
 
-        self.apply_activation(&tracks, time);
+        self.apply_activation(&tracks, time, &active_base);
         self.apply_transform(&tracks, time, &xy_base);
         self.apply_animation(id, &tracks, time, &anim_base);
         if fire_audio {
@@ -345,7 +370,12 @@ impl World {
         }
     }
 
-    fn apply_activation(&mut self, tracks: &[TimelineTrackRuntime], time: f32) {
+    fn apply_activation(
+        &mut self,
+        tracks: &[TimelineTrackRuntime],
+        time: f32,
+        base: &[ActiveBaseline],
+    ) {
         let mut names: Vec<String> = Vec::new();
         for track in tracks {
             if track.kind == TimelineTrackKind::Activation
@@ -367,8 +397,16 @@ impl World {
                     }
                 }
             }
+            let baseline = base
+                .iter()
+                .find(|b| b.name == name)
+                .map(|b| b.active)
+                .unwrap_or(true);
+            // Inside a clip: `active` is the desired GameObject flag.
+            // Outside every clip: restore the pre-timeline flag (so `active:
+            // false` can hide during the clip without leaving the entity off).
             if let Some(eid) = self.find_by_name(&name) {
-                self.set_active(eid, inside.unwrap_or(false));
+                self.set_active(eid, inside.unwrap_or(baseline));
             }
         }
     }
@@ -569,19 +607,85 @@ mod tests {
     use super::*;
     use crate::world::Transform;
 
-    fn clip_xform(start: f32, end: f32, from: [f32; 2], to: [f32; 2]) -> TimelineClipRuntime {
+    fn clip_base(
+        start: f32,
+        end: f32,
+        active: bool,
+        clip: &str,
+        cells: Vec<String>,
+        audio: &str,
+        from: [f32; 2],
+        to: [f32; 2],
+    ) -> TimelineClipRuntime {
         TimelineClipRuntime {
             start,
             end,
-            active: true,
-            clip: String::new(),
-            cells: Vec::new(),
+            active,
+            clip: clip.into(),
+            cells,
             fps: 10.0,
             loop_clip: true,
-            audio: String::new(),
+            audio: audio.into(),
             volume: 1.0,
             from,
             to,
+        }
+    }
+
+    fn clip_xform(start: f32, end: f32, from: [f32; 2], to: [f32; 2]) -> TimelineClipRuntime {
+        clip_base(start, end, true, "", Vec::new(), "", from, to)
+    }
+
+    fn clip_act(start: f32, end: f32, active: bool) -> TimelineClipRuntime {
+        clip_base(
+            start,
+            end,
+            active,
+            "",
+            Vec::new(),
+            "",
+            [0.0, 0.0],
+            [0.0, 0.0],
+        )
+    }
+
+    fn clip_anim(start: f32, end: f32, stem: &str, cells: &[&str]) -> TimelineClipRuntime {
+        clip_base(
+            start,
+            end,
+            true,
+            stem,
+            cells.iter().map(|s| (*s).to_string()).collect(),
+            "",
+            [0.0, 0.0],
+            [0.0, 0.0],
+        )
+    }
+
+    fn clip_audio(start: f32, end: f32, stem: &str) -> TimelineClipRuntime {
+        clip_base(
+            start,
+            end,
+            true,
+            "",
+            Vec::new(),
+            stem,
+            [0.0, 0.0],
+            [0.0, 0.0],
+        )
+    }
+
+    fn track(
+        name: &str,
+        kind: TimelineTrackKind,
+        binding: &str,
+        clips: Vec<TimelineClipRuntime>,
+    ) -> TimelineTrackRuntime {
+        TimelineTrackRuntime {
+            name: name.into(),
+            kind,
+            binding: binding.into(),
+            clips,
         }
     }
 
@@ -615,6 +719,224 @@ mod tests {
         assert!(
             (xf.translation.x - 320.0).abs() < 1e-3,
             "stop snaps to t=0, which is the clip start"
+        );
+    }
+
+    #[test]
+    fn activation_false_hides_inside_clip_and_stop_restores() {
+        let mut world = World::new();
+        let ghost = world.spawn_named("IntroGhost", Transform::default());
+        let hud = world.spawn_named("Hud", Transform::default());
+        world.set_active(ghost, false);
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 4.0, true, false);
+        d.tracks.push(track(
+            "Appear",
+            TimelineTrackKind::Activation,
+            "IntroGhost",
+            vec![clip_act(0.5, 4.0, true)],
+        ));
+        d.tracks.push(track(
+            "HideHud",
+            TimelineTrackKind::Activation,
+            "Hud",
+            vec![clip_act(1.0, 2.0, false)],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+
+        world.set_timeline_time(dir, 0.0);
+        assert!(!world.is_active(ghost), "outside appear: authored inactive");
+        assert!(world.is_active(hud), "outside hide: authored active");
+
+        world.set_timeline_time(dir, 1.5);
+        assert!(world.is_active(ghost), "inside appear clip");
+        assert!(!world.is_active(hud), "active:false disables while inside");
+
+        world.set_timeline_time(dir, 3.0);
+        assert!(world.is_active(ghost));
+        assert!(world.is_active(hud), "after hide clip restore baseline");
+
+        world.set_timeline_time(dir, 4.0);
+        assert!(
+            world.is_active(ghost),
+            "clip end is inclusive; still inside appear"
+        );
+
+        world.stop_timeline(dir);
+        assert!(!world.is_active(ghost), "stop at t=0 restores inactive");
+        assert!(world.is_active(hud), "stop restores HUD");
+    }
+
+    #[test]
+    fn play_on_awake_false_stays_stopped() {
+        let mut world = World::new();
+        let cam = world.spawn_named("MainCamera", Transform::from_xy(10.0, 10.0));
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 4.0, false, false);
+        d.tracks.push(track(
+            "CamSlide",
+            TimelineTrackKind::Transform,
+            "MainCamera",
+            vec![clip_xform(0.0, 2.0, [320.0, 240.0], [400.0, 240.0])],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+        world.tick_timelines(0.5);
+        world.tick_timelines(0.5);
+        let d = world.director(dir).unwrap();
+        assert!(!d.playing);
+        assert!(!d.finished);
+        assert!((d.time).abs() < 1e-6);
+        let xf = world.transform(cam).unwrap();
+        assert!(
+            (xf.translation.x - 10.0).abs() < 1e-3,
+            "stopped director does not apply tracks"
+        );
+    }
+
+    #[test]
+    fn loop_wrap_refires_audio_and_resets_animation() {
+        let mut world = World::new();
+        let player = world.spawn_named("Player", Transform::default());
+        world.set_animation(
+            player,
+            Some(Animation::new("idle", vec!["idle0".into()], 8.0, true)),
+        );
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 2.0, true, true);
+        d.tracks.push(track(
+            "Move",
+            TimelineTrackKind::Animation,
+            "Player",
+            vec![clip_anim(0.0, 1.0, "chomp", &["a", "b"])],
+        ));
+        d.tracks.push(track(
+            "Stinger",
+            TimelineTrackKind::Audio,
+            "",
+            vec![clip_audio(0.0, 0.4, "beep")],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+
+        world.tick_timelines(0.05);
+        let shots = world.drain_oneshots();
+        assert_eq!(shots.len(), 1);
+        assert_eq!(shots[0].clip, "beep");
+        assert_eq!(world.animation(player).unwrap().clip, "chomp");
+
+        world.tick_timelines(1.2);
+        assert_eq!(
+            world.animation(player).unwrap().clip,
+            "idle",
+            "outside anim clip restores baseline"
+        );
+        assert!(world.drain_oneshots().is_empty());
+
+        // duration 2.0; time is ~1.25; another 1.0 wraps to ~0.25
+        world.tick_timelines(1.0);
+        let d = world.director(dir).unwrap();
+        assert!(d.playing);
+        assert!(!d.finished);
+        assert!(d.time < 1.0, "wrapped time {}", d.time);
+        let shots = world.drain_oneshots();
+        assert_eq!(shots.len(), 1, "audio re-fires after loop wrap");
+        assert_eq!(shots[0].clip, "beep");
+        assert_eq!(
+            world.animation(player).unwrap().clip,
+            "chomp",
+            "wrap re-enters anim clip from local t"
+        );
+        assert!(world.animation(player).unwrap().hold_time);
+    }
+
+    #[test]
+    fn non_loop_finish_then_play_timeline_restarts() {
+        let mut world = World::new();
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 1.0, true, false);
+        d.tracks.push(track(
+            "Stinger",
+            TimelineTrackKind::Audio,
+            "",
+            vec![clip_audio(0.0, 0.2, "beep")],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+        world.tick_timelines(0.05);
+        assert_eq!(world.drain_oneshots().len(), 1);
+        world.tick_timelines(2.0);
+        {
+            let d = world.director(dir).unwrap();
+            assert!(!d.playing);
+            assert!(d.finished);
+            assert!((d.time - 1.0).abs() < 1e-4);
+        }
+        assert!(world.drain_oneshots().is_empty());
+
+        assert!(world.play_timeline(dir));
+        {
+            let d = world.director(dir).unwrap();
+            assert!(d.playing);
+            assert!(!d.finished);
+            assert!((d.time).abs() < 1e-4);
+        }
+        world.tick_timelines(0.05);
+        let shots = world.drain_oneshots();
+        assert_eq!(shots.len(), 1, "restart re-fires audio from t=0");
+        assert_eq!(shots[0].clip, "beep");
+    }
+
+    #[test]
+    fn scrub_back_rearms_audio() {
+        let mut world = World::new();
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 2.0, false, false);
+        d.tracks.push(track(
+            "Stinger",
+            TimelineTrackKind::Audio,
+            "",
+            vec![clip_audio(0.5, 0.8, "beep")],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+        world.set_timeline_time(dir, 0.6);
+        assert_eq!(world.drain_oneshots().len(), 1);
+        world.set_timeline_time(dir, 0.1);
+        assert!(world.drain_oneshots().is_empty());
+        world.set_timeline_time(dir, 0.6);
+        assert_eq!(world.drain_oneshots().len(), 1, "scrub back re-arms");
+    }
+
+    #[test]
+    fn missing_animation_and_stem_do_not_panic() {
+        let mut world = World::new();
+        let player = world.spawn_named("Player", Transform::default());
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 2.0, true, false);
+        d.tracks.push(track(
+            "Move",
+            TimelineTrackKind::Animation,
+            "Player",
+            vec![clip_anim(0.0, 1.0, "missing-clip", &[])],
+        ));
+        d.tracks.push(track(
+            "Nobody",
+            TimelineTrackKind::Activation,
+            "NoSuchEntity",
+            vec![clip_act(0.0, 1.0, false)],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+        world.set_timeline_time(dir, 0.2);
+        let anim = world.animation(player).unwrap();
+        assert_eq!(anim.clip, "missing-clip");
+        assert!(anim.cells.is_empty());
+        world.set_timeline_time(dir, 1.5);
+        assert!(
+            world.animation(player).is_none(),
+            "missing pre-timeline Animation is removed outside the clip"
         );
     }
 }

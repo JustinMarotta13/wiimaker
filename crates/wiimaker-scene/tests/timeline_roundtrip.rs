@@ -112,7 +112,10 @@ fn timeline_asset_and_director_tick() {
     assert!(world.director(director).unwrap().playing);
 
     world.set_timeline_time(director, 0.0);
-    assert!(!world.is_active(ghost), "outside the activation clip");
+    assert!(
+        world.is_active(ghost),
+        "outside clips restore the pre-timeline active flag"
+    );
     world.set_timeline_time(director, 0.15);
     let anim = world.animation(player).unwrap();
     assert_eq!(anim.clip, "chomp");
