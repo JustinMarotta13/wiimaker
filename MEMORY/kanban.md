@@ -12,7 +12,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 |---|---|
 | Project window | `game.toml` + `assets/` + `scenes/` + editor **Project** explorer |
 | Hierarchy | editor Hierarchy (parent/unparent DnD, multi-select, duplicate) |
-| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/Animator/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer**, Sprite **Pivot** X/Y override + Reset, scene **Environment** **Clear Color** (empty selection + open `.scene.json`), **Input** card (live GCN-layout stick / D-pad / face / IR / Accel + Keyboard · Wiimote · IR · motion · Classic · GCN · mouse aim · Shift+mouse tilt) |
+| Inspector | Transform + Sprite/Disc/Camera/Tilemap/Collider/Animation/Animator/PlayableDirector/GridMover/AudioSource/Text, enable checkbox, catalog combo, tile palette (anim + auto-tile), **Sorting Layer** + **Order in Layer**, Sprite **Pivot** X/Y override + Reset, scene **Environment** **Clear Color** (empty selection + open `.scene.json`), **Input** card (live GCN-layout stick / D-pad / face / IR / Accel + Keyboard · Wiimote · IR · motion · Classic · GCN · mouse aim · Shift+mouse tilt) |
 | Scene view | 640×480 viewport, pick/drag, **Move / Scale / Rotate / Hand / Paint / Erase / Pick**, 2D (always-on), zoom % + scroll, grid overlay, gizmos, **Move axis handles** (red X / green Y), Snap + nudge |
 | Game view | aspect dropdown (Free / 640×480 / 16:9 / 4:3 / custom) + Scale + letterbox; prefs in `.wiimaker/prefs.toml` |
 | Play | toolbar Play/Pause/Stop ticks the open game `App` (`wiimaker-play` cdylib) · WASD/`Player` fallback if no plugin · File → Run external → `cargo run -p <game>` |
@@ -21,27 +21,29 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 | Sprite Editor | `assets/<stem>.sprites.json` · Grid By Cell Count + pivot |
 | Undo | `UndoStack` in `wiimaker-scene` (depth 50) · Cmd/Ctrl+Z/Y |
 
-Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, Animator, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle; **IR aim** `ir_x`/`ir_y`/`ir_valid` in 640×480; **motion** `accel_*`/`motion_valid` + shake/swing edges), 60 Hz `Clock`, `render_world` (in `wiimaker-core`, re-exported from `wiimaker-scene`) sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib (WSCN→World → `render_world` → DrawList → GX + ASND oneshots), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · `Animator` / `*.controller.json` (Bool/Float/Trigger SM → clip cells) · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
+Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, Animator, PlayableDirector, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle; **IR aim** `ir_x`/`ir_y`/`ir_valid` in 640×480; **motion** `accel_*`/`motion_valid` + shake/swing edges), 60 Hz `Clock`, `render_world` (in `wiimaker-core`, re-exported from `wiimaker-scene`) sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), GX C stub_game **or** Rust `wiimaker-wii` staticlib (WSCN→World → `render_world` → DrawList → GX + ASND oneshots), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · `Animator` / `*.controller.json` (Bool/Float/Trigger SM → clip cells) · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** blend trees / layers / Mecanim curves; WSCN bake of Animator; Apply to Base / Open Base for prefab variants.
+**Not present:** blend trees / layers / Mecanim curves; Signal/Control tracks; nested timelines; WSCN bake of Animator or PlayableDirector; Apply to Base / Open Base for prefab variants.
 
 ---
 
 ## Now
 
-**Recommended next morning (2026-10-03):** Timeline / cutscene authoring. Animator shipped.
+**Recommended next morning (2026-10-04):** Apply to Base / Open Base for prefab variants. Timeline / PlayableDirector shipped.
 
 ---
 
 ## Later
 
-- Apply to base / Open Base for prefab variants (deferred from 2026-10-02).
+- Timeline polish: Signal / Control tracks, curve editor, nested timelines (v1 is Activation / Animation / Audio / Transform only).
 
 ---
 
 ## Done
 
 Shipped. Keep here so we do not rebuild them.
+
+- **Timeline / cutscene authoring** (2026-10-04) — `assets/<name>.timeline.json` (`TimelineMeta` / catalog). Scene/runtime `PlayableDirector` (`timeline`, `play_on_awake`, `loop`, live `time` / `playing` / `finished`). Tracks: **Activation** (bound entity active inside the clip; inactive outside if any Activation track binds it), **Animation** (drive sibling `Animation` from `*.anim.json` for the clip; restore authored outside), **Audio** (oneshot once per playthrough when the playhead crosses `start`), **Transform** (lerp local XY; hold `to` after the clip; stop/scrub re-evaluates). `World::play_timeline` / `stop_timeline` / `set_timeline_time` / `tick_timelines` (from `animate_world`, host + editor Play). Inspector **Playable Director** foldout + bottom **Timeline** dock (dark Pro). CLI `asset timeline` / `list-timelines`; `entity add-component PlayableDirector --timeline`; `entity set --timeline --play-on-awake --loop`; `timeline-play` / `timeline-stop` / `timeline-status` (`--json`). Host-first (WSCN unchanged). Out of scope: signals, curves, nested timelines, WSCN bake.
 
 - **Animator / animation state machine** (2026-10-03) — `assets/<name>.controller.json` (`AnimatorControllerMeta` / catalog). Distinct scene/runtime `Animator` feeds sibling `Animation` cells. Bool/Float/Trigger params, `Any` from-state, optional `has_exit_time`. `World::set_animator_bool/float/trigger` + `tick_animators` inside `animate_world` (host + editor Play). Inspector Animator foldout (controller combo, live state, params). CLI `asset controller` / `list-controllers`; `entity add-component Animator --controller`; `entity set --controller`; `animator-set` / `animator-status` (`--json`). Single-clip `Animation` still valid. Host-first (WSCN unchanged). Out of scope: blend trees, layers, WSCN bake.
 
@@ -140,14 +142,15 @@ Global: `--json`
 | `scene list` · `scene show` · `scene new --name` · `scene set-default --scene` · `scene set-clear --rgb` · `scene build-list` · `scene build-add --scene` · `scene build-remove --scene` · `scene set-game-view` | build-* mutate `game.toml` `scenes`; set-game-view writes `.wiimaker/prefs.toml` |
 | `editor prefs` · `editor set-scene-view` · `editor set-project-view` · `editor play-status` | Scene zoom/pan/grid/gizmos/snap + Project collapsed folders in prefs; play-status reports App plugin vs WASD fallback (no new prefs). Filter text is session-only. |
 | `input map` | GCN-layout table: Keyboard / Wiimote / Classic / Nunchuk → Button/stick (`--json`) |
-| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer` (`--z` alias) `--pivot-x --pivot-y --clear-pivot` `--controller` |
-| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Animator` (`--controller`) \| `Camera` \| `Follow` (`--target --lerp`) \| `GridMover` (`--cell --speed --queued-dir`) \| `AudioSource` (`--clip --volume --play-on-awake`) \| `Text` (`--text --size --color --align`) · Sprite `--pivot-x --pivot-y` |
+| `entity list` · `entity add` · `entity set` · `entity remove` · `entity despawn` | `--name --sprite --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer` (`--z` alias) `--pivot-x --pivot-y --clear-pivot` `--controller` `--timeline` `--loop` |
+| `entity add-component` · `entity remove-component` · `entity set-component-enabled` | kinds: `Sprite` \| `Disc` \| `Tilemap` (`--cols --rows --cell`) \| `Collider` (`--w --h` / `--shape Circle --radius`, `--solid` `--trigger` `--filter`) \| `Trigger` (collider with trigger=true) \| `Animation` (`--clip` `--fps` `--loop`) \| `Animator` (`--controller`) \| `PlayableDirector` (`--timeline` `--play-on-awake` `--loop`) \| `Camera` \| `Follow` (`--target --lerp`) \| `GridMover` (`--cell --speed --queued-dir`) \| `AudioSource` (`--clip --volume --play-on-awake`) \| `Text` (`--text --size --color --align`) · Sprite `--pivot-x --pivot-y` |
 | `entity set-anim` | `--name --clip [--fps] [--loop]` |
 | `entity animator-set` · `entity animator-status` | `--name --bool Moving=true --float Speed=1 --trigger Jump` · status `--json` controller/state/params |
+| `entity timeline-play` · `entity timeline-stop` · `entity timeline-status` | `--name` · status `--json` timeline/time/playing/finished |
 | `entity overlaps` · `entity triggers` | `--name` [ `--other` ] · pairwise/list overlaps; `triggers <name>` lists entered triggers |
 | `entity duplicate` · `entity rename` · `entity set-parent` | |
 | `entity create-prefab` · `entity create-variant` · `entity instantiate-prefab` · `entity apply-prefab` · `entity revert-prefab` · `entity unpack-prefab` · `entity prefab-status` | create-variant `--from` base or `--name` instance + `--as-name`; apply writes variant/base asset; status lists overrides + `base`/`variant` |
-| `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` · `asset anim` · `asset list-anims` · `asset controller` · `asset list-controllers` · `asset list-wavs` · `asset play --name` | `asset import` copies `.png` or `.wav`; `asset play` host oneshot (`--json` `skipped` if no device); `asset controller` writes `*.controller.json` (`--states Idle:idle --param Moving:Bool=false --transition Idle>Walk:Moving=true` or `--stdin`) |
+| `asset list` · `asset import` · `asset slice --cols --rows` · `asset set-pivot --x --y` · `asset list-sprites` · `asset anim` · `asset list-anims` · `asset controller` · `asset list-controllers` · `asset timeline` · `asset list-timelines` · `asset list-wavs` · `asset play --name` | `asset import` copies `.png` or `.wav`; `asset play` host oneshot (`--json` `skipped` if no device); `asset controller` writes `*.controller.json`; `asset timeline` writes `*.timeline.json` (`--duration` `--track Name:Kind:Binding:start-end:payload` or `--stdin`) |
 | `tilemap set` · `tilemap fill` · `tilemap stamp` · `tilemap from-ascii` · `tilemap get` · `tilemap set-palette` · `tilemap mask` | `--name --x --y --id` · `--ascii` / `--cells --width` · `from-ascii FILE` (`--map` `--resize`) · palette `--anim --fps --auto-tile id|solid|off --auto-sprites` · mask NESW · `--json` |
 | `sorting-layer list` · `sorting-layer add --name [--index]` · `sorting-layer rename --from --to` · `sorting-layer move --name --index` · `sorting-layer remove --name` | project Tags & Layers analogue on `game.toml`; rename/remove remap scenes + prefabs |
 
@@ -155,21 +158,22 @@ Global: `--json`
 
 File: Save scene · Doctor · Build Settings… · Play · Stop Play · Run external… · Build · Play in Dolphin · Build & Run · Instantiate <prefab>
 Edit: Undo · Redo · Duplicate · Copy · Paste
-Window: Hierarchy · Inspector · Project · Console
+Window: Hierarchy · Inspector · Project · Console · Timeline
 Toolbar (left): Save · Build · Play in Dolphin · Build & Run · ⋯ (Cook assets… · Doctor · Refresh assets)
 Toolbar (center): Play / Pause / Stop
 Center tabs: Scene · Game
 Scene view: Move · Scale · Rotate · Hand · Paint · Erase · Pick · 2D · Grid · Gizmos · Snap · grid size · zoom %
 Game view: aspect preset (Free / 640×480 / 16:9 / 4:3 / custom W×H) · Scale · Play overlay: live stick / D-pad / face / IR crosshair + mapping legend
-Bottom tabs: Project · Console
+Bottom tabs: Project · Console · Timeline
 Project: Search (filename / relative path) · collapsible folders (foldout + `#`) · Refresh · New scene · Set default · Build Settings…
 Console: Search (text + info/warn/error tags) · Info / Warn / Error toggles · Clear · Doctor · count `N messages` / `k / N messages`
-Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab / **Prefab Variant** instance **Apply** / **Revert** / **Unpack Completely** / **Create Prefab Variant…** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Animator controller combo + current state + parameter toggles · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · **Input** card (live stick / D-pad / A/B/Start / IR + Keyboard · Wiimote · IR · Classic · GCN · mouse aim; empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap**
+Inspector: component foldout + enable + gear/Remove · Add Component · Edit Sprites… · Save as Prefab… · Prefab / **Prefab Variant** instance **Apply** / **Revert** / **Unpack Completely** / **Create Prefab Variant…** + orange-bold override labels · Tilemap grid/palette/Brush · palette **Anim** clip + Override FPS · **Auto Tile** Off/Same id/Solid + Variants · **Import ASCII** (project `.txt`) · Collider kind/w/h/radius/solid/Is Trigger/Filter Tag/offset · Animation clip combo + Override FPS + Loop · Animator controller combo + current state + parameter toggles · **Playable Director** timeline combo + Play On Awake + Loop + time/state + Play/Stop/scrub · Camera Follow target combo + Lerp · GridMover cell/speed/queued dir · AudioSource clip combo + Volume + Play On Awake + Play · Text string + Size + Color + Align + Sorting Layer/Order in Layer · Sprite/Disc/Tilemap/Text **Sorting Layer** combo + **Order in Layer** · Sprite **Pivot** X/Y + catalog hint + **Reset** · scene **Environment** **Clear Color** picker + **Reset** (empty Inspector + open `.scene.json`) · **Input** card (live stick / D-pad / A/B/Start / IR + Keyboard · Wiimote · IR · Classic · GCN · mouse aim; empty Inspector + open `.scene.json`) · `game.toml` Sorting Layers list (↑↓ – + Add / Rename) · Project `.txt` **Stamp into Tilemap** · Project `.timeline.json` duration + track list
+Timeline window: track rows + clip rects + ruler + playhead · Play / Stop (dark Pro)
 Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ---
 
 ## Recommended next morning
 
-**Timeline / cutscene authoring.** Animator shipped 2026-10-03. Prefab variants shipped 2026-10-02. Nested prefabs shipped 2026-10-01. Motion gestures shipped 2026-09-30. IR pointer / sensor-bar aiming shipped 2026-09-29.
+**Apply to Base / Open Base for prefab variants.** Timeline / PlayableDirector shipped 2026-10-04. Animator shipped 2026-10-03. Prefab variants shipped 2026-10-02. Nested prefabs shipped 2026-10-01. Motion gestures shipped 2026-09-30. IR pointer / sensor-bar aiming shipped 2026-09-29.
 

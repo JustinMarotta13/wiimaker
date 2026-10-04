@@ -17,6 +17,7 @@ mod anim;
 mod controller;
 mod font;
 mod sprites;
+mod timeline;
 mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
@@ -33,6 +34,10 @@ pub use font::{
 pub use sprites::{
     grid_by_cell_count, set_sprite_pivot, slice_sheet, Pivot, PixelRect, ResolvedSprite,
     SpriteCatalog, SpriteCell, SpriteSheetMeta,
+};
+pub use timeline::{
+    list_timelines, write_timeline, TimelineCatalog, TimelineClip, TimelineMeta, TimelineTrack,
+    TimelineTrackKind,
 };
 pub use wav::{
     inspect_wav, list_wav_clips, load_pcm16_wav, resolve_wav, spawn_wav_player, write_beep_wav,

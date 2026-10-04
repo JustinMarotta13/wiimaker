@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use wiimaker_assets::{AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog};
+use wiimaker_assets::{AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog, TimelineCatalog};
 use wiimaker_core::collider::move_and_collide;
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::input::Input;
@@ -102,6 +102,7 @@ pub fn hydrate_play_world(
     let project = load_project(game_dir)?;
     let controllers =
         AnimatorControllerCatalog::load_dir(&project.assets_path(game_dir)).unwrap_or_default();
+    let timelines = TimelineCatalog::load_dir(&project.assets_path(game_dir)).unwrap_or_default();
     if let Some(json) = scene_json.map(str::trim).filter(|s| !s.is_empty()) {
         let scene: Scene = serde_json::from_str(json)?;
         let layers = project.effective_sorting_layers();
@@ -112,6 +113,7 @@ pub fn hydrate_play_world(
             Some(anims),
             Some(&controllers),
             Some(&layers),
+            Some(&timelines),
         );
         Ok(scene.clear_rgba())
     } else {

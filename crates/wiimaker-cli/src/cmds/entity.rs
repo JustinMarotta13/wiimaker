@@ -5,26 +5,102 @@ use serde::Serialize;
 use wiimaker_scene::{
     add_component_animation, add_component_animator, add_component_audio_source,
     add_component_camera, add_component_collider, add_component_disc, add_component_follow,
-    add_component_grid_mover, add_component_sprite, add_component_text, add_component_tilemap,
-    add_entity, apply_prefab, attach_prefab_instance, create_prefab_variant, duplicate_entity,
-    entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered,
-    instantiate_prefab, load_prefab, load_prefab_for_instance, normalize_prefab_source,
-    prefab_tree_overrides, refresh_variant_overrides, remove_component_animation,
-    remove_component_animator, remove_component_audio_source, remove_component_camera,
-    remove_component_collider, remove_component_disc, remove_component_follow,
-    remove_component_grid_mover, remove_component_sprite, remove_component_text,
-    remove_component_tilemap, remove_entity, rename_entity, resolve_prefab, resolve_prefab_asset,
-    revert_prefab_instance, save_prefab, save_scene, set_component_enabled, set_entity_anim,
-    set_entity_animator_bool, set_entity_animator_float, set_entity_audio_source,
-    set_entity_controller, set_entity_follow, set_entity_grid_mover, set_entity_parent,
-    set_entity_rotation_z, set_entity_scale, set_entity_sorting, set_entity_sprite_pivot,
-    set_entity_text, set_entity_transform, unpack_prefab_instance, variant_from_instance,
-    MutateOpts, Scene, SceneColliderKind, SceneDir, SceneTextAlign,
+    add_component_grid_mover, add_component_playable_director, add_component_sprite,
+    add_component_text, add_component_tilemap, add_entity, apply_prefab, attach_prefab_instance,
+    create_prefab_variant, duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab,
+    entity_triggers_entered, instantiate_prefab, load_prefab, load_prefab_for_instance,
+    normalize_prefab_source, prefab_tree_overrides, refresh_variant_overrides,
+    remove_component_animation, remove_component_animator, remove_component_audio_source,
+    remove_component_camera, remove_component_collider, remove_component_disc,
+    remove_component_follow, remove_component_grid_mover, remove_component_playable_director,
+    remove_component_sprite, remove_component_text, remove_component_tilemap, remove_entity,
+    rename_entity, resolve_prefab, resolve_prefab_asset, revert_prefab_instance, save_prefab,
+    save_scene, set_component_enabled, set_entity_anim, set_entity_animator_bool,
+    set_entity_animator_float, set_entity_audio_source, set_entity_controller, set_entity_follow,
+    set_entity_grid_mover, set_entity_parent, set_entity_playable_director, set_entity_rotation_z,
+    set_entity_scale, set_entity_sorting, set_entity_sprite_pivot, set_entity_text,
+    set_entity_transform, unpack_prefab_instance, variant_from_instance, MutateOpts, Scene,
+    SceneColliderKind, SceneDir, SceneTextAlign,
 };
 
 use crate::args::EntityCmd;
 use crate::cmds::scene::open_scene;
 use crate::util::emit_ok;
+
+fn timeline_transport(
+    root: &Path,
+    game: &str,
+    name: &str,
+    scene: Option<&str>,
+    json: bool,
+    play: bool,
+    stop: bool,
+) -> Result<()> {
+    let (gd, project, _path, sc) = open_scene(root, game, scene)?;
+    let ent = sc
+        .find_entity(name)
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
+    let scene_d = ent
+        .components
+        .playable_director
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no PlayableDirector"))?;
+    let assets = project.assets_path(&gd);
+    let anims = wiimaker_assets::AnimClipCatalog::load_dir(&assets).unwrap_or_default();
+    let timelines = wiimaker_assets::TimelineCatalog::load_dir(&assets).unwrap_or_default();
+    let mut world = wiimaker_scene::hydrate_lenient_with_all_catalogs(
+        &sc,
+        &wiimaker_scene::TextureMap::new(),
+        None,
+        Some(&anims),
+        None,
+        None,
+        Some(&timelines),
+    );
+    let id = world
+        .find_by_name(name)
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' missing after hydrate"))?;
+    if play {
+        world.play_timeline(id);
+    } else if stop {
+        world.stop_timeline(id);
+    }
+    let d = world
+        .director(id)
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no runtime PlayableDirector"))?;
+    #[derive(Serialize)]
+    struct Out {
+        ok: bool,
+        name: String,
+        timeline: String,
+        time: f32,
+        playing: bool,
+        finished: bool,
+        #[serde(rename = "play_on_awake")]
+        play_on_awake: bool,
+        #[serde(rename = "loop")]
+        loop_: bool,
+    }
+    let out = Out {
+        ok: true,
+        name: name.to_string(),
+        timeline: d.timeline.clone(),
+        time: d.time,
+        playing: d.playing,
+        finished: d.finished,
+        play_on_awake: scene_d.play_on_awake,
+        loop_: scene_d.loop_,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    } else {
+        println!(
+            "{name}: timeline={} time={:.3} playing={} finished={}",
+            out.timeline, out.time, out.playing, out.finished
+        );
+    }
+    Ok(())
+}
 
 pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
     match cmd {
@@ -97,6 +173,8 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             pivot_y,
             clear_pivot,
             controller,
+            timeline,
+            timeline_loop,
             scene,
         } => {
             let (_gd, project, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -124,8 +202,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 && pivot_y.is_none()
                 && !clear_pivot
                 && controller.is_none()
+                && timeline.is_none()
+                && timeline_loop.is_none()
             {
-                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer --pivot-x --pivot-y --clear-pivot --controller");
+                bail!("entity set: pass at least one of --x --y --sx --sy --rotation-deg --tag --follow --lerp --cell --speed --queued-dir --audio-clip --volume --play-on-awake --text --size --color --align --sorting-layer --order-in-layer --pivot-x --pivot-y --clear-pivot --controller --timeline --loop");
             }
             if x.is_some() || y.is_some() {
                 set_entity_transform(&mut sc, &name, x, y)?;
@@ -162,7 +242,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 };
                 set_entity_grid_mover(&mut sc, &name, cell, speed, q)?;
             }
-            if audio_clip.is_some() || volume.is_some() || play_on_awake.is_some() {
+            if audio_clip.is_some()
+                || volume.is_some()
+                || (play_on_awake.is_some() && timeline.is_none() && timeline_loop.is_none())
+            {
                 set_entity_audio_source(
                     &mut sc,
                     &name,
@@ -194,6 +277,21 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             }
             if let Some(ctrl) = controller {
                 set_entity_controller(&mut sc, &name, &ctrl)?;
+            }
+            if timeline.is_some() || play_on_awake.is_some() || timeline_loop.is_some() {
+                let has_director = sc
+                    .find_entity(&name)
+                    .and_then(|e| e.components.playable_director.as_ref())
+                    .is_some();
+                if timeline.is_some() || timeline_loop.is_some() || has_director {
+                    set_entity_playable_director(
+                        &mut sc,
+                        &name,
+                        timeline.as_deref(),
+                        play_on_awake,
+                        timeline_loop,
+                    )?;
+                }
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("updated entity {name}"))
@@ -229,6 +327,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             pivot_x,
             pivot_y,
             controller,
+            timeline,
             scene,
         } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
@@ -269,12 +368,24 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "animation" => {
                     let clip =
                         clip.ok_or_else(|| anyhow::anyhow!("--clip required for Animation"))?;
-                    add_component_animation(&mut sc, &name, &clip, fps, r#loop)?;
+                    add_component_animation(&mut sc, &name, &clip, fps, r#loop.unwrap_or(true))?;
                 }
                 "animator" => {
                     let controller = controller
                         .ok_or_else(|| anyhow::anyhow!("--controller required for Animator"))?;
                     add_component_animator(&mut sc, &name, &controller)?;
+                }
+                "playabledirector" | "playable_director" | "playable-director" | "timeline" => {
+                    let timeline = timeline.ok_or_else(|| {
+                        anyhow::anyhow!("--timeline required for PlayableDirector")
+                    })?;
+                    add_component_playable_director(
+                        &mut sc,
+                        &name,
+                        &timeline,
+                        play_on_awake.unwrap_or(true),
+                        r#loop.unwrap_or(false),
+                    )?;
                 }
                 "camera" => {
                     add_component_camera(&mut sc, &name, true)?;
@@ -299,7 +410,13 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 }
                 "audiosource" | "audio_source" | "audio-source" | "audio" => {
                     let clip = clip.unwrap_or_default();
-                    add_component_audio_source(&mut sc, &name, &clip, volume, play_on_awake)?;
+                    add_component_audio_source(
+                        &mut sc,
+                        &name,
+                        &clip,
+                        volume,
+                        play_on_awake.unwrap_or(false),
+                    )?;
                 }
                 "text" | "label" | "hud" => {
                     let body = text.unwrap_or_else(|| "Text".into());
@@ -313,7 +430,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     add_component_text(&mut sc, &name, &body, size, color, align)?;
                 }
                 other => {
-                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Animator|Camera|Follow|GridMover|AudioSource|Text)")
+                    bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Trigger|Animation|Animator|PlayableDirector|Camera|Follow|GridMover|AudioSource|Text)")
                 }
             }
             save_scene(&path, &sc)?;
@@ -427,6 +544,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 "collider" => remove_component_collider(&mut sc, &name)?,
                 "animation" => remove_component_animation(&mut sc, &name)?,
                 "animator" => remove_component_animator(&mut sc, &name)?,
+                "playabledirector" | "playable_director" | "playable-director" | "timeline" => {
+                    remove_component_playable_director(&mut sc, &name)?
+                }
                 "camera" => remove_component_camera(&mut sc, &name)?,
                 "follow" => remove_component_follow(&mut sc, &name)?,
                 "gridmover" | "grid_mover" | "grid-mover" => {
@@ -436,7 +556,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     remove_component_audio_source(&mut sc, &name)?
                 }
                 "text" | "label" | "hud" => remove_component_text(&mut sc, &name)?,
-                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Camera|Follow|GridMover|AudioSource|Text)"),
+                other => bail!("unknown component kind '{other}' (Sprite|Disc|Tilemap|Collider|Animation|Animator|PlayableDirector|Camera|Follow|GridMover|AudioSource|Text)"),
             }
             save_scene(&path, &sc)?;
             emit_ok(json, &format!("removed {kind} from {name}"))
@@ -667,6 +787,15 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 );
             }
             Ok(())
+        }
+        EntityCmd::TimelinePlay { game, name, scene } => {
+            timeline_transport(root, &game, &name, scene.as_deref(), json, true, false)
+        }
+        EntityCmd::TimelineStop { game, name, scene } => {
+            timeline_transport(root, &game, &name, scene.as_deref(), json, false, true)
+        }
+        EntityCmd::TimelineStatus { game, name, scene } => {
+            timeline_transport(root, &game, &name, scene.as_deref(), json, false, false)
         }
         EntityCmd::Despawn { game, name, scene } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;

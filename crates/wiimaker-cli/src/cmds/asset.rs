@@ -4,10 +4,11 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use wiimaker_assets::{
-    inspect_wav, list_anim_clips, list_animator_controllers, list_wav_clips, resolve_wav,
-    set_sprite_pivot, slice_sheet, spawn_wav_player, write_anim_clip, write_animator_controller,
-    AnimatorControllerMeta, ControllerCondition, ControllerParam, ControllerParamType,
-    ControllerState, ControllerTransition, SpriteCatalog,
+    inspect_wav, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
+    resolve_wav, set_sprite_pivot, slice_sheet, spawn_wav_player, write_anim_clip,
+    write_animator_controller, write_timeline, AnimatorControllerMeta, ControllerCondition,
+    ControllerParam, ControllerParamType, ControllerState, ControllerTransition, SpriteCatalog,
+    TimelineClip, TimelineMeta, TimelineTrack, TimelineTrackKind,
 };
 use wiimaker_scene::{find_game_dir, load_project};
 
@@ -292,6 +293,67 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             }
             Ok(())
         }
+        AssetCmd::Timeline {
+            game,
+            name,
+            duration,
+            tracks,
+            stdin,
+        } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let meta = if stdin {
+                let mut buf = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+                    .context("read timeline JSON from stdin")?;
+                serde_json::from_str(&buf).context("parse timeline JSON from stdin")?
+            } else {
+                parse_timeline_flags(duration, &tracks)?
+            };
+            let (path, meta) = write_timeline(&assets, &name, meta)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    path: String,
+                    name: String,
+                    duration: f32,
+                    tracks: usize,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Out {
+                        path: path.display().to_string(),
+                        name,
+                        duration: meta.duration,
+                        tracks: meta.tracks.len(),
+                    })?
+                );
+            } else {
+                println!(
+                    "wrote timeline {} ({:.2}s, {} tracks) → {}",
+                    name,
+                    meta.duration,
+                    meta.tracks.len(),
+                    path.display()
+                );
+            }
+            Ok(())
+        }
+        AssetCmd::ListTimelines { game } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let names = list_timelines(&assets)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&names)?);
+            } else {
+                for n in names {
+                    println!("{n}");
+                }
+            }
+            Ok(())
+        }
         AssetCmd::ListWavs { game } => {
             let game_dir = find_game_dir(root, &game)?;
             let project = load_project(&game_dir)?;
@@ -480,4 +542,102 @@ fn parse_controller_flags(
         states: parsed_states,
         transitions: parsed_transitions,
     })
+}
+
+fn parse_timeline_flags(duration: f32, tracks: &[String]) -> Result<TimelineMeta> {
+    let mut out: Vec<TimelineTrack> = Vec::new();
+    for spec in tracks {
+        let mut parts = spec.splitn(5, ':');
+        let name = parts.next().unwrap_or("").trim();
+        let kind_s = parts.next().unwrap_or("").trim();
+        let binding_s = parts.next().unwrap_or("").trim();
+        let range = parts.next().unwrap_or("").trim();
+        let payload = parts.next().unwrap_or("").trim();
+        if name.is_empty() {
+            anyhow::bail!("--track '{spec}' needs Name:Kind:Binding:start-end:payload");
+        }
+        let kind = TimelineTrackKind::parse(kind_s).ok_or_else(|| {
+            anyhow::anyhow!("--track '{spec}' kind must be Activation|Animation|Audio|Transform")
+        })?;
+        let (start_s, end_s) = range.split_once('-').ok_or_else(|| {
+            anyhow::anyhow!("--track '{spec}' range must be start-end (e.g. 0.5-4)")
+        })?;
+        let start: f32 = start_s
+            .trim()
+            .parse()
+            .with_context(|| format!("--track '{spec}' start"))?;
+        let end: f32 = end_s
+            .trim()
+            .parse()
+            .with_context(|| format!("--track '{spec}' end"))?;
+        let binding = if binding_s.is_empty() || binding_s == "-" {
+            None
+        } else {
+            Some(binding_s.to_string())
+        };
+        let clip = match kind {
+            TimelineTrackKind::Activation => {
+                let active = if payload.is_empty() {
+                    true
+                } else {
+                    payload.eq_ignore_ascii_case("true") || payload == "1"
+                };
+                TimelineClip::activation(start, end, active)
+            }
+            TimelineTrackKind::Animation => {
+                if payload.is_empty() {
+                    anyhow::bail!("--track '{spec}' animation payload is a clip stem");
+                }
+                TimelineClip::animation(start, end, payload)
+            }
+            TimelineTrackKind::Audio => {
+                let (stem, volume) = if let Some((stem, vol)) = payload.split_once(':') {
+                    let volume: f32 = vol
+                        .trim()
+                        .parse()
+                        .with_context(|| format!("--track '{spec}' volume"))?;
+                    (stem.trim(), volume)
+                } else {
+                    (payload, 1.0)
+                };
+                if stem.is_empty() {
+                    anyhow::bail!("--track '{spec}' audio payload is a wav stem");
+                }
+                TimelineClip::audio(start, end, stem, volume)
+            }
+            TimelineTrackKind::Transform => {
+                let (from_s, to_s) = payload.split_once('>').ok_or_else(|| {
+                    anyhow::anyhow!("--track '{spec}' transform payload must be x,y>x,y")
+                })?;
+                TimelineClip::transform(start, end, parse_xy(from_s)?, parse_xy(to_s)?)
+            }
+        };
+        if let Some(existing) = out
+            .iter_mut()
+            .find(|t| t.name == name && t.kind == kind && t.binding == binding)
+        {
+            existing.clips.push(clip);
+        } else {
+            out.push(TimelineTrack {
+                name: name.to_string(),
+                kind,
+                binding,
+                clips: vec![clip],
+            });
+        }
+    }
+    Ok(TimelineMeta {
+        duration,
+        tracks: out,
+    })
+}
+
+fn parse_xy(s: &str) -> Result<[f32; 2]> {
+    let (x, y) = s
+        .split_once(',')
+        .ok_or_else(|| anyhow::anyhow!("expected x,y, got '{s}'"))?;
+    Ok([
+        x.trim().parse().with_context(|| format!("x in '{s}'"))?,
+        y.trim().parse().with_context(|| format!("y in '{s}'"))?,
+    ])
 }

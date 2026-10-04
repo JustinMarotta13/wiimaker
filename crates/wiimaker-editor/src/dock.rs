@@ -14,6 +14,7 @@ pub(crate) enum EditorTab {
     Inspector,
     Project,
     Console,
+    Timeline,
 }
 
 impl EditorTab {
@@ -25,6 +26,7 @@ impl EditorTab {
             Self::Inspector => "Inspector",
             Self::Project => "Project",
             Self::Console => "Console",
+            Self::Timeline => "Timeline",
         }
     }
 }
@@ -36,15 +38,14 @@ pub(crate) fn default_unity_layout() -> DockState<EditorTab> {
     let mut dock = DockState::new(vec![EditorTab::Scene, EditorTab::Game]);
     let surface = dock.main_surface_mut();
     // split_left fraction = left (new) child share (Horizontal::fraction).
-    let [center, _hier] =
-        surface.split_left(NodeIndex::root(), 0.18, vec![EditorTab::Hierarchy]);
+    let [center, _hier] = surface.split_left(NodeIndex::root(), 0.18, vec![EditorTab::Hierarchy]);
     // split_right fraction = left (old) child share → inspector ~0.22 of remaining.
     let [center, _insp] = surface.split_right(center, 0.78, vec![EditorTab::Inspector]);
     // split_below fraction = top (old) child share → bottom ~0.22 of remaining center.
     let [_center, _bottom] = surface.split_below(
         center,
         0.78,
-        vec![EditorTab::Project, EditorTab::Console],
+        vec![EditorTab::Project, EditorTab::Console, EditorTab::Timeline],
     );
     if let Some(loc) = dock.find_tab(&EditorTab::Scene) {
         dock.set_active_tab(loc);
@@ -114,6 +115,7 @@ impl TabViewer for EditorTabViewer<'_> {
             EditorTab::Game => self.app.ui_viewport(ui, CenterTab::Game),
             EditorTab::Project => self.app.ui_project_body(ui),
             EditorTab::Console => self.app.ui_console(ui),
+            EditorTab::Timeline => self.app.ui_timeline(ui),
         }
     }
 

@@ -8,8 +8,8 @@ use serde::Serialize;
 use crate::project::GameProject;
 use crate::scene::{load_scene, Scene};
 use wiimaker_assets::{
-    inspect_wav, list_anim_clips, list_animator_controllers, list_wav_clips, AnimClipMeta,
-    AnimatorControllerMeta, SpriteCatalog,
+    inspect_wav, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
+    AnimClipMeta, AnimatorControllerMeta, SpriteCatalog, TimelineMeta,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -103,6 +103,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
 
     let anim_names = list_anim_clips(&assets).unwrap_or_default();
     let controller_names = list_animator_controllers(&assets).unwrap_or_default();
+    let timeline_names = list_timelines(&assets).unwrap_or_default();
     let wav_names = list_wav_clips(&assets).unwrap_or_default();
     for wname in &wav_names {
         let path = assets.join(format!("{wname}.wav"));
@@ -140,6 +141,57 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
             }),
         }
     }
+    for tname in &timeline_names {
+        let path = TimelineMeta::path(&assets, tname);
+        match TimelineMeta::load(&path) {
+            Ok(meta) => {
+                for track in &meta.tracks {
+                    if let Some(binding) = track.binding.as_deref().filter(|s| !s.is_empty()) {
+                        let known = scene
+                            .as_ref()
+                            .is_some_and(|sc| sc.entities.iter().any(|e| e.name == binding));
+                        if !known {
+                            issues.push(Issue {
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "timeline '{tname}': track '{}' binding '{binding}' not in the default scene",
+                                    track.name
+                                ),
+                            });
+                        }
+                    }
+                    for clip in &track.clips {
+                        if let Some(stem) = clip.clip.as_deref().filter(|s| !s.is_empty()) {
+                            if !anim_names.iter().any(|n| n == stem) {
+                                issues.push(Issue {
+                                    severity: Severity::Warning,
+                                    message: format!(
+                                        "timeline '{tname}': track '{}' clip '{stem}' missing (expected assets/{stem}.anim.json)",
+                                        track.name
+                                    ),
+                                });
+                            }
+                        }
+                        if let Some(stem) = clip.audio.as_deref().filter(|s| !s.is_empty()) {
+                            if !wav_names.iter().any(|n| n == stem) {
+                                issues.push(Issue {
+                                    severity: Severity::Warning,
+                                    message: format!(
+                                        "timeline '{tname}': track '{}' audio '{stem}' missing (expected assets/{stem}.wav)",
+                                        track.name
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => issues.push(Issue {
+                severity: Severity::Error,
+                message: format!("timeline '{tname}': {e}"),
+            }),
+        }
+    }
     for cname in &controller_names {
         let path = AnimatorControllerMeta::path(&assets, cname);
         match AnimatorControllerMeta::load(&path) {
@@ -169,6 +221,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
             &sprite_names,
             &anim_names,
             &controller_names,
+            &timeline_names,
             &wav_names,
             &assets,
             &project.effective_sorting_layers(),
@@ -275,6 +328,7 @@ fn check_scene_refs(
     sprites: &[String],
     anims: &[String],
     controllers: &[String],
+    timelines: &[String],
     wavs: &[String],
     assets: &Path,
     sorting_layers: &[String],
@@ -433,6 +487,25 @@ fn check_scene_refs(
                     message: format!(
                         "entity '{}': Animator controller '{}' missing (expected assets/{}.controller.json)",
                         ent.name, a.controller, a.controller
+                    ),
+                });
+            }
+        }
+        if let Some(d) = &ent.components.playable_director {
+            if d.timeline.is_empty() {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "entity '{}': PlayableDirector has empty timeline name",
+                        ent.name
+                    ),
+                });
+            } else if !timelines.iter().any(|n| n == &d.timeline) {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "entity '{}': timeline '{}' missing (expected assets/{}.timeline.json)",
+                        ent.name, d.timeline, d.timeline
                     ),
                 });
             }

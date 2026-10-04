@@ -666,6 +666,28 @@ fn copy_entity_field(dest: &mut EntityData, src: &EntityData, field: &str) {
                 dest.components.animator = src.components.animator.clone();
             }
         }
+        "PlayableDirector" => {
+            dest.components.playable_director = src.components.playable_director.clone()
+        }
+        "PlayableDirector.timeline"
+        | "PlayableDirector.play_on_awake"
+        | "PlayableDirector.loop"
+        | "PlayableDirector.enabled" => {
+            if let (Some(d), Some(s)) = (
+                &mut dest.components.playable_director,
+                &src.components.playable_director,
+            ) {
+                match field {
+                    "PlayableDirector.timeline" => d.timeline = s.timeline.clone(),
+                    "PlayableDirector.play_on_awake" => d.play_on_awake = s.play_on_awake,
+                    "PlayableDirector.loop" => d.loop_ = s.loop_,
+                    "PlayableDirector.enabled" => d.enabled = s.enabled,
+                    _ => {}
+                }
+            } else {
+                dest.components.playable_director = src.components.playable_director.clone();
+            }
+        }
         "Animator.parameters" | "Animator.enabled" => {
             if let (Some(d), Some(s)) = (&mut dest.components.animator, &src.components.animator) {
                 match field {
@@ -804,6 +826,24 @@ fn push_components(out: &mut Vec<String>, a: &SceneComponents, b: &SceneComponen
             }
         }
         (Some(_), None) | (None, Some(_)) => out.push("Animator".into()),
+        (None, None) => {}
+    }
+    match (&a.playable_director, &b.playable_director) {
+        (Some(i), Some(p)) => {
+            if i.timeline != p.timeline {
+                out.push("PlayableDirector.timeline".into());
+            }
+            if i.play_on_awake != p.play_on_awake {
+                out.push("PlayableDirector.play_on_awake".into());
+            }
+            if i.loop_ != p.loop_ {
+                out.push("PlayableDirector.loop".into());
+            }
+            if i.enabled != p.enabled {
+                out.push("PlayableDirector.enabled".into());
+            }
+        }
+        (Some(_), None) | (None, Some(_)) => out.push("PlayableDirector".into()),
         (None, None) => {}
     }
     match (&a.grid_mover, &b.grid_mover) {

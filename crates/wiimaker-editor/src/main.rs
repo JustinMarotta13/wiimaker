@@ -10,6 +10,7 @@ mod ui_console;
 mod ui_hierarchy;
 mod ui_inspector;
 mod ui_project;
+mod ui_timeline;
 mod ui_toolbar;
 mod viewport;
 mod workspace;
@@ -20,7 +21,9 @@ use app::EditorApp;
 use workspace::find_root;
 
 fn main() -> eframe::Result<()> {
-    let game = std::env::args().nth(1).unwrap_or_else(|| "hello-orb".into());
+    let game = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "hello-orb".into());
     let root = find_root().expect("wiimaker workspace root");
     let state = EditorApp::open(&root, &game).unwrap_or_else(|e| {
         eprintln!("editor error: {e:#}");

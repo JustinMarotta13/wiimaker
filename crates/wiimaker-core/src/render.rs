@@ -91,7 +91,10 @@ pub fn render_world_ex(world: &World, draw: &mut DrawList, clear: Rgba8, apply_c
     // Collect tilemaps, then sprites, then discs so equal (layer, z) stays stable
     // (old scenes without named layers still draw tiles → sprites → discs).
     let mut items: Vec<DrawItem<'_>> = Vec::new();
-    for (_id, xf, tm) in world.iter_tilemaps() {
+    for (id, xf, tm) in world.iter_tilemaps() {
+        if !world.is_active(id) {
+            continue;
+        }
         items.push(DrawItem::Tilemap {
             layer: tm.sorting_layer,
             z: tm.z,
@@ -99,7 +102,10 @@ pub fn render_world_ex(world: &World, draw: &mut DrawList, clear: Rgba8, apply_c
             tm,
         });
     }
-    for (_id, xf, sp) in world.iter_sprites() {
+    for (id, xf, sp) in world.iter_sprites() {
+        if !world.is_active(id) {
+            continue;
+        }
         items.push(DrawItem::Sprite {
             layer: sp.sorting_layer,
             z: sp.z,
@@ -107,7 +113,10 @@ pub fn render_world_ex(world: &World, draw: &mut DrawList, clear: Rgba8, apply_c
             sp,
         });
     }
-    for (_id, xf, d) in world.iter_discs() {
+    for (id, xf, d) in world.iter_discs() {
+        if !world.is_active(id) {
+            continue;
+        }
         items.push(DrawItem::Disc {
             layer: d.sorting_layer,
             z: d.z,
@@ -115,7 +124,10 @@ pub fn render_world_ex(world: &World, draw: &mut DrawList, clear: Rgba8, apply_c
             d,
         });
     }
-    for (_id, xf, t) in world.iter_texts() {
+    for (id, xf, t) in world.iter_texts() {
+        if !world.is_active(id) {
+            continue;
+        }
         items.push(DrawItem::Text {
             layer: t.sorting_layer,
             z: t.z,
