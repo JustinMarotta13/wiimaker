@@ -213,3 +213,113 @@ fn apply_prefab_to_base_open_base_and_status_json() {
         variant_after.overrides
     );
 }
+
+#[test]
+fn apply_prefab_to_base_updates_sibling_instances() {
+    let dir = std::env::temp_dir().join(format!(
+        "wiimaker-cli-sib-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("assets").join("prefabs")).unwrap();
+    fs::create_dir_all(dir.join("scenes")).unwrap();
+    let mut project = GameProject::new("cli-sib");
+    project.default_scene = "scenes/main.scene.json".into();
+    save_project(&dir, &project).unwrap();
+
+    let mut scene = Scene::new("main");
+    add_entity(
+        &mut scene,
+        "Ghost",
+        &MutateOpts {
+            radius: Some(8.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let base = entity_to_prefab(&scene, "Ghost").unwrap();
+    save_prefab(&dir.join("assets/prefabs/ghost.prefab.json"), &base).unwrap();
+    create_prefab_variant(&dir, "ghost", "blinky").unwrap();
+    create_prefab_variant(&dir, "ghost", "pinky").unwrap();
+    let blinky_raw =
+        wiimaker_scene::load_prefab(&dir.join("assets/prefabs/blinky.prefab.json")).unwrap();
+    let pinky_raw =
+        wiimaker_scene::load_prefab(&dir.join("assets/prefabs/pinky.prefab.json")).unwrap();
+    let blinky_res = resolve_prefab(&dir, &blinky_raw).unwrap();
+    let pinky_res = resolve_prefab(&dir, &pinky_raw).unwrap();
+    let blinky = instantiate_prefab(
+        &mut scene,
+        &blinky_res,
+        "assets/prefabs/blinky.prefab.json",
+        None,
+        None,
+    );
+    let pinky = instantiate_prefab(
+        &mut scene,
+        &pinky_res,
+        "assets/prefabs/pinky.prefab.json",
+        Some(40.0),
+        None,
+    );
+    save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+    let game = dir.to_str().unwrap();
+
+    let set = wiimaker()
+        .args([
+            "entity", "set", game, "--name", &blinky, "--sx", "1.25", "--sy", "1.25",
+        ])
+        .output()
+        .expect("entity set");
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let apply = wiimaker()
+        .args([
+            "entity",
+            "apply-prefab",
+            game,
+            "--name",
+            &blinky,
+            "--to-base",
+            "--field",
+            "transform.scale",
+            "--json",
+        ])
+        .output()
+        .expect("apply to base");
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply_out = String::from_utf8_lossy(&apply.stdout);
+    assert!(
+        apply_out.contains("scene_synced") && apply_out.contains(&pinky),
+        "{apply_out}"
+    );
+
+    let scene = wiimaker_scene::load_scene(&dir.join("scenes/main.scene.json")).unwrap();
+    let pinky_ent = scene.entities.iter().find(|e| e.name == pinky).unwrap();
+    assert!(
+        (pinky_ent.transform.scale[0] - 1.25).abs() < 1e-3,
+        "{:?}",
+        pinky_ent.transform.scale
+    );
+    let status = wiimaker()
+        .args(["entity", "prefab-status", game, "--name", &pinky, "--json"])
+        .output()
+        .expect("prefab-status");
+    assert!(status.status.success());
+    let status_out = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        !status_out.contains("transform.scale"),
+        "sibling must not gain an instance override: {status_out}"
+    );
+}

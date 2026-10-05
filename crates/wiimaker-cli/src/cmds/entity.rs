@@ -7,10 +7,11 @@ use wiimaker_scene::{
     add_component_camera, add_component_collider, add_component_disc, add_component_follow,
     add_component_grid_mover, add_component_playable_director, add_component_sprite,
     add_component_text, add_component_tilemap, add_entity, apply_instance_fields_to_prefab,
-    apply_instance_to_base, apply_prefab, apply_variant_override_to_base, attach_prefab_instance,
-    create_prefab_variant, duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab,
-    entity_triggers_entered, find_game_dir, instantiate_prefab, load_prefab,
-    load_prefab_for_instance, normalize_prefab_source, prefab_chain_status, prefab_tree_overrides,
+    apply_instance_to_base, apply_prefab, apply_prefab_scene_inherit, apply_variant_override_to_base,
+    apply_variant_override_to_base_in_scene, attach_prefab_instance, create_prefab_variant,
+    duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered,
+    find_game_dir, instantiate_prefab, load_prefab, load_prefab_for_instance,
+    normalize_prefab_source, plan_prefab_scene_inherit, prefab_chain_status, prefab_tree_overrides,
     refresh_variant_overrides, remove_component_animation, remove_component_animator,
     remove_component_audio_source, remove_component_camera, remove_component_collider,
     remove_component_disc, remove_component_follow, remove_component_grid_mover,
@@ -1155,11 +1156,30 @@ fn apply_prefab_cmd(
             bail!("apply-prefab --to-base accepts either --name or --prefab, not both");
         }
         let report = if let Some(name) = name {
-            let (gd, _p, _path, sc) = open_scene(root, game, scene)?;
-            apply_instance_to_base(&gd, &sc, name, fields, target)?
+            let (gd, _p, path, mut sc) = open_scene(root, game, scene)?;
+            let report = apply_instance_to_base(&gd, &mut sc, name, fields, target)?;
+            if !report.scene_synced.is_empty() {
+                save_scene(&path, &sc)?;
+            }
+            report
         } else if let Some(prefab) = prefab {
-            let gd = find_game_dir(root, game)?;
-            apply_variant_override_to_base(&gd, prefab, fields, target)?
+            match open_scene(root, game, scene) {
+                Ok((gd, _p, path, mut sc)) => {
+                    let report = apply_variant_override_to_base_in_scene(
+                        &gd, &mut sc, prefab, fields, target,
+                    )?;
+                    if !report.scene_synced.is_empty() {
+                        save_scene(&path, &sc)?;
+                    }
+                    report
+                }
+                Err(e) if scene.is_none() => {
+                    let gd = find_game_dir(root, game)?;
+                    let _ = e;
+                    apply_variant_override_to_base(&gd, prefab, fields, target)?
+                }
+                Err(e) => return Err(e),
+            }
         } else {
             bail!("apply-prefab --to-base requires --name <entity> or --prefab <variant>");
         };
@@ -1173,9 +1193,13 @@ fn apply_prefab_cmd(
     let prefab_path = resolve_prefab_path(&gd, &source)?;
     if fields.is_empty() {
         let mut pf = load_prefab(&prefab_path)?;
+        let resolved = resolve_prefab(&gd, &pf)?;
+        let changed = prefab_tree_overrides(&sc, name, &resolved).fields;
+        let slots = plan_prefab_scene_inherit(&gd, &sc, &source, &changed)?;
         apply_prefab(&mut sc, name, &mut pf, &source)?;
         refresh_variant_overrides(&gd, &mut pf)?;
         save_prefab(&prefab_path, &pf)?;
+        let scene_synced = apply_prefab_scene_inherit(&gd, &mut sc, &slots)?;
         save_scene(&path, &sc)?;
         if json {
             #[derive(Serialize)]
@@ -1184,6 +1208,7 @@ fn apply_prefab_cmd(
                 message: String,
                 prefab: String,
                 path: String,
+                scene_synced: Vec<String>,
             }
             println!(
                 "{}",
@@ -1192,6 +1217,7 @@ fn apply_prefab_cmd(
                     message: format!("applied prefab to {name}"),
                     prefab: normalize_prefab_source(&source),
                     path: prefab_path.display().to_string(),
+                    scene_synced,
                 })?
             );
             Ok(())
@@ -1200,7 +1226,10 @@ fn apply_prefab_cmd(
             Ok(())
         }
     } else {
-        let overrides = apply_instance_fields_to_prefab(&gd, &sc, name, fields)?;
+        let report = apply_instance_fields_to_prefab(&gd, &mut sc, name, fields)?;
+        if !report.scene_synced.is_empty() {
+            save_scene(&path, &sc)?;
+        }
         if json {
             #[derive(Serialize)]
             struct Out {
@@ -1210,6 +1239,7 @@ fn apply_prefab_cmd(
                 path: String,
                 applied: Vec<String>,
                 variant_overrides: Vec<String>,
+                scene_synced: Vec<String>,
             }
             println!(
                 "{}",
@@ -1219,7 +1249,8 @@ fn apply_prefab_cmd(
                     prefab: normalize_prefab_source(&source),
                     path: prefab_path.display().to_string(),
                     applied: fields.to_vec(),
-                    variant_overrides: overrides,
+                    variant_overrides: report.variant_overrides,
+                    scene_synced: report.scene_synced,
                 })?
             );
             Ok(())
@@ -1246,6 +1277,7 @@ fn emit_apply_report(json: bool, report: &wiimaker_scene::ApplyToBaseReport) -> 
             applied: &'a [String],
             variant_overrides: &'a [String],
             chain: &'a [String],
+            scene_synced: &'a [String],
         }
         let message = if report.applied.is_empty() {
             "no overrides to apply to base".to_string()
@@ -1266,6 +1298,7 @@ fn emit_apply_report(json: bool, report: &wiimaker_scene::ApplyToBaseReport) -> 
                 applied: &report.applied,
                 variant_overrides: &report.variant_overrides,
                 chain: &report.chain,
+                scene_synced: &report.scene_synced,
             })?
         );
     } else if report.applied.is_empty() {
