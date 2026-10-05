@@ -616,6 +616,7 @@ pub enum EntityCmd {
         #[arg(long)]
         name: Option<String>,
         /// Prefab stem or path (instance link when omitted; variant asset with `--to-base`)
+        #[arg(long)]
         prefab: Option<String>,
         /// Write values into the base prefab and drop those paths from the variant overrides
         #[arg(long)]

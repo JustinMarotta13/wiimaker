@@ -601,9 +601,11 @@ pub fn apply_variant_override_to_base(
     if !asset.is_variant() {
         bail!("prefab '{link}' is not a variant (no base to apply to)");
     }
+    let effective = materialized_override_list(game_dir, &asset)?;
     let paths_owned = if paths.is_empty() {
-        materialized_override_list(game_dir, &asset)?
+        effective.clone()
     } else {
+        validate_variant_override_paths(&link, &effective, paths)?;
         paths.to_vec()
     };
     if paths_owned.is_empty() {
@@ -700,14 +702,7 @@ pub fn revert_variant_to_base(
     let paths_owned = if paths.is_empty() {
         effective.clone()
     } else {
-        for path in paths {
-            if !is_known_override_path(path) {
-                bail!("unknown override path '{path}'");
-            }
-            if !effective.iter().any(|p| p == path) {
-                bail!("override '{path}' is not set on variant '{link}'");
-            }
-        }
+        validate_variant_override_paths(&link, &effective, paths)?;
         paths.to_vec()
     };
     let chain = prefab_base_chain(game_dir, &link)?;
@@ -806,6 +801,22 @@ fn load_instance_variant(
     Ok((link, asset, resolved))
 }
 
+fn validate_variant_override_paths(
+    link: &str,
+    effective: &[String],
+    paths: &[String],
+) -> Result<()> {
+    for path in paths {
+        if !is_known_override_path(path) {
+            bail!("unknown override path '{path}'");
+        }
+        if !effective.iter().any(|p| p == path) {
+            bail!("override '{path}' is not set on variant '{link}'");
+        }
+    }
+    Ok(())
+}
+
 fn validate_instance_paths(
     instance_paths: &[String],
     asset_paths: &[String],
@@ -869,8 +880,7 @@ fn apply_paths_along_chain(
     // an empty-override snapshot that still has the previous value would look
     // like a new override vs the new base (or inherit-all if we only inspect
     // `overrides`). Plan now; apply after the chain write.
-    let pending_inherit =
-        plan_inherited_snapshot_updates(game_dir, &target_link, paths, &chain)?;
+    let pending_inherit = plan_inherited_snapshot_updates(game_dir, &target_link, paths, &chain)?;
     {
         let disk = resolve_prefab_asset(game_dir, &target_link)?;
         let mut asset = crate::scene::load_prefab(&disk)?;
@@ -1322,7 +1332,25 @@ fn copy_entity_field(dest: &mut EntityData, src: &EntityData, field: &str) {
         | "Tilemap.z"
         | "Tilemap.sorting_layer"
         | "Tilemap.enabled" => {
-            dest.components.tilemap = src.components.tilemap.clone();
+            if let (Some(d), Some(s)) = (&mut dest.components.tilemap, &src.components.tilemap) {
+                match field {
+                    "Tilemap.cell" => d.cell = s.cell,
+                    "Tilemap.origin" => d.origin = s.origin,
+                    "Tilemap.size" => {
+                        d.width = s.width;
+                        d.height = s.height;
+                    }
+                    "Tilemap.cells" => d.cells = s.cells.clone(),
+                    "Tilemap.solid" => d.solid = s.solid.clone(),
+                    "Tilemap.palette" => d.palette = s.palette.clone(),
+                    "Tilemap.z" => d.z = s.z,
+                    "Tilemap.sorting_layer" => d.sorting_layer = s.sorting_layer.clone(),
+                    "Tilemap.enabled" => d.enabled = s.enabled,
+                    _ => {}
+                }
+            } else {
+                dest.components.tilemap = src.components.tilemap.clone();
+            }
         }
         "Collider" => dest.components.collider = src.components.collider.clone(),
         "Collider.kind"
