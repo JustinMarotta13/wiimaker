@@ -1125,6 +1125,28 @@ impl EditorApp {
         match wiimaker_scene::resolve_prefab_asset(&self.game_dir, &src) {
             Ok(path) => match wiimaker_scene::load_prefab(&path) {
                 Ok(mut prefab) => {
+                    let changed = match wiimaker_scene::resolve_prefab(&self.game_dir, &prefab) {
+                        Ok(resolved) => {
+                            wiimaker_scene::prefab_tree_overrides(&self.scene, name, &resolved)
+                                .fields
+                        }
+                        Err(e) => {
+                            self.status = format!("resolve prefab failed: {e}");
+                            return;
+                        }
+                    };
+                    let slots = match wiimaker_scene::plan_prefab_scene_inherit(
+                        &self.game_dir,
+                        &self.scene,
+                        &src,
+                        &changed,
+                    ) {
+                        Ok(slots) => slots,
+                        Err(e) => {
+                            self.status = format!("apply prefab failed: {e}");
+                            return;
+                        }
+                    };
                     self.push_undo();
                     if let Err(e) =
                         wiimaker_scene::apply_prefab(&mut self.scene, name, &mut prefab, &src)
@@ -1143,6 +1165,15 @@ impl EditorApp {
                     if let Err(e) = wiimaker_scene::save_prefab(&path, &prefab) {
                         let _ = self.undo.undo(&mut self.scene);
                         self.status = format!("write prefab failed: {e}");
+                        return;
+                    }
+                    if let Err(e) = wiimaker_scene::apply_prefab_scene_inherit(
+                        &self.game_dir,
+                        &mut self.scene,
+                        &slots,
+                    ) {
+                        let _ = self.undo.undo(&mut self.scene);
+                        self.status = format!("apply prefab failed: {e}");
                         return;
                     }
                     self.sync_baseline();
@@ -1217,17 +1248,23 @@ impl EditorApp {
     }
 
     pub(crate) fn apply_instance_field_to_variant(&mut self, name: &str, field: &str) {
+        self.push_undo();
         match wiimaker_scene::apply_instance_fields_to_prefab(
             &self.game_dir,
-            &self.scene,
+            &mut self.scene,
             name,
             &[field.to_string()],
         ) {
             Ok(_) => {
+                self.sync_baseline();
+                self.mark_dirty();
                 self.refresh_project_tree();
                 self.status = format!("applied {field} to prefab variant");
             }
-            Err(e) => self.status = format!("apply prefab failed: {e}"),
+            Err(e) => {
+                let _ = self.undo.undo(&mut self.scene);
+                self.status = format!("apply prefab failed: {e}");
+            }
         }
     }
 
@@ -1243,14 +1280,21 @@ impl EditorApp {
             wiimaker_scene::ApplyBaseTarget::Immediate
         };
         let paths: Vec<String> = field.map(|f| vec![f.to_string()]).unwrap_or_default();
+        self.push_undo();
         match wiimaker_scene::apply_instance_to_base(
             &self.game_dir,
-            &self.scene,
+            &mut self.scene,
             name,
             &paths,
             target,
         ) {
             Ok(rep) => {
+                if rep.scene_synced.is_empty() {
+                    self.undo.discard_latest();
+                } else {
+                    self.sync_baseline();
+                    self.mark_dirty();
+                }
                 self.refresh_project_tree();
                 if rep.applied.is_empty() {
                     self.status = "no overrides to apply to base".into();
@@ -1258,7 +1302,10 @@ impl EditorApp {
                     self.status = format!("applied {} to {}", rep.applied.join(", "), rep.base);
                 }
             }
-            Err(e) => self.status = format!("apply to base failed: {e}"),
+            Err(e) => {
+                let _ = self.undo.undo(&mut self.scene);
+                self.status = format!("apply to base failed: {e}");
+            }
         }
     }
 
@@ -1300,8 +1347,21 @@ impl EditorApp {
             wiimaker_scene::ApplyBaseTarget::Immediate
         };
         let paths: Vec<String> = field.map(|f| vec![f.to_string()]).unwrap_or_default();
-        match wiimaker_scene::apply_variant_override_to_base(&self.game_dir, rel, &paths, target) {
+        self.push_undo();
+        match wiimaker_scene::apply_variant_override_to_base_in_scene(
+            &self.game_dir,
+            &mut self.scene,
+            rel,
+            &paths,
+            target,
+        ) {
             Ok(rep) => {
+                if rep.scene_synced.is_empty() {
+                    self.undo.discard_latest();
+                } else {
+                    self.sync_baseline();
+                    self.mark_dirty();
+                }
                 self.refresh_project_tree();
                 if rep.applied.is_empty() {
                     self.status = "no variant overrides to apply to base".into();
@@ -1309,7 +1369,10 @@ impl EditorApp {
                     self.status = format!("applied {} to {}", rep.applied.join(", "), rep.base);
                 }
             }
-            Err(e) => self.status = format!("apply to base failed: {e}"),
+            Err(e) => {
+                let _ = self.undo.undo(&mut self.scene);
+                self.status = format!("apply to base failed: {e}");
+            }
         }
     }
 

@@ -41,6 +41,11 @@ impl UndoStack {
         self.redo.len()
     }
 
+    /// Drop the newest undo snapshot without touching `redo` or the live scene.
+    pub fn discard_latest(&mut self) -> bool {
+        self.undo.pop().is_some()
+    }
+
     /// Record `before` (state prior to a mutation). Clears the redo stack.
     pub fn push(&mut self, before: &Scene) {
         self.push_owned(before.clone());

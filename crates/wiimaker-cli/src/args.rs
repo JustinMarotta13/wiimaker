@@ -616,7 +616,11 @@ pub enum EntityCmd {
         #[arg(long)]
         name: Option<String>,
         /// Prefab stem or path (instance link when omitted; variant asset with `--to-base`)
+        #[arg(long)]
         prefab: Option<String>,
+        /// Positional alias of `--prefab` so `apply-prefab <game> [PREFAB]` keeps working.
+        #[arg(value_name = "PREFAB", hide = true)]
+        prefab_pos: Option<String>,
         /// Write values into the base prefab and drop those paths from the variant overrides
         #[arg(long)]
         to_base: bool,
