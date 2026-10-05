@@ -38,8 +38,9 @@ Canonical rules: `.cursor/rules/wiimaker-engine.mdc` · architecture: `ARCHITECT
 - Scene hierarchy TRS: `SceneTransform::compose_child` / `to_local` are the single source of truth. `world.scale = parent.scale * local.scale` (component-wise, no shear), `world.rotation = parent.rotation * local.rotation` (glam `Quat`, scene stores `[x,y,z,w]`), `world.t = parent.t + rotate(parent.r, local.t * parent.s)`. Hydrate writes flattened world pose onto `World` (no parent links at runtime). WSCN bake writes composed translation+scale only. Identity rotation still matches the old translate×scale path.
 
 - Nested prefabs: `Prefab { entity, children }` — children use prefab-local `parent` names; scene instances link only on the root (`EntityData.prefab`). Override paths: `ChildName/transform.position`. Apply/Revert rebuild the nested tree. Old single-entity `.prefab.json` remains valid.
+- Variant empty `overrides` is not "inherits all": `resolve_prefab` treats it as snapshot-vs-base. Apply to Base must plan sibling copies **before** writing the base (`materialized_override_list` vs old base). A legacy sibling whose snapshot already diverged keeps that value.
 
 ## Open follow-ups
 
-- Prefab variants shipped 2026-10-02; Animator shipped 2026-10-03; Timeline / PlayableDirector shipped 2026-10-04 (host-first). Next authoring gap: Apply to Base / Open Base.
+- Prefab variants shipped 2026-10-02; Animator shipped 2026-10-03; Timeline / PlayableDirector shipped 2026-10-04; Apply to Base / Open Base shipped 2026-10-05 (host-first). Legacy empty-override siblings: plan inherit from old-base effective diffs (F1).
 - Sprite sheet offset/padding, Grid By Cell Size.

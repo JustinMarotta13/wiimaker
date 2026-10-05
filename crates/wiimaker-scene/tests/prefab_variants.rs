@@ -313,6 +313,103 @@ fn apply_field_to_base_removes_override_and_siblings_inherit() {
     );
 }
 
+/// Legacy empty `overrides` + a snapshot that already diverged from the old
+/// base is a real override (`resolve_prefab` uses the snapshot-vs-base diff).
+/// Apply to Base must not paint that sibling with the applied value.
+#[test]
+fn apply_to_base_keeps_legacy_divergent_sibling_and_explicit_override() {
+    let dir = tmp_game("apply-base-legacy-sib");
+    let mut scene = Scene::new("main");
+    add_entity(
+        &mut scene,
+        "Ghost",
+        &MutateOpts {
+            x: Some(10.0),
+            y: Some(20.0),
+            radius: Some(8.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    scene
+        .entities
+        .iter_mut()
+        .find(|e| e.name == "Ghost")
+        .unwrap()
+        .components
+        .disc
+        .as_mut()
+        .unwrap()
+        .color = [255, 0, 0, 255];
+    let base = entity_to_prefab(&scene, "Ghost").unwrap();
+    let base_path = dir.join("assets/prefabs/ghost.prefab.json");
+    save_prefab(&base_path, &base).unwrap();
+
+    let (ghost_a_path, mut ghost_a) = create_prefab_variant(&dir, "ghost", "ghost_a").unwrap();
+    ghost_a.entity.components.disc.as_mut().unwrap().color = [0, 0, 255, 255];
+    refresh_variant_overrides(&dir, &mut ghost_a).unwrap();
+    save_prefab(&ghost_a_path, &ghost_a).unwrap();
+
+    // Hand-edited / legacy: empty overrides, green snapshot vs red base.
+    let (ghost_b_path, mut ghost_b) = create_prefab_variant(&dir, "ghost", "ghost_b").unwrap();
+    assert!(ghost_b.overrides.is_empty());
+    ghost_b.entity.components.disc.as_mut().unwrap().color = [0, 255, 0, 255];
+    save_prefab(&ghost_b_path, &ghost_b).unwrap();
+
+    let (ghost_c_path, mut ghost_c) = create_prefab_variant(&dir, "ghost", "ghost_c").unwrap();
+    ghost_c.entity.components.disc.as_mut().unwrap().color = [255, 255, 0, 255];
+    refresh_variant_overrides(&dir, &mut ghost_c).unwrap();
+    assert!(ghost_c.overrides.iter().any(|p| p == "Disc.color"));
+    save_prefab(&ghost_c_path, &ghost_c).unwrap();
+
+    apply_variant_override_to_base(
+        &dir,
+        "ghost_a",
+        &["Disc.color".into()],
+        ApplyBaseTarget::Immediate,
+    )
+    .unwrap();
+
+    let base_after = load_prefab(&base_path).unwrap();
+    assert_eq!(
+        base_after.entity.components.disc.as_ref().unwrap().color,
+        [0, 0, 255, 255]
+    );
+
+    let a_after = load_prefab(&ghost_a_path).unwrap();
+    let a_resolved = resolve_prefab(&dir, &a_after).unwrap();
+    assert!(!a_after.overrides.iter().any(|p| p == "Disc.color"));
+    assert_eq!(
+        a_resolved.entity.components.disc.as_ref().unwrap().color,
+        [0, 0, 255, 255]
+    );
+
+    let b_after = load_prefab(&ghost_b_path).unwrap();
+    assert!(
+        b_after.overrides.is_empty(),
+        "legacy sibling must keep empty overrides: {:?}",
+        b_after.overrides
+    );
+    assert_eq!(
+        b_after.entity.components.disc.as_ref().unwrap().color,
+        [0, 255, 0, 255],
+        "legacy snapshot must stay green"
+    );
+    let b_resolved = resolve_prefab(&dir, &b_after).unwrap();
+    assert_eq!(
+        b_resolved.entity.components.disc.as_ref().unwrap().color,
+        [0, 255, 0, 255]
+    );
+
+    let c_after = load_prefab(&ghost_c_path).unwrap();
+    assert!(c_after.overrides.iter().any(|p| p == "Disc.color"));
+    let c_resolved = resolve_prefab(&dir, &c_after).unwrap();
+    assert_eq!(
+        c_resolved.entity.components.disc.as_ref().unwrap().color,
+        [255, 255, 0, 255]
+    );
+}
+
 #[test]
 fn apply_nested_child_field_to_base() {
     let dir = tmp_game("apply-nested");

@@ -865,6 +865,12 @@ fn apply_paths_along_chain(
         ApplyBaseTarget::Root => chain.len() - 1,
     };
     let target_link = chain[target_idx].clone();
+    // Gate sibling copies against the *old* base. After the target is written,
+    // an empty-override snapshot that still has the previous value would look
+    // like a new override vs the new base (or inherit-all if we only inspect
+    // `overrides`). Plan now; apply after the chain write.
+    let pending_inherit =
+        plan_inherited_snapshot_updates(game_dir, &target_link, paths, &chain)?;
     {
         let disk = resolve_prefab_asset(game_dir, &target_link)?;
         let mut asset = crate::scene::load_prefab(&disk)?;
@@ -895,10 +901,7 @@ fn apply_paths_along_chain(
         }
         crate::scene::save_prefab(&disk, &asset)?;
     }
-    // Variants outside this chain that do not list the path must inherit it.
-    // Empty `overrides` is a full snapshot diff, so copy the new value onto those
-    // snapshots; an explicit list that omits the path already inherits via resolve.
-    propagate_inherited_snapshots(game_dir, &target_link, value_src, paths, &chain)?;
+    apply_inherited_snapshot_updates(value_src, pending_inherit)?;
     Ok(ApplyToBaseReport {
         variant: chain[0].clone(),
         base: target_link,
@@ -908,17 +911,17 @@ fn apply_paths_along_chain(
     })
 }
 
-fn propagate_inherited_snapshots(
+fn plan_inherited_snapshot_updates(
     game_dir: &Path,
     target_link: &str,
-    value_src: &Prefab,
     paths: &[String],
     skip: &[String],
-) -> Result<()> {
+) -> Result<Vec<(PathBuf, Vec<String>)>> {
     let dir = game_dir.join("assets").join("prefabs");
     let Ok(rd) = std::fs::read_dir(&dir) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
+    let mut pending = Vec::new();
     for entry in rd.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -931,7 +934,7 @@ fn propagate_inherited_snapshots(
         if skip.iter().any(|s| s == &link) {
             continue;
         }
-        let mut asset = crate::scene::load_prefab(&path)?;
+        let asset = crate::scene::load_prefab(&path)?;
         if !asset.is_variant() {
             continue;
         }
@@ -939,14 +942,28 @@ fn propagate_inherited_snapshots(
         if !asset_chain.iter().any(|c| c == target_link) {
             continue;
         }
+        // Explicit list: skip listed paths. Empty list: effective = snapshot vs
+        // current (old) base — a divergent snapshot is a real override.
+        let blocked = materialized_override_list(game_dir, &asset)?;
         let inherited: Vec<String> = paths
             .iter()
-            .filter(|p| !asset.overrides.iter().any(|have| have == *p))
+            .filter(|p| !blocked.iter().any(|have| have == *p))
             .cloned()
             .collect();
         if inherited.is_empty() {
             continue;
         }
+        pending.push((path, inherited));
+    }
+    Ok(pending)
+}
+
+fn apply_inherited_snapshot_updates(
+    value_src: &Prefab,
+    pending: Vec<(PathBuf, Vec<String>)>,
+) -> Result<()> {
+    for (path, inherited) in pending {
+        let mut asset = crate::scene::load_prefab(&path)?;
         apply_override_paths(&mut asset, value_src, &inherited)?;
         crate::scene::save_prefab(&path, &asset)?;
     }
