@@ -51,11 +51,14 @@ pub use pick::{
     pointer_to_scene,
 };
 pub use prefab::{
-    collect_descendants, create_prefab_variant, find_prefab_instance_root,
+    apply_instance_fields_to_prefab, apply_instance_to_base, apply_variant_override_to_base,
+    collect_descendants, create_prefab_variant, find_prefab_instance_root, is_known_override_path,
     load_prefab_for_instance, match_prefab_instance, normalize_prefab_source,
-    prefab_asset_overrides, prefab_local_name, prefab_overrides, prefab_stem,
-    prefab_tree_overrides, refresh_variant_overrides, resolve_prefab, resolve_prefab_asset,
-    topo_prefab_children, variant_from_instance, PrefabOverrides,
+    prefab_asset_overrides, prefab_base_chain, prefab_chain_status, prefab_local_name,
+    prefab_overrides, prefab_stem, prefab_tree_overrides, prefab_variant_chrome,
+    refresh_variant_overrides, resolve_prefab, resolve_prefab_asset, revert_prefab_instance_fields,
+    revert_variant_to_base, topo_prefab_children, variant_from_instance, ApplyBaseTarget,
+    ApplyToBaseReport, PrefabChainStatus, PrefabOverrides, PrefabVariantChrome,
 };
 pub use prefs::{
     apply_game_view, apply_project_view, apply_scene_view, editor_prefs_path, fitted_blit_rect,

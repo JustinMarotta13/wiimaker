@@ -458,6 +458,722 @@ pub fn variant_from_instance(
     Ok(variant)
 }
 
+/// Where an Apply-to-Base writes in a variant chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplyBaseTarget {
+    /// The asset named by this variant's `base` field.
+    Immediate,
+    /// The first non-variant prefab at the end of the chain.
+    Root,
+}
+
+/// Result of pushing override paths from a variant onto a base asset.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ApplyToBaseReport {
+    /// Game-relative variant asset that lost the applied paths.
+    pub variant: String,
+    /// Game-relative asset that received the values (immediate or root).
+    pub base: String,
+    pub applied: Vec<String>,
+    /// Overrides still stored on the variant asset after the write.
+    pub variant_overrides: Vec<String>,
+    /// `variant` … immediate bases … root.
+    pub chain: Vec<String>,
+}
+
+/// Inspector / CLI labels for a prefab variant (Unity Overrides dropdown).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrefabVariantChrome {
+    pub open_base: &'static str,
+    pub select_base: &'static str,
+    pub revert: &'static str,
+    pub revert_all: &'static str,
+    pub revert_to_base: &'static str,
+    pub apply_all_to_base: &'static str,
+    pub apply_to_variant: String,
+    pub apply_all_to_variant: String,
+    pub apply_to_base: String,
+    pub apply_to_root: Option<String>,
+    pub apply_all_to_root: Option<String>,
+}
+
+/// Unity-shaped control labels. `root_stem` is set when the chain is deeper than one base.
+pub fn prefab_variant_chrome(
+    variant_stem: &str,
+    base_stem: &str,
+    root_stem: Option<&str>,
+) -> PrefabVariantChrome {
+    let root = root_stem.filter(|r| !r.is_empty() && *r != base_stem);
+    PrefabVariantChrome {
+        open_base: "Open Base",
+        select_base: "Select Base",
+        revert: "Revert",
+        revert_all: "Revert All",
+        revert_to_base: "Revert to Base",
+        apply_all_to_base: "Apply All to Base",
+        apply_to_variant: format!("Apply to Prefab Variant '{variant_stem}'"),
+        apply_all_to_variant: format!("Apply All to Prefab Variant '{variant_stem}'"),
+        apply_to_base: format!("Apply to Base '{base_stem}'"),
+        apply_to_root: root.map(|r| format!("Apply to Root '{r}'")),
+        apply_all_to_root: root.map(|r| format!("Apply All to Root '{r}'")),
+    }
+}
+
+/// Base chain for a prefab asset: `[self, immediate base, …, root]`.
+pub fn prefab_base_chain(game_dir: &Path, source: &str) -> Result<Vec<String>> {
+    let mut chain = Vec::new();
+    let mut current = normalize_prefab_source(source);
+    if current.is_empty() {
+        bail!("prefab source cannot be empty");
+    }
+    for _ in 0..32 {
+        if chain.iter().any(|s| s == &current) {
+            bail!("prefab variant cycle involving {current}");
+        }
+        chain.push(current.clone());
+        let raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, &current)?)?;
+        match raw.base.as_deref().filter(|s| !s.is_empty()) {
+            Some(base) => current = normalize_prefab_source(base),
+            None => return Ok(chain),
+        }
+    }
+    bail!("prefab variant chain too deep");
+}
+
+/// Which overrides live on a variant asset vs its immediate base.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PrefabChainStatus {
+    pub prefab: String,
+    pub base: Option<String>,
+    pub root: String,
+    pub chain: Vec<String>,
+    pub variant: bool,
+    pub variant_overrides: Vec<String>,
+    pub base_overrides: Vec<String>,
+}
+
+/// Load `source` and describe its base chain plus stored overrides.
+pub fn prefab_chain_status(game_dir: &Path, source: &str) -> Result<PrefabChainStatus> {
+    let chain = prefab_base_chain(game_dir, source)?;
+    let prefab = chain.first().cloned().unwrap_or_default();
+    let raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, &prefab)?)?;
+    let base = if chain.len() > 1 {
+        Some(chain[1].clone())
+    } else {
+        None
+    };
+    let root = chain.last().cloned().unwrap_or_else(|| prefab.clone());
+    let base_overrides = if let Some(base_link) = &base {
+        let base_raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, base_link)?)?;
+        if base_raw.is_variant() {
+            base_raw.overrides
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    Ok(PrefabChainStatus {
+        variant: raw.is_variant(),
+        variant_overrides: raw.overrides,
+        prefab,
+        base,
+        root,
+        chain,
+        base_overrides,
+    })
+}
+
+/// Write variant-asset override values into the base and drop them from this variant.
+///
+/// `paths` empty applies every override stored on the variant (legacy empty list is
+/// materialized from the snapshot diff first). Other variants of the same base that
+/// do not override the field inherit the new value on [`resolve_prefab`].
+pub fn apply_variant_override_to_base(
+    game_dir: &Path,
+    variant_source: &str,
+    paths: &[String],
+    target: ApplyBaseTarget,
+) -> Result<ApplyToBaseReport> {
+    let link = normalize_prefab_source(variant_source);
+    let disk = resolve_prefab_asset(game_dir, &link)?;
+    let asset = crate::scene::load_prefab(&disk)?;
+    if !asset.is_variant() {
+        bail!("prefab '{link}' is not a variant (no base to apply to)");
+    }
+    let paths_owned = if paths.is_empty() {
+        materialized_override_list(game_dir, &asset)?
+    } else {
+        paths.to_vec()
+    };
+    if paths_owned.is_empty() {
+        return empty_apply_report(game_dir, &link, &asset);
+    }
+    apply_paths_along_chain(game_dir, &link, &asset, &paths_owned, target)
+}
+
+/// Apply instance values onto the base asset and drop those paths from the variant.
+///
+/// `paths` empty applies every instance override versus the resolved variant
+/// (not the variant asset's own stored overrides). Scene entities are left as-is.
+pub fn apply_instance_to_base(
+    game_dir: &Path,
+    scene: &Scene,
+    instance_root: &str,
+    paths: &[String],
+    target: ApplyBaseTarget,
+) -> Result<ApplyToBaseReport> {
+    let (link, asset, resolved) = load_instance_variant(game_dir, scene, instance_root)?;
+    let inst_paths = prefab_tree_overrides(scene, instance_root, &resolved).fields;
+    let paths_owned = if paths.is_empty() {
+        inst_paths
+    } else {
+        validate_instance_paths(&inst_paths, &asset.overrides, paths)?;
+        paths.to_vec()
+    };
+    if paths_owned.is_empty() {
+        return empty_apply_report(game_dir, &link, &asset);
+    }
+    let mut values = asset.clone();
+    overlay_instance_values(scene, instance_root, &resolved, &mut values)?;
+    apply_paths_along_chain(game_dir, &link, &values, &paths_owned, target)
+}
+
+/// Push specific instance override paths onto the linked prefab asset (not its base).
+///
+/// `paths` empty applies every instance override. Does not modify the scene.
+pub fn apply_instance_fields_to_prefab(
+    game_dir: &Path,
+    scene: &Scene,
+    instance_root: &str,
+    paths: &[String],
+) -> Result<Vec<String>> {
+    let ent = scene
+        .find_entity(instance_root)
+        .ok_or_else(|| anyhow::anyhow!("entity '{instance_root}' not found"))?;
+    let src = ent
+        .prefab
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("entity '{instance_root}' is not a prefab instance"))?;
+    let link = normalize_prefab_source(src);
+    let disk = resolve_prefab_asset(game_dir, &link)?;
+    let mut asset = crate::scene::load_prefab(&disk)?;
+    let resolved = resolve_prefab(game_dir, &asset)?;
+    let inst_paths = prefab_tree_overrides(scene, instance_root, &resolved).fields;
+    let paths_owned = if paths.is_empty() {
+        inst_paths
+    } else {
+        validate_instance_paths(&inst_paths, &[], paths)?;
+        paths.to_vec()
+    };
+    if paths_owned.is_empty() {
+        return Ok(asset.overrides);
+    }
+    let mut values = asset.clone();
+    overlay_instance_values(scene, instance_root, &resolved, &mut values)?;
+    apply_override_paths(&mut asset, &values, &paths_owned)?;
+    if asset.is_variant() {
+        record_paths_on_variant(game_dir, &mut asset, &paths_owned)?;
+        let values = asset.clone();
+        realign_variant_snapshot(game_dir, &mut asset, &values)?;
+    }
+    crate::scene::save_prefab(&disk, &asset)?;
+    Ok(asset.overrides)
+}
+
+/// Drop override paths on a variant asset so those fields inherit from the base.
+///
+/// `paths` empty reverts every stored variant override. Does not modify scene instances.
+pub fn revert_variant_to_base(
+    game_dir: &Path,
+    variant_source: &str,
+    paths: &[String],
+) -> Result<ApplyToBaseReport> {
+    let link = normalize_prefab_source(variant_source);
+    let disk = resolve_prefab_asset(game_dir, &link)?;
+    let mut asset = crate::scene::load_prefab(&disk)?;
+    if !asset.is_variant() {
+        bail!("prefab '{link}' is not a variant (no base to revert to)");
+    }
+    let effective = materialized_override_list(game_dir, &asset)?;
+    let paths_owned = if paths.is_empty() {
+        effective.clone()
+    } else {
+        for path in paths {
+            if !is_known_override_path(path) {
+                bail!("unknown override path '{path}'");
+            }
+            if !effective.iter().any(|p| p == path) {
+                bail!("override '{path}' is not set on variant '{link}'");
+            }
+        }
+        paths.to_vec()
+    };
+    let chain = prefab_base_chain(game_dir, &link)?;
+    let base = chain.get(1).cloned().unwrap_or_default();
+    if paths_owned.is_empty() {
+        return Ok(ApplyToBaseReport {
+            variant: link,
+            base,
+            applied: Vec::new(),
+            variant_overrides: asset.overrides,
+            chain,
+        });
+    }
+    if asset.overrides.is_empty() {
+        asset.overrides = effective;
+    }
+    asset
+        .overrides
+        .retain(|p| !paths_owned.iter().any(|applied| applied == p));
+    let values = asset.clone();
+    realign_variant_snapshot(game_dir, &mut asset, &values)?;
+    crate::scene::save_prefab(&disk, &asset)?;
+    Ok(ApplyToBaseReport {
+        variant: link,
+        base,
+        applied: paths_owned,
+        variant_overrides: asset.overrides,
+        chain,
+    })
+}
+
+/// Restore specific instance fields from a resolved prefab. Does not rebuild the tree.
+pub fn revert_prefab_instance_fields(
+    scene: &mut Scene,
+    instance_root: &str,
+    prefab: &Prefab,
+    paths: &[String],
+) -> Result<()> {
+    if paths.is_empty() {
+        bail!("no fields to revert");
+    }
+    let map = match_prefab_instance(scene, instance_root, prefab);
+    for path in paths {
+        if !is_known_override_path(path) {
+            bail!("unknown override path '{path}'");
+        }
+        if path.ends_with("/<added>") || path.ends_with("/<missing>") {
+            bail!("revert of structural override '{path}' needs a full Revert");
+        }
+        if let Some((child, field)) = path.split_once('/') {
+            let inst_name = map
+                .get(child)
+                .ok_or_else(|| anyhow::anyhow!("prefab child '{child}' is not in the instance"))?;
+            let src = prefab
+                .children
+                .iter()
+                .find(|c| c.name == child)
+                .ok_or_else(|| anyhow::anyhow!("prefab has no child '{child}'"))?;
+            let dest = scene
+                .entities
+                .iter_mut()
+                .find(|e| e.name == *inst_name)
+                .ok_or_else(|| anyhow::anyhow!("entity '{inst_name}' not found"))?;
+            copy_entity_field(dest, src, field);
+        } else {
+            let dest = scene
+                .entities
+                .iter_mut()
+                .find(|e| e.name == instance_root)
+                .ok_or_else(|| anyhow::anyhow!("entity '{instance_root}' not found"))?;
+            copy_entity_field(dest, &prefab.entity, path);
+        }
+    }
+    Ok(())
+}
+
+fn load_instance_variant(
+    game_dir: &Path,
+    scene: &Scene,
+    instance_root: &str,
+) -> Result<(String, Prefab, Prefab)> {
+    let ent = scene
+        .find_entity(instance_root)
+        .ok_or_else(|| anyhow::anyhow!("entity '{instance_root}' not found"))?;
+    let src = ent
+        .prefab
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("entity '{instance_root}' is not a prefab instance"))?;
+    let link = normalize_prefab_source(src);
+    let asset = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, &link)?)?;
+    if !asset.is_variant() {
+        bail!("prefab '{link}' is not a variant (no base to apply to)");
+    }
+    let resolved = resolve_prefab(game_dir, &asset)?;
+    Ok((link, asset, resolved))
+}
+
+fn validate_instance_paths(
+    instance_paths: &[String],
+    asset_paths: &[String],
+    paths: &[String],
+) -> Result<()> {
+    for path in paths {
+        if !is_known_override_path(path) {
+            bail!("unknown override path '{path}'");
+        }
+        let on_instance = instance_paths.iter().any(|p| p == path);
+        let on_asset = asset_paths.iter().any(|p| p == path);
+        if !on_instance && !on_asset {
+            bail!("override '{path}' is not set on this instance or variant");
+        }
+    }
+    Ok(())
+}
+
+fn empty_apply_report(game_dir: &Path, link: &str, asset: &Prefab) -> Result<ApplyToBaseReport> {
+    let chain = prefab_base_chain(game_dir, link)?;
+    Ok(ApplyToBaseReport {
+        variant: chain.first().cloned().unwrap_or_else(|| link.to_string()),
+        base: asset.base.clone().unwrap_or_default(),
+        applied: Vec::new(),
+        variant_overrides: asset.overrides.clone(),
+        chain,
+    })
+}
+
+fn materialized_override_list(game_dir: &Path, asset: &Prefab) -> Result<Vec<String>> {
+    if !asset.overrides.is_empty() || !asset.is_variant() {
+        return Ok(asset.overrides.clone());
+    }
+    let mut copy = asset.clone();
+    refresh_variant_overrides(game_dir, &mut copy)?;
+    Ok(copy.overrides)
+}
+
+fn apply_paths_along_chain(
+    game_dir: &Path,
+    leaf_link: &str,
+    value_src: &Prefab,
+    paths: &[String],
+    target: ApplyBaseTarget,
+) -> Result<ApplyToBaseReport> {
+    for path in paths {
+        if !is_known_override_path(path) {
+            bail!("unknown override path '{path}'");
+        }
+    }
+    let chain = prefab_base_chain(game_dir, leaf_link)?;
+    if chain.len() < 2 {
+        bail!("prefab '{leaf_link}' is not a variant (no base to apply to)");
+    }
+    let target_idx = match target {
+        ApplyBaseTarget::Immediate => 1,
+        ApplyBaseTarget::Root => chain.len() - 1,
+    };
+    let target_link = chain[target_idx].clone();
+    // Gate sibling copies against the *old* base. After the target is written,
+    // an empty-override snapshot that still has the previous value would look
+    // like a new override vs the new base (or inherit-all if we only inspect
+    // `overrides`). Plan now; apply after the chain write.
+    let pending_inherit =
+        plan_inherited_snapshot_updates(game_dir, &target_link, paths, &chain)?;
+    {
+        let disk = resolve_prefab_asset(game_dir, &target_link)?;
+        let mut asset = crate::scene::load_prefab(&disk)?;
+        apply_override_paths(&mut asset, value_src, paths)?;
+        if asset.is_variant() {
+            record_paths_on_variant(game_dir, &mut asset, paths)?;
+            let values = asset.clone();
+            realign_variant_snapshot(game_dir, &mut asset, &values)?;
+        }
+        crate::scene::save_prefab(&disk, &asset)?;
+    }
+    let mut leaf_overrides = Vec::new();
+    for idx in (0..target_idx).rev() {
+        let disk = resolve_prefab_asset(game_dir, &chain[idx])?;
+        let mut asset = crate::scene::load_prefab(&disk)?;
+        if asset.is_variant() && asset.overrides.is_empty() {
+            refresh_variant_overrides(game_dir, &mut asset)?;
+        }
+        asset
+            .overrides
+            .retain(|p| !paths.iter().any(|applied| applied == p));
+        if asset.is_variant() {
+            let values = asset.clone();
+            realign_variant_snapshot(game_dir, &mut asset, &values)?;
+        }
+        if idx == 0 {
+            leaf_overrides = asset.overrides.clone();
+        }
+        crate::scene::save_prefab(&disk, &asset)?;
+    }
+    apply_inherited_snapshot_updates(value_src, pending_inherit)?;
+    Ok(ApplyToBaseReport {
+        variant: chain[0].clone(),
+        base: target_link,
+        applied: paths.to_vec(),
+        variant_overrides: leaf_overrides,
+        chain,
+    })
+}
+
+fn plan_inherited_snapshot_updates(
+    game_dir: &Path,
+    target_link: &str,
+    paths: &[String],
+    skip: &[String],
+) -> Result<Vec<(PathBuf, Vec<String>)>> {
+    let dir = game_dir.join("assets").join("prefabs");
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut pending = Vec::new();
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !name.ends_with(".prefab.json") {
+            continue;
+        }
+        let link = normalize_prefab_source(name);
+        if skip.iter().any(|s| s == &link) {
+            continue;
+        }
+        let asset = crate::scene::load_prefab(&path)?;
+        if !asset.is_variant() {
+            continue;
+        }
+        let asset_chain = prefab_base_chain(game_dir, &link)?;
+        if !asset_chain.iter().any(|c| c == target_link) {
+            continue;
+        }
+        // Explicit list: skip listed paths. Empty list: effective = snapshot vs
+        // current (old) base — a divergent snapshot is a real override.
+        let blocked = materialized_override_list(game_dir, &asset)?;
+        let inherited: Vec<String> = paths
+            .iter()
+            .filter(|p| !blocked.iter().any(|have| have == *p))
+            .cloned()
+            .collect();
+        if inherited.is_empty() {
+            continue;
+        }
+        pending.push((path, inherited));
+    }
+    Ok(pending)
+}
+
+fn apply_inherited_snapshot_updates(
+    value_src: &Prefab,
+    pending: Vec<(PathBuf, Vec<String>)>,
+) -> Result<()> {
+    for (path, inherited) in pending {
+        let mut asset = crate::scene::load_prefab(&path)?;
+        apply_override_paths(&mut asset, value_src, &inherited)?;
+        crate::scene::save_prefab(&path, &asset)?;
+    }
+    Ok(())
+}
+
+fn record_paths_on_variant(game_dir: &Path, asset: &mut Prefab, paths: &[String]) -> Result<()> {
+    if asset.overrides.is_empty() {
+        refresh_variant_overrides(game_dir, asset)?;
+        return Ok(());
+    }
+    let base_src = asset
+        .base
+        .clone()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("variant is missing a base"))?;
+    let base_raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, &base_src)?)?;
+    let base_resolved = resolve_prefab(game_dir, &base_raw)?;
+    for path in paths {
+        if path_is_override(asset, &base_resolved, path) {
+            if !asset.overrides.iter().any(|p| p == path) {
+                asset.overrides.push(path.clone());
+            }
+        } else {
+            asset.overrides.retain(|p| p != path);
+        }
+    }
+    Ok(())
+}
+
+fn path_is_override(asset: &Prefab, base_resolved: &Prefab, path: &str) -> bool {
+    if let Some(child) = path.strip_suffix("/<added>") {
+        return asset.children.iter().any(|c| c.name == child)
+            && !base_resolved.children.iter().any(|c| c.name == child);
+    }
+    if let Some(child) = path.strip_suffix("/<missing>") {
+        return !asset.children.iter().any(|c| c.name == child)
+            && base_resolved.children.iter().any(|c| c.name == child);
+    }
+    if let Some((child, field)) = path.split_once('/') {
+        let Some(a) = asset.children.iter().find(|c| c.name == child) else {
+            return false;
+        };
+        let Some(b) = base_resolved.children.iter().find(|c| c.name == child) else {
+            return true;
+        };
+        return prefab_overrides(a, b).contains(field);
+    }
+    prefab_overrides(&asset.entity, &base_resolved.entity).contains(path)
+}
+
+/// Rebuild a variant snapshot as resolved base + its explicit overrides.
+fn realign_variant_snapshot(
+    game_dir: &Path,
+    variant: &mut Prefab,
+    value_from: &Prefab,
+) -> Result<()> {
+    let base_src = variant
+        .base
+        .clone()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("not a prefab variant"))?;
+    let base_raw = crate::scene::load_prefab(&resolve_prefab_asset(game_dir, &base_src)?)?;
+    let resolved = resolve_prefab(game_dir, &base_raw)?;
+    let keep_name = variant.entity.name.clone();
+    let keep_overrides = variant.overrides.clone();
+    let keep_base = variant.base.clone();
+    let mut next = resolved;
+    apply_override_paths(&mut next, value_from, &keep_overrides)?;
+    if next.entity.name != keep_name {
+        let old = next.entity.name.clone();
+        next.entity.name = keep_name.clone();
+        for child in &mut next.children {
+            if child.parent.as_deref() == Some(old.as_str()) {
+                child.parent = Some(keep_name.clone());
+            }
+        }
+    }
+    next.base = keep_base;
+    next.overrides = keep_overrides;
+    *variant = next;
+    Ok(())
+}
+
+fn overlay_instance_values(
+    scene: &Scene,
+    instance_root: &str,
+    shape: &Prefab,
+    dest: &mut Prefab,
+) -> Result<()> {
+    let map = match_prefab_instance(scene, instance_root, shape);
+    if let Some(inst_name) = map.get(&shape.entity.name) {
+        if let Some(inst) = scene.find_entity(inst_name) {
+            dest.entity.transform = inst.transform.clone();
+            dest.entity.components = inst.components.clone();
+            dest.entity.tag = inst.tag;
+        }
+    }
+    for child in &mut dest.children {
+        let Some(inst_name) = map.get(&child.name) else {
+            continue;
+        };
+        let Some(inst) = scene.find_entity(inst_name) else {
+            continue;
+        };
+        child.transform = inst.transform.clone();
+        child.components = inst.components.clone();
+        child.tag = inst.tag;
+    }
+    Ok(())
+}
+
+/// True for override paths the variant resolver understands (`Disc.color`, `Eye/Disc.radius`).
+pub fn is_known_override_path(path: &str) -> bool {
+    let path = path.trim();
+    if path.is_empty() {
+        return false;
+    }
+    let field = if let Some((child, field)) = path.split_once('/') {
+        if child.is_empty() || field.is_empty() {
+            return false;
+        }
+        field
+    } else {
+        path
+    };
+    is_known_override_field(field)
+}
+
+fn is_known_override_field(field: &str) -> bool {
+    matches!(
+        field,
+        "<added>"
+            | "<missing>"
+            | "transform.position"
+            | "transform.rotation"
+            | "transform.scale"
+            | "tag"
+            | "Sprite"
+            | "Sprite.texture"
+            | "Sprite.size"
+            | "Sprite.color"
+            | "Sprite.z"
+            | "Sprite.sorting_layer"
+            | "Sprite.enabled"
+            | "Sprite.pivot"
+            | "Disc"
+            | "Disc.radius"
+            | "Disc.color"
+            | "Disc.z"
+            | "Disc.sorting_layer"
+            | "Disc.enabled"
+            | "Camera"
+            | "Camera.active"
+            | "Camera.follow"
+            | "Camera.lerp"
+            | "Tilemap"
+            | "Tilemap.cell"
+            | "Tilemap.origin"
+            | "Tilemap.size"
+            | "Tilemap.cells"
+            | "Tilemap.solid"
+            | "Tilemap.palette"
+            | "Tilemap.z"
+            | "Tilemap.sorting_layer"
+            | "Tilemap.enabled"
+            | "Collider"
+            | "Collider.kind"
+            | "Collider.size"
+            | "Collider.radius"
+            | "Collider.offset"
+            | "Collider.solid"
+            | "Collider.trigger"
+            | "Collider.filter_tag"
+            | "Collider.enabled"
+            | "Animation"
+            | "Animation.clip"
+            | "Animation.fps"
+            | "Animation.loop"
+            | "Animation.enabled"
+            | "Animator"
+            | "Animator.controller"
+            | "Animator.parameters"
+            | "Animator.enabled"
+            | "PlayableDirector"
+            | "PlayableDirector.timeline"
+            | "PlayableDirector.play_on_awake"
+            | "PlayableDirector.loop"
+            | "PlayableDirector.enabled"
+            | "GridMover"
+            | "GridMover.cell"
+            | "GridMover.speed"
+            | "GridMover.queued_dir"
+            | "GridMover.enabled"
+            | "AudioSource"
+            | "AudioSource.clip"
+            | "AudioSource.volume"
+            | "AudioSource.play_on_awake"
+            | "AudioSource.enabled"
+            | "Text"
+            | "Text.text"
+            | "Text.size"
+            | "Text.color"
+            | "Text.align"
+            | "Text.z"
+            | "Text.sorting_layer"
+            | "Text.enabled"
+    )
+}
+
 fn apply_override_paths(dest: &mut Prefab, src: &Prefab, paths: &[String]) -> Result<()> {
     for path in paths {
         if path.ends_with("/<missing>") || path.ends_with("/<added>") {
