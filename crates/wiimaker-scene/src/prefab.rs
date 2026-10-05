@@ -479,6 +479,24 @@ pub struct ApplyToBaseReport {
     pub variant_overrides: Vec<String>,
     /// `variant` … immediate bases … root.
     pub chain: Vec<String>,
+    /// Open-scene instance roots that inherited `applied` (no local override).
+    #[serde(default)]
+    pub scene_synced: Vec<String>,
+}
+
+/// Result of pushing instance fields onto the linked prefab (not its base).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ApplyInstanceFieldsReport {
+    pub variant_overrides: Vec<String>,
+    #[serde(default)]
+    pub scene_synced: Vec<String>,
+}
+
+/// One scene instance that should pick up prefab values after an Apply.
+#[derive(Clone, Debug)]
+pub struct SceneInheritSlot {
+    pub root: String,
+    pub paths: Vec<String>,
 }
 
 /// Inspector / CLI labels for a prefab variant (Unity Overrides dropdown).
@@ -595,32 +613,42 @@ pub fn apply_variant_override_to_base(
     paths: &[String],
     target: ApplyBaseTarget,
 ) -> Result<ApplyToBaseReport> {
-    let link = normalize_prefab_source(variant_source);
-    let disk = resolve_prefab_asset(game_dir, &link)?;
-    let asset = crate::scene::load_prefab(&disk)?;
-    if !asset.is_variant() {
-        bail!("prefab '{link}' is not a variant (no base to apply to)");
-    }
-    let effective = materialized_override_list(game_dir, &asset)?;
-    let paths_owned = if paths.is_empty() {
-        effective.clone()
-    } else {
-        validate_variant_override_paths(&link, &effective, paths)?;
-        paths.to_vec()
-    };
+    let (link, asset, paths_owned, _target_link) =
+        prepare_variant_apply(game_dir, variant_source, paths, target)?;
     if paths_owned.is_empty() {
         return empty_apply_report(game_dir, &link, &asset);
     }
     apply_paths_along_chain(game_dir, &link, &asset, &paths_owned, target)
 }
 
+/// [`apply_variant_override_to_base`] plus Unity-style refresh of `scene` instances
+/// whose prefab chain includes the written base and that did not override those paths.
+pub fn apply_variant_override_to_base_in_scene(
+    game_dir: &Path,
+    scene: &mut Scene,
+    variant_source: &str,
+    paths: &[String],
+    target: ApplyBaseTarget,
+) -> Result<ApplyToBaseReport> {
+    let (link, asset, paths_owned, target_link) =
+        prepare_variant_apply(game_dir, variant_source, paths, target)?;
+    if paths_owned.is_empty() {
+        return empty_apply_report(game_dir, &link, &asset);
+    }
+    let slots = plan_prefab_scene_inherit(game_dir, scene, &target_link, &paths_owned)?;
+    let mut report = apply_paths_along_chain(game_dir, &link, &asset, &paths_owned, target)?;
+    report.scene_synced = apply_prefab_scene_inherit(game_dir, scene, &slots)?;
+    Ok(report)
+}
+
 /// Apply instance values onto the base asset and drop those paths from the variant.
 ///
 /// `paths` empty applies every instance override versus the resolved variant
-/// (not the variant asset's own stored overrides). Scene entities are left as-is.
+/// (not the variant asset's own stored overrides). Other instances in `scene`
+/// whose chain includes the written asset inherit paths they did not override.
 pub fn apply_instance_to_base(
     game_dir: &Path,
-    scene: &Scene,
+    scene: &mut Scene,
     instance_root: &str,
     paths: &[String],
     target: ApplyBaseTarget,
@@ -636,20 +664,26 @@ pub fn apply_instance_to_base(
     if paths_owned.is_empty() {
         return empty_apply_report(game_dir, &link, &asset);
     }
+    let chain = prefab_base_chain(game_dir, &link)?;
+    let target_link = chain_target_link(&chain, target)?;
+    let slots = plan_prefab_scene_inherit(game_dir, scene, &target_link, &paths_owned)?;
     let mut values = asset.clone();
     overlay_instance_values(scene, instance_root, &resolved, &mut values)?;
-    apply_paths_along_chain(game_dir, &link, &values, &paths_owned, target)
+    let mut report = apply_paths_along_chain(game_dir, &link, &values, &paths_owned, target)?;
+    report.scene_synced = apply_prefab_scene_inherit(game_dir, scene, &slots)?;
+    Ok(report)
 }
 
 /// Push specific instance override paths onto the linked prefab asset (not its base).
 ///
-/// `paths` empty applies every instance override. Does not modify the scene.
+/// `paths` empty applies every instance override. Other instances in `scene` linked
+/// through that prefab inherit paths they did not override.
 pub fn apply_instance_fields_to_prefab(
     game_dir: &Path,
-    scene: &Scene,
+    scene: &mut Scene,
     instance_root: &str,
     paths: &[String],
-) -> Result<Vec<String>> {
+) -> Result<ApplyInstanceFieldsReport> {
     let ent = scene
         .find_entity(instance_root)
         .ok_or_else(|| anyhow::anyhow!("entity '{instance_root}' not found"))?;
@@ -670,8 +704,12 @@ pub fn apply_instance_fields_to_prefab(
         paths.to_vec()
     };
     if paths_owned.is_empty() {
-        return Ok(asset.overrides);
+        return Ok(ApplyInstanceFieldsReport {
+            variant_overrides: asset.overrides,
+            scene_synced: Vec::new(),
+        });
     }
+    let slots = plan_prefab_scene_inherit(game_dir, scene, &link, &paths_owned)?;
     let mut values = asset.clone();
     overlay_instance_values(scene, instance_root, &resolved, &mut values)?;
     apply_override_paths(&mut asset, &values, &paths_owned)?;
@@ -681,7 +719,11 @@ pub fn apply_instance_fields_to_prefab(
         realign_variant_snapshot(game_dir, &mut asset, &values)?;
     }
     crate::scene::save_prefab(&disk, &asset)?;
-    Ok(asset.overrides)
+    let scene_synced = apply_prefab_scene_inherit(game_dir, scene, &slots)?;
+    Ok(ApplyInstanceFieldsReport {
+        variant_overrides: asset.overrides,
+        scene_synced,
+    })
 }
 
 /// Drop override paths on a variant asset so those fields inherit from the base.
@@ -714,6 +756,7 @@ pub fn revert_variant_to_base(
             applied: Vec::new(),
             variant_overrides: asset.overrides,
             chain,
+            scene_synced: Vec::new(),
         });
     }
     if asset.overrides.is_empty() {
@@ -731,6 +774,7 @@ pub fn revert_variant_to_base(
         applied: paths_owned,
         variant_overrides: asset.overrides,
         chain,
+        scene_synced: Vec::new(),
     })
 }
 
@@ -843,7 +887,43 @@ fn empty_apply_report(game_dir: &Path, link: &str, asset: &Prefab) -> Result<App
         applied: Vec::new(),
         variant_overrides: asset.overrides.clone(),
         chain,
+        scene_synced: Vec::new(),
     })
+}
+
+fn prepare_variant_apply(
+    game_dir: &Path,
+    variant_source: &str,
+    paths: &[String],
+    target: ApplyBaseTarget,
+) -> Result<(String, Prefab, Vec<String>, String)> {
+    let link = normalize_prefab_source(variant_source);
+    let disk = resolve_prefab_asset(game_dir, &link)?;
+    let asset = crate::scene::load_prefab(&disk)?;
+    if !asset.is_variant() {
+        bail!("prefab '{link}' is not a variant (no base to apply to)");
+    }
+    let effective = materialized_override_list(game_dir, &asset)?;
+    let paths_owned = if paths.is_empty() {
+        effective
+    } else {
+        validate_variant_override_paths(&link, &effective, paths)?;
+        paths.to_vec()
+    };
+    let chain = prefab_base_chain(game_dir, &link)?;
+    let target_link = chain_target_link(&chain, target)?;
+    Ok((link, asset, paths_owned, target_link))
+}
+
+fn chain_target_link(chain: &[String], target: ApplyBaseTarget) -> Result<String> {
+    if chain.len() < 2 {
+        bail!("prefab is not a variant (no base to apply to)");
+    }
+    let idx = match target {
+        ApplyBaseTarget::Immediate => 1,
+        ApplyBaseTarget::Root => chain.len() - 1,
+    };
+    Ok(chain[idx].clone())
 }
 
 fn materialized_override_list(game_dir: &Path, asset: &Prefab) -> Result<Vec<String>> {
@@ -881,6 +961,15 @@ fn apply_paths_along_chain(
     // like a new override vs the new base (or inherit-all if we only inspect
     // `overrides`). Plan now; apply after the chain write.
     let pending_inherit = plan_inherited_snapshot_updates(game_dir, &target_link, paths, &chain)?;
+    // Intermediates between the leaf and the target: their own value for a path
+    // (materialized vs the *old* base) must survive `--to-root` unless it already
+    // equals the value being applied.
+    let mut intermediate_materialized = Vec::new();
+    for idx in 1..target_idx {
+        let disk = resolve_prefab_asset(game_dir, &chain[idx])?;
+        let asset = crate::scene::load_prefab(&disk)?;
+        intermediate_materialized.push(materialized_override_list(game_dir, &asset)?);
+    }
     {
         let disk = resolve_prefab_asset(game_dir, &target_link)?;
         let mut asset = crate::scene::load_prefab(&disk)?;
@@ -896,12 +985,30 @@ fn apply_paths_along_chain(
     for idx in (0..target_idx).rev() {
         let disk = resolve_prefab_asset(game_dir, &chain[idx])?;
         let mut asset = crate::scene::load_prefab(&disk)?;
-        if asset.is_variant() && asset.overrides.is_empty() {
-            refresh_variant_overrides(game_dir, &mut asset)?;
+        if idx == 0 {
+            if asset.is_variant() && asset.overrides.is_empty() {
+                refresh_variant_overrides(game_dir, &mut asset)?;
+            }
+            asset
+                .overrides
+                .retain(|p| !paths.iter().any(|applied| applied == p));
+        } else if asset.is_variant() {
+            let materialized = &intermediate_materialized[idx - 1];
+            if asset.overrides.is_empty() {
+                asset.overrides = materialized.clone();
+            }
+            for path in paths {
+                let owns = materialized.iter().any(|p| p == path);
+                let same_as_applied = !path_is_override(&asset, value_src, path);
+                if owns && !same_as_applied {
+                    if !asset.overrides.iter().any(|p| p == path) {
+                        asset.overrides.push(path.clone());
+                    }
+                } else {
+                    asset.overrides.retain(|p| p != path);
+                }
+            }
         }
-        asset
-            .overrides
-            .retain(|p| !paths.iter().any(|applied| applied == p));
         if asset.is_variant() {
             let values = asset.clone();
             realign_variant_snapshot(game_dir, &mut asset, &values)?;
@@ -918,7 +1025,84 @@ fn apply_paths_along_chain(
         applied: paths.to_vec(),
         variant_overrides: leaf_overrides,
         chain,
+        scene_synced: Vec::new(),
     })
+}
+
+/// Instance roots whose prefab chain includes `written_link` and that do not
+/// already override `paths` (compared to the prefab *before* the asset write).
+pub fn plan_prefab_scene_inherit(
+    game_dir: &Path,
+    scene: &Scene,
+    written_link: &str,
+    paths: &[String],
+) -> Result<Vec<SceneInheritSlot>> {
+    let written = normalize_prefab_source(written_link);
+    let inherit_paths: Vec<String> = paths
+        .iter()
+        .filter(|p| {
+            is_known_override_path(p) && !p.ends_with("/<added>") && !p.ends_with("/<missing>")
+        })
+        .cloned()
+        .collect();
+    if inherit_paths.is_empty() || written.is_empty() {
+        return Ok(Vec::new());
+    }
+    let roots: Vec<(String, String)> = scene
+        .entities
+        .iter()
+        .filter_map(|e| {
+            e.prefab
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| (e.name.clone(), normalize_prefab_source(s)))
+        })
+        .collect();
+    let mut slots = Vec::new();
+    for (name, link) in roots {
+        let chain = prefab_base_chain(game_dir, &link)?;
+        if !chain.iter().any(|c| c == &written) {
+            continue;
+        }
+        let ent = scene
+            .find_entity(&name)
+            .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
+        let resolved = load_prefab_for_instance(game_dir, ent)?;
+        let overrides = prefab_tree_overrides(scene, &name, &resolved).fields;
+        let keep: Vec<String> = inherit_paths
+            .iter()
+            .filter(|p| !overrides.iter().any(|o| o == *p))
+            .cloned()
+            .collect();
+        if keep.is_empty() {
+            continue;
+        }
+        slots.push(SceneInheritSlot {
+            root: name,
+            paths: keep,
+        });
+    }
+    Ok(slots)
+}
+
+pub fn apply_prefab_scene_inherit(
+    game_dir: &Path,
+    scene: &mut Scene,
+    slots: &[SceneInheritSlot],
+) -> Result<Vec<String>> {
+    let mut synced = Vec::new();
+    for slot in slots {
+        if slot.paths.is_empty() {
+            continue;
+        }
+        let Some(ent) = scene.find_entity(&slot.root).cloned() else {
+            continue;
+        };
+        let resolved = load_prefab_for_instance(game_dir, &ent)?;
+        revert_prefab_instance_fields(scene, &slot.root, &resolved, &slot.paths)?;
+        synced.push(slot.root.clone());
+    }
+    Ok(synced)
 }
 
 fn plan_inherited_snapshot_updates(

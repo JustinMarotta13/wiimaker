@@ -7,10 +7,10 @@ use wiimaker_scene::{
     add_component_tilemap, add_entity, apply_instance_to_base, apply_prefab,
     apply_variant_override_to_base, create_prefab_variant, entity_to_prefab, instantiate_prefab,
     load_prefab, load_prefab_for_instance, normalize_prefab_source, prefab_base_chain,
-    prefab_chain_status, prefab_variant_chrome, refresh_variant_overrides, resolve_prefab,
-    revert_prefab_instance, revert_prefab_instance_fields, revert_variant_to_base, save_prefab,
-    set_entity_parent, set_entity_transform, unpack_prefab_instance, variant_from_instance,
-    ApplyBaseTarget, MutateOpts, Scene, UndoStack,
+    prefab_chain_status, prefab_tree_overrides, prefab_variant_chrome, refresh_variant_overrides,
+    resolve_prefab, revert_prefab_instance, revert_prefab_instance_fields, revert_variant_to_base,
+    save_prefab, set_entity_parent, set_entity_transform, unpack_prefab_instance,
+    variant_from_instance, ApplyBaseTarget, MutateOpts, Scene, UndoStack,
 };
 
 fn tmp_game(label: &str) -> PathBuf {
@@ -649,7 +649,7 @@ fn apply_instance_value_to_base_and_revert_field_undo() {
 
     apply_instance_to_base(
         &dir,
-        &scene,
+        &mut scene,
         &inst,
         &["Disc.color".into()],
         ApplyBaseTarget::Immediate,
@@ -920,6 +920,174 @@ fn prefab_variant_chrome_labels() {
         deep.apply_all_to_root.as_deref(),
         Some("Apply All to Root 'root'")
     );
+}
+
+#[test]
+fn apply_to_root_keeps_intermediate_different_value() {
+    let dir = tmp_game("apply-root-mid");
+    let mut scene = Scene::new("main");
+    add_entity(
+        &mut scene,
+        "Ghost",
+        &MutateOpts {
+            radius: Some(8.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    scene
+        .entities
+        .iter_mut()
+        .find(|e| e.name == "Ghost")
+        .unwrap()
+        .components
+        .disc
+        .as_mut()
+        .unwrap()
+        .color = [255, 0, 0, 255];
+    save_prefab(
+        &dir.join("assets/prefabs/ghost.prefab.json"),
+        &entity_to_prefab(&scene, "Ghost").unwrap(),
+    )
+    .unwrap();
+    let (mid_path, mut mid) = create_prefab_variant(&dir, "ghost", "ghost_mid").unwrap();
+    mid.entity.components.disc.as_mut().unwrap().color = [255, 255, 0, 255];
+    refresh_variant_overrides(&dir, &mut mid).unwrap();
+    save_prefab(&mid_path, &mid).unwrap();
+    let (leaf_path, mut leaf) = create_prefab_variant(&dir, "ghost_mid", "ghost_leaf").unwrap();
+    leaf.entity.components.disc.as_mut().unwrap().color = [0, 0, 255, 255];
+    refresh_variant_overrides(&dir, &mut leaf).unwrap();
+    save_prefab(&leaf_path, &leaf).unwrap();
+
+    apply_variant_override_to_base(
+        &dir,
+        "ghost_leaf",
+        &["Disc.color".into()],
+        ApplyBaseTarget::Root,
+    )
+    .unwrap();
+
+    let root = load_prefab(&dir.join("assets/prefabs/ghost.prefab.json")).unwrap();
+    assert_eq!(
+        root.entity.components.disc.as_ref().unwrap().color,
+        [0, 0, 255, 255]
+    );
+    let mid = load_prefab(&mid_path).unwrap();
+    assert!(
+        mid.overrides.iter().any(|p| p == "Disc.color"),
+        "{:?}",
+        mid.overrides
+    );
+    assert_eq!(
+        mid.entity.components.disc.as_ref().unwrap().color,
+        [255, 255, 0, 255]
+    );
+    let mid_resolved = resolve_prefab(&dir, &mid).unwrap();
+    assert_eq!(
+        mid_resolved.entity.components.disc.as_ref().unwrap().color,
+        [255, 255, 0, 255]
+    );
+    let leaf = load_prefab(&leaf_path).unwrap();
+    assert!(!leaf.overrides.iter().any(|p| p == "Disc.color"));
+    let leaf_resolved = resolve_prefab(&dir, &leaf).unwrap();
+    assert_eq!(
+        leaf_resolved.entity.components.disc.as_ref().unwrap().color,
+        [255, 255, 0, 255]
+    );
+}
+
+#[test]
+fn apply_to_base_updates_sibling_instances_in_scene() {
+    let dir = tmp_game("apply-scene-sib");
+    let mut scene = Scene::new("main");
+    add_entity(
+        &mut scene,
+        "Ghost",
+        &MutateOpts {
+            radius: Some(8.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    save_prefab(
+        &dir.join("assets/prefabs/ghost.prefab.json"),
+        &entity_to_prefab(&scene, "Ghost").unwrap(),
+    )
+    .unwrap();
+    create_prefab_variant(&dir, "ghost", "blinky").unwrap();
+    create_prefab_variant(&dir, "ghost", "pinky").unwrap();
+    let blinky_raw = load_prefab(&dir.join("assets/prefabs/blinky.prefab.json")).unwrap();
+    let blinky_res = resolve_prefab(&dir, &blinky_raw).unwrap();
+    let pinky_raw = load_prefab(&dir.join("assets/prefabs/pinky.prefab.json")).unwrap();
+    let pinky_res = resolve_prefab(&dir, &pinky_raw).unwrap();
+    let blinky = instantiate_prefab(
+        &mut scene,
+        &blinky_res,
+        "assets/prefabs/blinky.prefab.json",
+        None,
+        None,
+    );
+    let pinky = instantiate_prefab(
+        &mut scene,
+        &pinky_res,
+        "assets/prefabs/pinky.prefab.json",
+        Some(10.0),
+        None,
+    );
+    let inky = instantiate_prefab(
+        &mut scene,
+        &pinky_res,
+        "assets/prefabs/pinky.prefab.json",
+        Some(20.0),
+        None,
+    );
+    scene
+        .entities
+        .iter_mut()
+        .find(|e| e.name == blinky)
+        .unwrap()
+        .transform
+        .scale = [1.25, 1.25, 1.0];
+    scene
+        .entities
+        .iter_mut()
+        .find(|e| e.name == inky)
+        .unwrap()
+        .transform
+        .scale = [2.0, 2.0, 1.0];
+
+    let report = apply_instance_to_base(
+        &dir,
+        &mut scene,
+        &blinky,
+        &["transform.scale".into()],
+        ApplyBaseTarget::Immediate,
+    )
+    .unwrap();
+    assert!(
+        report.scene_synced.iter().any(|n| n == &pinky),
+        "{:?}",
+        report.scene_synced
+    );
+    assert!(!report.scene_synced.iter().any(|n| n == &inky));
+    assert!(!report.scene_synced.iter().any(|n| n == &blinky));
+
+    let pinky_scale = scene.find_entity(&pinky).unwrap().transform.scale;
+    assert!((pinky_scale[0] - 1.25).abs() < 1e-3, "{pinky_scale:?}");
+    let inky_scale = scene.find_entity(&inky).unwrap().transform.scale;
+    assert!((inky_scale[0] - 2.0).abs() < 1e-3, "{inky_scale:?}");
+
+    let pinky_resolved =
+        load_prefab_for_instance(&dir, scene.find_entity(&pinky).unwrap()).unwrap();
+    let pinky_over = prefab_tree_overrides(&scene, &pinky, &pinky_resolved);
+    assert!(
+        !pinky_over.fields.iter().any(|p| p == "transform.scale"),
+        "{:?}",
+        pinky_over.fields
+    );
+    let inky_resolved = load_prefab_for_instance(&dir, scene.find_entity(&inky).unwrap()).unwrap();
+    let inky_over = prefab_tree_overrides(&scene, &inky, &inky_resolved);
+    assert!(inky_over.fields.iter().any(|p| p == "transform.scale"));
 }
 
 #[test]
