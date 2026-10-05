@@ -4,13 +4,13 @@ use std::fs;
 use std::path::PathBuf;
 
 use wiimaker_scene::{
-    add_entity, apply_instance_to_base, apply_prefab, apply_variant_override_to_base,
-    create_prefab_variant, entity_to_prefab, instantiate_prefab, load_prefab,
-    load_prefab_for_instance, normalize_prefab_source, prefab_base_chain, prefab_chain_status,
-    prefab_variant_chrome, refresh_variant_overrides, resolve_prefab, revert_prefab_instance,
-    revert_prefab_instance_fields, revert_variant_to_base, save_prefab, set_entity_parent,
-    set_entity_transform, unpack_prefab_instance, variant_from_instance, ApplyBaseTarget,
-    MutateOpts, Scene, UndoStack,
+    add_component_tilemap, add_entity, apply_instance_to_base, apply_prefab,
+    apply_variant_override_to_base, create_prefab_variant, entity_to_prefab, instantiate_prefab,
+    load_prefab, load_prefab_for_instance, normalize_prefab_source, prefab_base_chain,
+    prefab_chain_status, prefab_variant_chrome, refresh_variant_overrides, resolve_prefab,
+    revert_prefab_instance, revert_prefab_instance_fields, revert_variant_to_base, save_prefab,
+    set_entity_parent, set_entity_transform, unpack_prefab_instance, variant_from_instance,
+    ApplyBaseTarget, MutateOpts, Scene, UndoStack,
 };
 
 fn tmp_game(label: &str) -> PathBuf {
@@ -749,6 +749,153 @@ fn revert_variant_asset_override_and_old_prefab_unchanged() {
     assert!((resolved.entity.components.disc.as_ref().unwrap().radius - 8.0).abs() < 1e-4);
     let base_after = load_prefab(&base_path).unwrap();
     assert!((base_after.entity.components.disc.as_ref().unwrap().radius - 8.0).abs() < 1e-4);
+}
+
+/// Stale snapshot fields that `resolve_prefab` ignores must not apply to base.
+#[test]
+fn apply_variant_rejects_non_override_path() {
+    let dir = tmp_game("apply-stale-path");
+    let mut scene = Scene::new("main");
+    add_entity(
+        &mut scene,
+        "Ghost",
+        &MutateOpts {
+            radius: Some(8.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    scene
+        .entities
+        .iter_mut()
+        .find(|e| e.name == "Ghost")
+        .unwrap()
+        .components
+        .disc
+        .as_mut()
+        .unwrap()
+        .color = [255, 0, 0, 255];
+    let base_path = dir.join("assets/prefabs/ghost.prefab.json");
+    save_prefab(&base_path, &entity_to_prefab(&scene, "Ghost").unwrap()).unwrap();
+
+    let (variant_path, mut variant) = create_prefab_variant(&dir, "ghost", "ghost_v").unwrap();
+    variant.entity.components.disc.as_mut().unwrap().color = [0, 0, 255, 255];
+    // Stale snapshot radius that is not listed as an override.
+    variant.entity.components.disc.as_mut().unwrap().radius = 99.0;
+    refresh_variant_overrides(&dir, &mut variant).unwrap();
+    assert!(
+        variant.overrides.iter().any(|p| p == "Disc.color"),
+        "{:?}",
+        variant.overrides
+    );
+    // Keep only color even if refresh also listed radius from the stale snapshot.
+    variant.overrides.retain(|p| p == "Disc.color");
+    save_prefab(&variant_path, &variant).unwrap();
+
+    let resolved = resolve_prefab(&dir, &variant).unwrap();
+    assert!(
+        (resolved.entity.components.disc.as_ref().unwrap().radius - 8.0).abs() < 1e-4,
+        "resolve must inherit base radius, not stale snapshot"
+    );
+
+    let err = apply_variant_override_to_base(
+        &dir,
+        "ghost_v",
+        &["Disc.radius".into()],
+        ApplyBaseTarget::Immediate,
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("not set") || msg.contains("unknown"), "{msg}");
+
+    let unknown = apply_variant_override_to_base(
+        &dir,
+        "ghost_v",
+        &["Nope".into()],
+        ApplyBaseTarget::Immediate,
+    )
+    .unwrap_err();
+    assert!(
+        unknown.to_string().contains("unknown override path"),
+        "{unknown}"
+    );
+
+    let base_after = load_prefab(&base_path).unwrap();
+    assert!(
+        (base_after.entity.components.disc.as_ref().unwrap().radius - 8.0).abs() < 1e-4,
+        "base radius must stay 8, not stale 99"
+    );
+}
+
+/// Applying `Tilemap.cell` must not clone cells/solid/palette.
+#[test]
+fn apply_tilemap_cell_does_not_clobber_other_tilemap_fields() {
+    let dir = tmp_game("apply-tilemap-cell");
+    let mut scene = Scene::new("main");
+    add_entity(&mut scene, "Map", &MutateOpts::default()).unwrap();
+    add_component_tilemap(&mut scene, "Map", 4, 2, 16.0).unwrap();
+    {
+        let tm = scene
+            .entities
+            .iter_mut()
+            .find(|e| e.name == "Map")
+            .unwrap()
+            .components
+            .tilemap
+            .as_mut()
+            .unwrap();
+        tm.cells[0] = 1;
+        tm.solid[0] = 1;
+        tm.palette[0].color = [10, 20, 30, 255];
+    }
+    let base_path = dir.join("assets/prefabs/map.prefab.json");
+    save_prefab(&base_path, &entity_to_prefab(&scene, "Map").unwrap()).unwrap();
+
+    let (cell_path, mut cell_v) = create_prefab_variant(&dir, "map", "map_cell").unwrap();
+    cell_v.entity.components.tilemap.as_mut().unwrap().cell = 32.0;
+    // Stale cells on the snapshot must not ride along with Tilemap.cell.
+    cell_v.entity.components.tilemap.as_mut().unwrap().cells[0] = 9;
+    refresh_variant_overrides(&dir, &mut cell_v).unwrap();
+    cell_v.overrides.retain(|p| p == "Tilemap.cell");
+    save_prefab(&cell_path, &cell_v).unwrap();
+
+    let (pal_path, mut pal_v) = create_prefab_variant(&dir, "map", "map_palette").unwrap();
+    pal_v.entity.components.tilemap.as_mut().unwrap().palette[0].color = [200, 0, 0, 255];
+    refresh_variant_overrides(&dir, &mut pal_v).unwrap();
+    assert!(
+        pal_v.overrides.iter().any(|p| p == "Tilemap.palette"),
+        "{:?}",
+        pal_v.overrides
+    );
+    save_prefab(&pal_path, &pal_v).unwrap();
+
+    apply_variant_override_to_base(
+        &dir,
+        "map_cell",
+        &["Tilemap.cell".into()],
+        ApplyBaseTarget::Immediate,
+    )
+    .unwrap();
+
+    let base_after = load_prefab(&base_path).unwrap();
+    let tm = base_after.entity.components.tilemap.as_ref().unwrap();
+    assert!((tm.cell - 32.0).abs() < 1e-4, "cell={}", tm.cell);
+    assert_eq!(tm.cells[0], 1, "base cells must not take stale snapshot 9");
+    assert_eq!(tm.solid[0], 1);
+    assert_eq!(tm.palette[0].color, [10, 20, 30, 255]);
+
+    let pal_after = load_prefab(&pal_path).unwrap();
+    let pal_tm = pal_after.entity.components.tilemap.as_ref().unwrap();
+    assert_eq!(
+        pal_tm.palette[0].color,
+        [200, 0, 0, 255],
+        "sibling palette override must survive inherit copy of Tilemap.cell"
+    );
+    assert_eq!(pal_tm.cells[0], 1);
+    let pal_resolved = resolve_prefab(&dir, &pal_after).unwrap();
+    let pal_r = pal_resolved.entity.components.tilemap.as_ref().unwrap();
+    assert!((pal_r.cell - 32.0).abs() < 1e-4);
+    assert_eq!(pal_r.palette[0].color, [200, 0, 0, 255]);
 }
 
 #[test]

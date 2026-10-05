@@ -176,4 +176,40 @@ fn apply_prefab_to_base_open_base_and_status_json() {
         "color override stays on the variant: {:?}",
         variant.overrides
     );
+
+    let apply_asset = wiimaker()
+        .args([
+            "entity",
+            "apply-prefab",
+            game,
+            "--prefab",
+            "ghost_v",
+            "--to-base",
+            "--field",
+            "Disc.color",
+            "--json",
+        ])
+        .output()
+        .expect("apply-prefab --prefab --to-base");
+    assert!(
+        apply_asset.status.success(),
+        "apply --prefab: {}",
+        String::from_utf8_lossy(&apply_asset.stderr)
+    );
+    let apply_asset_out = String::from_utf8_lossy(&apply_asset.stdout);
+    assert!(apply_asset_out.contains("Disc.color"), "{apply_asset_out}");
+
+    let base_color =
+        wiimaker_scene::load_prefab(&dir.join("assets/prefabs/ghost.prefab.json")).unwrap();
+    assert_eq!(
+        base_color.entity.components.disc.as_ref().unwrap().color,
+        [0, 0, 255, 255]
+    );
+    let variant_after =
+        wiimaker_scene::load_prefab(&dir.join("assets/prefabs/ghost_v.prefab.json")).unwrap();
+    assert!(
+        variant_after.overrides.iter().all(|v| v != "Disc.color"),
+        "{:?}",
+        variant_after.overrides
+    );
 }
