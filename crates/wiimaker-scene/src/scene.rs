@@ -53,7 +53,8 @@ impl Scene {
 ///
 /// Prefab **variants** set [`Self::base`] to a base prefab path/stem and store
 /// [`Self::overrides`] (field paths vs the resolved base). Instantiate resolves
-/// base + overrides; Apply on a variant instance writes the variant asset (not the base).
+/// base + overrides; Apply on a variant instance writes the variant asset.
+/// Apply to Base writes the base asset and drops that path from the variant.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Prefab {
     #[serde(flatten)]

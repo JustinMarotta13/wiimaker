@@ -609,13 +609,38 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
-    /// Push instance tree overrides onto the prefab asset (Unity Apply)
+    /// Push instance overrides onto the prefab asset, or onto its base (`--to-base`)
     ApplyPrefab {
         game: String,
+        /// Instance entity. Required unless `--to-base --prefab` targets a variant asset.
         #[arg(long)]
-        name: String,
-        /// Prefab stem or path (defaults to the entity's instance link)
+        name: Option<String>,
+        /// Prefab stem or path (instance link when omitted; variant asset with `--to-base`)
         prefab: Option<String>,
+        /// Write values into the base prefab and drop those paths from the variant overrides
+        #[arg(long)]
+        to_base: bool,
+        /// With `--to-base`, write the root prefab instead of the immediate base
+        #[arg(long)]
+        to_root: bool,
+        /// Override path (`Disc.color`, `Eye/Disc.radius`). Repeatable. Omit to apply all.
+        #[arg(long = "field")]
+        fields: Vec<String>,
+        #[arg(long)]
+        scene: Option<String>,
+    },
+    /// Report the base prefab an editor Open Base / Select Base would focus (`--json`)
+    OpenBase {
+        game: String,
+        /// Prefab instance entity
+        #[arg(long)]
+        name: Option<String>,
+        /// Variant asset stem or path (instead of `--name`)
+        #[arg(long)]
+        prefab: Option<String>,
+        /// Target the root base instead of the immediate base
+        #[arg(long)]
+        root: bool,
         #[arg(long)]
         scene: Option<String>,
     },

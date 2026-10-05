@@ -1183,6 +1183,151 @@ impl EditorApp {
         }
     }
 
+    /// Focus a prefab asset in the Project window and Inspector.
+    ///
+    /// `open` matches Unity Open Base; both paths select the asset (no prefab stage).
+    pub(crate) fn focus_base_asset(&mut self, rel: &str, open: bool) {
+        let rel_norm = rel.replace('\\', "/");
+        let parts: Vec<&str> = rel_norm.split('/').filter(|p| !p.is_empty()).collect();
+        if parts.len() > 1 {
+            let mut acc = String::new();
+            let mut changed = false;
+            for part in &parts[..parts.len() - 1] {
+                if !acc.is_empty() {
+                    acc.push('/');
+                }
+                acc.push_str(part);
+                let n = wiimaker_scene::normalize_project_rel(&acc);
+                let before = self.prefs.project_view.collapsed.len();
+                self.prefs
+                    .project_view
+                    .collapsed
+                    .retain(|c| wiimaker_scene::normalize_project_rel(c) != n);
+                if self.prefs.project_view.collapsed.len() != before {
+                    changed = true;
+                }
+            }
+            if changed {
+                self.persist_prefs();
+            }
+        }
+        self.select_file(Some(PathBuf::from(&rel_norm)));
+        let verb = if open { "opened base" } else { "selected base" };
+        self.status = format!("{verb} → {rel_norm}");
+    }
+
+    pub(crate) fn apply_instance_field_to_variant(&mut self, name: &str, field: &str) {
+        match wiimaker_scene::apply_instance_fields_to_prefab(
+            &self.game_dir,
+            &self.scene,
+            name,
+            &[field.to_string()],
+        ) {
+            Ok(_) => {
+                self.refresh_project_tree();
+                self.status = format!("applied {field} to prefab variant");
+            }
+            Err(e) => self.status = format!("apply prefab failed: {e}"),
+        }
+    }
+
+    pub(crate) fn apply_instance_to_base_cmd(
+        &mut self,
+        name: &str,
+        field: Option<&str>,
+        to_root: bool,
+    ) {
+        let target = if to_root {
+            wiimaker_scene::ApplyBaseTarget::Root
+        } else {
+            wiimaker_scene::ApplyBaseTarget::Immediate
+        };
+        let paths: Vec<String> = field.map(|f| vec![f.to_string()]).unwrap_or_default();
+        match wiimaker_scene::apply_instance_to_base(
+            &self.game_dir,
+            &self.scene,
+            name,
+            &paths,
+            target,
+        ) {
+            Ok(rep) => {
+                self.refresh_project_tree();
+                if rep.applied.is_empty() {
+                    self.status = "no overrides to apply to base".into();
+                } else {
+                    self.status = format!("applied {} to {}", rep.applied.join(", "), rep.base);
+                }
+            }
+            Err(e) => self.status = format!("apply to base failed: {e}"),
+        }
+    }
+
+    pub(crate) fn revert_instance_field(&mut self, name: &str, field: &str) {
+        let Some(ent) = self.scene.find_entity(name).cloned() else {
+            self.status = format!("entity '{name}' not found");
+            return;
+        };
+        match wiimaker_scene::load_prefab_for_instance(&self.game_dir, &ent) {
+            Ok(prefab) => {
+                self.push_undo();
+                if let Err(e) = wiimaker_scene::revert_prefab_instance_fields(
+                    &mut self.scene,
+                    name,
+                    &prefab,
+                    &[field.to_string()],
+                ) {
+                    let _ = self.undo.undo(&mut self.scene);
+                    self.status = format!("revert failed: {e}");
+                    return;
+                }
+                self.sync_baseline();
+                self.mark_dirty();
+                self.status = format!("reverted {field}");
+            }
+            Err(e) => self.status = format!("{e}"),
+        }
+    }
+
+    pub(crate) fn apply_variant_asset_to_base(
+        &mut self,
+        rel: &str,
+        field: Option<&str>,
+        to_root: bool,
+    ) {
+        let target = if to_root {
+            wiimaker_scene::ApplyBaseTarget::Root
+        } else {
+            wiimaker_scene::ApplyBaseTarget::Immediate
+        };
+        let paths: Vec<String> = field.map(|f| vec![f.to_string()]).unwrap_or_default();
+        match wiimaker_scene::apply_variant_override_to_base(&self.game_dir, rel, &paths, target) {
+            Ok(rep) => {
+                self.refresh_project_tree();
+                if rep.applied.is_empty() {
+                    self.status = "no variant overrides to apply to base".into();
+                } else {
+                    self.status = format!("applied {} to {}", rep.applied.join(", "), rep.base);
+                }
+            }
+            Err(e) => self.status = format!("apply to base failed: {e}"),
+        }
+    }
+
+    pub(crate) fn revert_variant_asset_field(&mut self, rel: &str, field: Option<&str>) {
+        let paths: Vec<String> = field.map(|f| vec![f.to_string()]).unwrap_or_default();
+        match wiimaker_scene::revert_variant_to_base(&self.game_dir, rel, &paths) {
+            Ok(rep) => {
+                self.refresh_project_tree();
+                if rep.applied.is_empty() {
+                    self.status = "no variant overrides to revert".into();
+                } else {
+                    self.status = format!("reverted {} to base", rep.applied.join(", "));
+                }
+            }
+            Err(e) => self.status = format!("revert to base failed: {e}"),
+        }
+    }
+
     pub(crate) fn unpack_selected_prefab(&mut self, name: &str) {
         self.push_undo();
         if let Err(e) = wiimaker_scene::unpack_prefab_instance(&mut self.scene, name) {

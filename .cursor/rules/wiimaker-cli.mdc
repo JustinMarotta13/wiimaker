@@ -18,7 +18,7 @@ clap binary in `crates/wiimaker-cli`. Agents build games as: `new` → `asset im
 | Input | `input map` (GCN-layout Keyboard / Wiimote / Classic / Nunchuk) |
 | Scene | `scene list\|show\|new\|set-default\|build-list\|build-add\|build-remove\|set-clear\|set-game-view` |
 | Editor prefs | `editor prefs` · `editor set-scene-view` · `editor set-project-view` · `editor play-status` |
-| Entity | `entity list\|add\|set\|add-component\|remove\|duplicate\|rename\|set-parent` · `set-anim` · `animator-set` · `animator-status` · `timeline-play` · `timeline-stop` · `timeline-status` · prefab `create-prefab\|instantiate-prefab\|apply-prefab\|revert-prefab\|unpack-prefab\|prefab-status` |
+| Entity | `entity list\|add\|set\|add-component\|remove\|duplicate\|rename\|set-parent` · `set-anim` · `animator-set` · `animator-status` · `timeline-play` · `timeline-stop` · `timeline-status` · prefab `create-prefab\|create-variant\|instantiate-prefab\|apply-prefab\|open-base\|revert-prefab\|unpack-prefab\|prefab-status` (`apply-prefab --to-base [--field] [--to-root]`, `open-base --name\|--prefab [--root]`) |
 | Asset | `asset list\|import\|slice\|set-pivot\|list-sprites\|anim\|list-anims\|controller\|list-controllers\|timeline\|list-timelines\|list-wavs\|play` |
 | Tilemap | `tilemap set\|fill\|stamp\|from-ascii\|get\|set-palette\|mask` |
 | Sorting | `sorting-layer list\|add\|rename\|move\|remove` |

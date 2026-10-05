@@ -120,6 +120,11 @@ impl EditorApp {
         let mut prefab_revert = false;
         let mut prefab_unpack = false;
         let mut prefab_create_variant = false;
+        let mut prefab_field_apply: Option<String> = None;
+        let mut prefab_field_base: Option<(String, bool)> = None;
+        let mut prefab_all_base: Option<bool> = None;
+        let mut prefab_field_revert: Option<String> = None;
+        let mut prefab_open_base: Option<bool> = None;
 
         // Prefab Apply/Revert/Unpack on the instance root only. Orange-bold uses
         // prefab_tree_overrides paths (`field` on root, `ChildName/field` on nested).
@@ -182,6 +187,19 @@ impl EditorApp {
             .as_ref()
             .and_then(|p| p.base.as_deref())
             .map(wiimaker_scene::prefab_stem);
+        let variant_chain = prefab_link
+            .as_deref()
+            .and_then(|src| wiimaker_scene::prefab_base_chain(&self.game_dir, src).ok());
+        let variant_root_stem = variant_chain
+            .as_ref()
+            .and_then(|chain| chain.last().map(|p| wiimaker_scene::prefab_stem(p)));
+        let variant_chrome = variant_base_stem.as_ref().map(|base| {
+            wiimaker_scene::prefab_variant_chrome(
+                &wiimaker_scene::prefab_stem(prefab_link.as_deref().unwrap_or("")),
+                base,
+                variant_root_stem.as_deref(),
+            )
+        });
         if is_prefab_instance {
             ui.add_space(4.0);
             theme::card_frame().show(ui, |ui| {
@@ -204,13 +222,6 @@ impl EditorApp {
                         .size(12.0)
                         .color(theme::TEXT),
                     );
-                    if let Some(base) = &variant_base_stem {
-                        ui.label(
-                            RichText::new(format!("of {base}"))
-                                .size(11.0)
-                                .color(theme::TEXT_MUTED),
-                        );
-                    }
                     if !prefab_ov.is_empty() {
                         ui.label(
                             RichText::new(format!("{} overrides", prefab_ov.len()))
@@ -220,6 +231,77 @@ impl EditorApp {
                         );
                     }
                 });
+                if is_variant_asset {
+                    if let Some(chrome) = &variant_chrome {
+                        if let Some(base) = &variant_base_stem {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("Base: {base}"))
+                                        .size(12.0)
+                                        .color(theme::TEXT),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                if ui.button(chrome.open_base).clicked() {
+                                    prefab_open_base = Some(false);
+                                }
+                                if ui.button(chrome.select_base).clicked() {
+                                    prefab_open_base = Some(true);
+                                }
+                            });
+                        }
+                        ui.horizontal(|ui| {
+                            ui.menu_button("Overrides", |ui| {
+                                ui.set_min_width(240.0);
+                                if prefab_ov.is_empty() {
+                                    theme::muted(ui, "No instance overrides");
+                                }
+                                for path in &prefab_ov.fields {
+                                    ui.menu_button(path, |ui| {
+                                        ui.set_min_width(220.0);
+                                        if ui.button(&chrome.apply_to_variant).clicked() {
+                                            prefab_field_apply = Some(path.clone());
+                                            ui.close_menu();
+                                        }
+                                        if ui.button(&chrome.apply_to_base).clicked() {
+                                            prefab_field_base = Some((path.clone(), false));
+                                            ui.close_menu();
+                                        }
+                                        if let Some(root_label) = &chrome.apply_to_root {
+                                            if ui.button(root_label).clicked() {
+                                                prefab_field_base = Some((path.clone(), true));
+                                                ui.close_menu();
+                                            }
+                                        }
+                                        if ui.button(chrome.revert).clicked() {
+                                            prefab_field_revert = Some(path.clone());
+                                            ui.close_menu();
+                                        }
+                                    });
+                                }
+                                ui.separator();
+                                if ui.button(&chrome.apply_all_to_variant).clicked() {
+                                    prefab_apply = true;
+                                    ui.close_menu();
+                                }
+                                if ui.button(chrome.apply_all_to_base).clicked() {
+                                    prefab_all_base = Some(false);
+                                    ui.close_menu();
+                                }
+                                if let Some(root_label) = &chrome.apply_all_to_root {
+                                    if ui.button(root_label).clicked() {
+                                        prefab_all_base = Some(true);
+                                        ui.close_menu();
+                                    }
+                                }
+                                if ui.button(chrome.revert_all).clicked() {
+                                    prefab_revert = true;
+                                    ui.close_menu();
+                                }
+                            });
+                        });
+                    }
+                }
                 ui.horizontal(|ui| {
                     let apply_tip = if is_variant_asset {
                         "Push overrides to the variant asset (not the base)"
@@ -2032,6 +2114,26 @@ impl EditorApp {
                 let as_name = format!("{base_stem}_Variant");
                 self.create_variant_from_selected(&sel, &as_name);
             }
+            let root_name = instance_root_name.as_deref().unwrap_or(sel.as_str());
+            if let Some(path) = prefab_field_apply {
+                self.apply_instance_field_to_variant(root_name, &path);
+            }
+            if let Some((path, to_root)) = prefab_field_base {
+                self.apply_instance_to_base_cmd(root_name, Some(&path), to_root);
+            }
+            if let Some(to_root) = prefab_all_base {
+                self.apply_instance_to_base_cmd(root_name, None, to_root);
+            }
+            if let Some(path) = prefab_field_revert {
+                self.revert_instance_field(root_name, &path);
+            }
+            if let Some(select_only) = prefab_open_base {
+                if let Some(chain) = variant_chain.as_ref().filter(|c| c.len() > 1) {
+                    self.focus_base_asset(&chain[1], !select_only);
+                } else {
+                    self.status = "variant has no base".into();
+                }
+            }
         } else {
             theme::card_frame().show(ui, |ui| {
                 if ui.button("Save as Prefab…").clicked() {
@@ -2382,6 +2484,7 @@ impl EditorApp {
                     self.instantiate_prefab_rel(&rel);
                 }
                 theme::muted(ui, "Creates a new entity from this prefab");
+                self.ui_prefab_asset_variant(ui, &rel);
             } else if name == "game.toml" {
                 theme::muted(ui, "Project settings — Scenes in Build · Sorting Layers");
                 ui.add_space(6.0);
@@ -2447,6 +2550,120 @@ impl EditorApp {
                 theme::muted(ui, "No editor actions for this file type yet");
             }
         });
+    }
+
+    /// Variant asset inspector: Base row, per-override Apply to Base / Revert to Base.
+    fn ui_prefab_asset_variant(&mut self, ui: &mut egui::Ui, rel: &std::path::Path) {
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        let abs = self.game_dir.join(rel);
+        let Ok(asset) = wiimaker_scene::load_prefab(&abs) else {
+            return;
+        };
+        if !asset.is_variant() {
+            return;
+        }
+        let Ok(status) = wiimaker_scene::prefab_chain_status(&self.game_dir, &rel_str) else {
+            return;
+        };
+        let Some(base) = status.base.clone() else {
+            return;
+        };
+        let base_stem = wiimaker_scene::prefab_stem(&base);
+        let root_stem = wiimaker_scene::prefab_stem(&status.root);
+        let variant_stem = wiimaker_scene::prefab_stem(&status.prefab);
+        let chrome =
+            wiimaker_scene::prefab_variant_chrome(&variant_stem, &base_stem, Some(&root_stem));
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Prefab Variant")
+                .strong()
+                .size(12.0)
+                .color(theme::PREFAB_OVERRIDE),
+        );
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("Base: {base_stem}"))
+                    .size(12.0)
+                    .color(theme::TEXT),
+            );
+        });
+        if root_stem != base_stem {
+            ui.label(
+                RichText::new(format!("Root: {root_stem}"))
+                    .size(11.0)
+                    .color(theme::TEXT_MUTED),
+            );
+        }
+        ui.horizontal(|ui| {
+            if ui.button(chrome.open_base).clicked() {
+                self.focus_base_asset(&base, true);
+            }
+            if ui.button(chrome.select_base).clicked() {
+                self.focus_base_asset(&base, false);
+            }
+        });
+        if status.variant_overrides.is_empty() {
+            theme::muted(ui, "No variant overrides");
+            return;
+        }
+        let mut apply_path: Option<String> = None;
+        let mut apply_root = false;
+        let mut revert_path: Option<String> = None;
+        let mut apply_all = false;
+        let mut apply_all_root = false;
+        ui.add_space(4.0);
+        for path in &status.variant_overrides {
+            ui.horizontal(|ui| {
+                let resp = ui.label(
+                    RichText::new(path)
+                        .size(12.0)
+                        .strong()
+                        .color(theme::PREFAB_OVERRIDE),
+                );
+                resp.context_menu(|ui| {
+                    if ui.button(&chrome.apply_to_base).clicked() {
+                        apply_path = Some(path.clone());
+                        ui.close_menu();
+                    }
+                    if let Some(root_label) = &chrome.apply_to_root {
+                        if ui.button(root_label).clicked() {
+                            apply_path = Some(path.clone());
+                            apply_root = true;
+                            ui.close_menu();
+                        }
+                    }
+                    if ui.button(chrome.revert_to_base).clicked() {
+                        revert_path = Some(path.clone());
+                        ui.close_menu();
+                    }
+                });
+                if ui.button("Apply to Base").clicked() {
+                    apply_path = Some(path.clone());
+                }
+                if ui.button(chrome.revert_to_base).clicked() {
+                    revert_path = Some(path.clone());
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            if ui.button(chrome.apply_all_to_base).clicked() {
+                apply_all = true;
+            }
+            if let Some(root_label) = &chrome.apply_all_to_root {
+                if ui.button(root_label).clicked() {
+                    apply_all_root = true;
+                }
+            }
+        });
+        if let Some(path) = apply_path {
+            self.apply_variant_asset_to_base(&rel_str, Some(&path), apply_root);
+        } else if apply_all {
+            self.apply_variant_asset_to_base(&rel_str, None, false);
+        } else if apply_all_root {
+            self.apply_variant_asset_to_base(&rel_str, None, true);
+        } else if let Some(path) = revert_path {
+            self.revert_variant_asset_field(&rel_str, Some(&path));
+        }
     }
 
     fn ui_sorting_layers_body(&mut self, ui: &mut egui::Ui) {
@@ -2628,5 +2845,24 @@ mod tests {
         assert!(INPUT_LEGEND.contains("Nunchuk"));
         assert!(INPUT_LEGEND.contains("IR"));
         assert!(INPUT_LEGEND.contains("motion"));
+    }
+
+    #[test]
+    fn prefab_variant_header_labels() {
+        let c = wiimaker_scene::prefab_variant_chrome("ghost_v", "ghost", None);
+        assert_eq!(c.open_base, "Open Base");
+        assert_eq!(c.select_base, "Select Base");
+        assert_eq!(c.apply_all_to_base, "Apply All to Base");
+        assert_eq!(c.apply_to_base, "Apply to Base 'ghost'");
+        assert_eq!(c.apply_to_variant, "Apply to Prefab Variant 'ghost_v'");
+        assert_eq!(c.revert, "Revert");
+        assert_eq!(c.revert_to_base, "Revert to Base");
+        assert!(c.apply_to_root.is_none());
+        let deep = wiimaker_scene::prefab_variant_chrome("leaf", "mid", Some("root"));
+        assert_eq!(deep.apply_to_root.as_deref(), Some("Apply to Root 'root'"));
+        assert_eq!(
+            deep.apply_all_to_root.as_deref(),
+            Some("Apply All to Root 'root'")
+        );
     }
 }

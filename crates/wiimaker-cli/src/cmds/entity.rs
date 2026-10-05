@@ -6,21 +6,23 @@ use wiimaker_scene::{
     add_component_animation, add_component_animator, add_component_audio_source,
     add_component_camera, add_component_collider, add_component_disc, add_component_follow,
     add_component_grid_mover, add_component_playable_director, add_component_sprite,
-    add_component_text, add_component_tilemap, add_entity, apply_prefab, attach_prefab_instance,
+    add_component_text, add_component_tilemap, add_entity, apply_instance_fields_to_prefab,
+    apply_instance_to_base, apply_prefab, apply_variant_override_to_base, attach_prefab_instance,
     create_prefab_variant, duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab,
-    entity_triggers_entered, instantiate_prefab, load_prefab, load_prefab_for_instance,
-    normalize_prefab_source, prefab_tree_overrides, refresh_variant_overrides,
-    remove_component_animation, remove_component_animator, remove_component_audio_source,
-    remove_component_camera, remove_component_collider, remove_component_disc,
-    remove_component_follow, remove_component_grid_mover, remove_component_playable_director,
-    remove_component_sprite, remove_component_text, remove_component_tilemap, remove_entity,
-    rename_entity, resolve_prefab, resolve_prefab_asset, revert_prefab_instance, save_prefab,
-    save_scene, set_component_enabled, set_entity_anim, set_entity_animator_bool,
-    set_entity_animator_float, set_entity_audio_source, set_entity_controller, set_entity_follow,
-    set_entity_grid_mover, set_entity_parent, set_entity_playable_director, set_entity_rotation_z,
-    set_entity_scale, set_entity_sorting, set_entity_sprite_pivot, set_entity_text,
-    set_entity_transform, unpack_prefab_instance, variant_from_instance, MutateOpts, Scene,
-    SceneColliderKind, SceneDir, SceneTextAlign,
+    entity_triggers_entered, find_game_dir, instantiate_prefab, load_prefab,
+    load_prefab_for_instance, normalize_prefab_source, prefab_chain_status, prefab_tree_overrides,
+    refresh_variant_overrides, remove_component_animation, remove_component_animator,
+    remove_component_audio_source, remove_component_camera, remove_component_collider,
+    remove_component_disc, remove_component_follow, remove_component_grid_mover,
+    remove_component_playable_director, remove_component_sprite, remove_component_text,
+    remove_component_tilemap, remove_entity, rename_entity, resolve_prefab, resolve_prefab_asset,
+    revert_prefab_instance, save_prefab, save_scene, set_component_enabled, set_entity_anim,
+    set_entity_animator_bool, set_entity_animator_float, set_entity_audio_source,
+    set_entity_controller, set_entity_follow, set_entity_grid_mover, set_entity_parent,
+    set_entity_playable_director, set_entity_rotation_z, set_entity_scale, set_entity_sorting,
+    set_entity_sprite_pivot, set_entity_text, set_entity_transform, unpack_prefab_instance,
+    variant_from_instance, ApplyBaseTarget, MutateOpts, Scene, SceneColliderKind, SceneDir,
+    SceneTextAlign,
 };
 
 use crate::args::EntityCmd;
@@ -965,39 +967,36 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             game,
             name,
             prefab,
+            to_base,
+            to_root,
+            fields,
             scene,
-        } => {
-            let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
-            let source = instance_prefab_source(&sc, &name, prefab.as_deref())?;
-            let prefab_path = resolve_prefab_path(&gd, &source)?;
-            let mut pf = load_prefab(&prefab_path)?;
-            apply_prefab(&mut sc, &name, &mut pf, &source)?;
-            refresh_variant_overrides(&gd, &mut pf)?;
-            save_prefab(&prefab_path, &pf)?;
-            save_scene(&path, &sc)?;
-            if json {
-                #[derive(Serialize)]
-                struct Out {
-                    ok: bool,
-                    message: String,
-                    prefab: String,
-                    path: String,
-                }
-                println!(
-                    "{}",
-                    serde_json::to_string(&Out {
-                        ok: true,
-                        message: format!("applied prefab to {name}"),
-                        prefab: normalize_prefab_source(&source),
-                        path: prefab_path.display().to_string(),
-                    })?
-                );
-                Ok(())
-            } else {
-                println!("applied {name} → {}", prefab_path.display());
-                Ok(())
-            }
-        }
+        } => apply_prefab_cmd(
+            root,
+            &game,
+            name.as_deref(),
+            prefab.as_deref(),
+            to_base,
+            to_root,
+            &fields,
+            scene.as_deref(),
+            json,
+        ),
+        EntityCmd::OpenBase {
+            game,
+            name,
+            prefab,
+            root: to_root,
+            scene,
+        } => open_base_cmd(
+            root,
+            &game,
+            name.as_deref(),
+            prefab.as_deref(),
+            to_root,
+            scene.as_deref(),
+            json,
+        ),
         EntityCmd::RevertPrefab {
             game,
             name,
@@ -1024,25 +1023,31 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 .find_entity(&name)
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' not found"))?;
             let source = ent.prefab.clone();
-            let (instance, overrides, base, is_variant) = if source.is_some() {
-                let raw = source
-                    .as_deref()
-                    .and_then(|s| resolve_prefab_asset(&gd, s).ok())
-                    .and_then(|p| load_prefab(&p).ok());
-                let base = raw.as_ref().and_then(|p| p.base.clone());
-                let is_variant = raw.as_ref().is_some_and(|p| p.is_variant());
-                match load_prefab_for_instance(&gd, ent) {
-                    Ok(pf) => (
-                        true,
-                        prefab_tree_overrides(&sc, &name, &pf).fields,
-                        base,
-                        is_variant,
-                    ),
-                    Err(_) => (true, Vec::new(), base, is_variant),
-                }
+            let (instance, overrides, chain_status) = if let Some(src) = source.as_deref() {
+                let status = prefab_chain_status(&gd, src).ok();
+                let overrides = match load_prefab_for_instance(&gd, ent) {
+                    Ok(pf) => prefab_tree_overrides(&sc, &name, &pf).fields,
+                    Err(_) => Vec::new(),
+                };
+                (true, overrides, status)
             } else {
-                (false, Vec::new(), None, false)
+                (false, Vec::new(), None)
             };
+            let base = chain_status.as_ref().and_then(|s| s.base.clone());
+            let is_variant = chain_status.as_ref().is_some_and(|s| s.variant);
+            let chain = chain_status
+                .as_ref()
+                .map(|s| s.chain.clone())
+                .unwrap_or_default();
+            let root_base = chain_status.as_ref().map(|s| s.root.clone());
+            let variant_overrides = chain_status
+                .as_ref()
+                .map(|s| s.variant_overrides.clone())
+                .unwrap_or_default();
+            let base_overrides = chain_status
+                .as_ref()
+                .map(|s| s.base_overrides.clone())
+                .unwrap_or_default();
             if json {
                 #[derive(Serialize)]
                 struct Out {
@@ -1051,8 +1056,15 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     instance: bool,
                     prefab: Option<String>,
                     base: Option<String>,
+                    root: Option<String>,
                     variant: bool,
+                    chain: Vec<String>,
+                    /// Instance diffs versus the resolved prefab.
                     overrides: Vec<String>,
+                    /// Overrides stored on the variant asset.
+                    variant_overrides: Vec<String>,
+                    /// Overrides stored on the immediate base when that base is itself a variant.
+                    base_overrides: Vec<String>,
                 }
                 println!(
                     "{}",
@@ -1062,8 +1074,12 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                         instance,
                         prefab: source,
                         base,
+                        root: root_base,
                         variant: is_variant,
+                        chain,
                         overrides,
+                        variant_overrides,
+                        base_overrides,
                     })?
                 );
                 Ok(())
@@ -1073,12 +1089,34 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     .as_deref()
                     .map(|b| format!(" (base {b})"))
                     .unwrap_or_default();
+                println!(
+                    "{name} {kind} of {}{base_note}",
+                    source.clone().unwrap_or_default()
+                );
+                if !chain.is_empty() {
+                    println!("chain: {}", chain.join(" → "));
+                }
+                println!(
+                    "variant overrides: {}",
+                    if variant_overrides.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        variant_overrides.join(", ")
+                    }
+                );
+                println!(
+                    "base overrides: {}",
+                    if base_overrides.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        base_overrides.join(", ")
+                    }
+                );
                 if overrides.is_empty() {
-                    println!("{name} {kind} of {}{base_note}", source.unwrap_or_default());
+                    println!("instance overrides: (none)");
                 } else {
                     println!(
-                        "{name} {kind} of {}{base_note} · {} overrides: {}",
-                        source.unwrap_or_default(),
+                        "instance overrides: {} ({})",
                         overrides.len(),
                         overrides.join(", ")
                     );
@@ -1090,6 +1128,229 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             }
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_prefab_cmd(
+    root: &Path,
+    game: &str,
+    name: Option<&str>,
+    prefab: Option<&str>,
+    to_base: bool,
+    to_root: bool,
+    fields: &[String],
+    scene: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    if to_root && !to_base {
+        bail!("--to-root requires --to-base");
+    }
+    let target = if to_root {
+        ApplyBaseTarget::Root
+    } else {
+        ApplyBaseTarget::Immediate
+    };
+    if to_base {
+        if name.is_some() && prefab.is_some() {
+            bail!("apply-prefab --to-base accepts either --name or --prefab, not both");
+        }
+        let report = if let Some(name) = name {
+            let (gd, _p, _path, sc) = open_scene(root, game, scene)?;
+            apply_instance_to_base(&gd, &sc, name, fields, target)?
+        } else if let Some(prefab) = prefab {
+            let gd = find_game_dir(root, game)?;
+            apply_variant_override_to_base(&gd, prefab, fields, target)?
+        } else {
+            bail!("apply-prefab --to-base requires --name <entity> or --prefab <variant>");
+        };
+        return emit_apply_report(json, &report);
+    }
+    let Some(name) = name else {
+        bail!("apply-prefab requires --name <entity> (or --to-base --prefab <variant>)");
+    };
+    let (gd, _p, path, mut sc) = open_scene(root, game, scene)?;
+    let source = instance_prefab_source(&sc, name, prefab)?;
+    let prefab_path = resolve_prefab_path(&gd, &source)?;
+    if fields.is_empty() {
+        let mut pf = load_prefab(&prefab_path)?;
+        apply_prefab(&mut sc, name, &mut pf, &source)?;
+        refresh_variant_overrides(&gd, &mut pf)?;
+        save_prefab(&prefab_path, &pf)?;
+        save_scene(&path, &sc)?;
+        if json {
+            #[derive(Serialize)]
+            struct Out {
+                ok: bool,
+                message: String,
+                prefab: String,
+                path: String,
+            }
+            println!(
+                "{}",
+                serde_json::to_string(&Out {
+                    ok: true,
+                    message: format!("applied prefab to {name}"),
+                    prefab: normalize_prefab_source(&source),
+                    path: prefab_path.display().to_string(),
+                })?
+            );
+            Ok(())
+        } else {
+            println!("applied {name} → {}", prefab_path.display());
+            Ok(())
+        }
+    } else {
+        let overrides = apply_instance_fields_to_prefab(&gd, &sc, name, fields)?;
+        if json {
+            #[derive(Serialize)]
+            struct Out {
+                ok: bool,
+                message: String,
+                prefab: String,
+                path: String,
+                applied: Vec<String>,
+                variant_overrides: Vec<String>,
+            }
+            println!(
+                "{}",
+                serde_json::to_string(&Out {
+                    ok: true,
+                    message: format!("applied {} field(s) to {name}", fields.len()),
+                    prefab: normalize_prefab_source(&source),
+                    path: prefab_path.display().to_string(),
+                    applied: fields.to_vec(),
+                    variant_overrides: overrides,
+                })?
+            );
+            Ok(())
+        } else {
+            println!(
+                "applied {} → {} ({})",
+                fields.join(", "),
+                prefab_path.display(),
+                name
+            );
+            Ok(())
+        }
+    }
+}
+
+fn emit_apply_report(json: bool, report: &wiimaker_scene::ApplyToBaseReport) -> Result<()> {
+    if json {
+        #[derive(Serialize)]
+        struct Out<'a> {
+            ok: bool,
+            message: String,
+            variant: &'a str,
+            base: &'a str,
+            applied: &'a [String],
+            variant_overrides: &'a [String],
+            chain: &'a [String],
+        }
+        let message = if report.applied.is_empty() {
+            "no overrides to apply to base".to_string()
+        } else {
+            format!(
+                "applied {} to base {}",
+                report.applied.join(", "),
+                report.base
+            )
+        };
+        println!(
+            "{}",
+            serde_json::to_string(&Out {
+                ok: true,
+                message,
+                variant: &report.variant,
+                base: &report.base,
+                applied: &report.applied,
+                variant_overrides: &report.variant_overrides,
+                chain: &report.chain,
+            })?
+        );
+    } else if report.applied.is_empty() {
+        println!("no overrides to apply to base {}", report.base);
+    } else {
+        println!(
+            "applied {} → {} (variant {})",
+            report.applied.join(", "),
+            report.base,
+            report.variant
+        );
+    }
+    Ok(())
+}
+
+fn open_base_cmd(
+    root: &Path,
+    game: &str,
+    name: Option<&str>,
+    prefab: Option<&str>,
+    to_root: bool,
+    scene: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    if name.is_some() && prefab.is_some() {
+        bail!("open-base accepts either --name or --prefab, not both");
+    }
+    let (gd, source) = if let Some(prefab) = prefab {
+        let gd = find_game_dir(root, game)?;
+        (gd, normalize_prefab_source(prefab))
+    } else if let Some(name) = name {
+        let (gd, _p, _path, sc) = open_scene(root, game, scene)?;
+        let link = sc
+            .find_entity(name)
+            .and_then(|e| e.prefab.clone())
+            .ok_or_else(|| anyhow::anyhow!("entity '{name}' is not a prefab instance"))?;
+        (gd, normalize_prefab_source(&link))
+    } else {
+        bail!("open-base requires --name <entity> or --prefab <asset>");
+    };
+    let status = prefab_chain_status(&gd, &source)?;
+    if !status.variant {
+        bail!(
+            "prefab '{}' is not a variant (no base to open)",
+            status.prefab
+        );
+    }
+    let target = if to_root {
+        status.root.clone()
+    } else {
+        status
+            .base
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("variant '{}' has no base", status.prefab))?
+    };
+    if json {
+        #[derive(Serialize)]
+        struct Out {
+            ok: bool,
+            prefab: String,
+            base: Option<String>,
+            root: String,
+            target: String,
+            chain: Vec<String>,
+            variant_overrides: Vec<String>,
+            base_overrides: Vec<String>,
+        }
+        println!(
+            "{}",
+            serde_json::to_string(&Out {
+                ok: true,
+                prefab: status.prefab,
+                base: status.base,
+                root: status.root,
+                target,
+                chain: status.chain,
+                variant_overrides: status.variant_overrides,
+                base_overrides: status.base_overrides,
+            })?
+        );
+    } else {
+        println!("base {target}");
+        println!("chain: {}", status.chain.join(" → "));
+    }
+    Ok(())
 }
 
 fn instance_prefab_source(scene: &Scene, name: &str, explicit: Option<&str>) -> Result<String> {
