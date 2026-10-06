@@ -10,7 +10,7 @@ use crate::math::{Quat, Vec2, Vec3};
 use crate::sorting::{default_sorting_layer_index, default_sorting_layers};
 use crate::text::Text;
 use crate::tilemap::Tilemap;
-use crate::timeline::PlayableDirector;
+use crate::timeline::{PlayableDirector, TimelineSignal};
 
 /// Host / scene framebuffer size (Wii VI analogue for v0 ortho).
 pub const SCREEN_W: f32 = 640.0;
@@ -211,6 +211,8 @@ pub(crate) struct Slot {
 pub struct World {
     slots: Vec<Slot>,
     pending_oneshots: Vec<Oneshot>,
+    /// Signals fired since the last [`Self::take_timeline_signals`] or `tick_timelines`.
+    pending_signals: Vec<TimelineSignal>,
     /// Ordered sorting layer names (Unity Tags & Layers). Index is draw order.
     sorting_layers: Vec<String>,
 }
@@ -226,6 +228,7 @@ impl World {
         Self {
             slots: Vec::new(),
             pending_oneshots: Vec::new(),
+            pending_signals: Vec::new(),
             sorting_layers: default_sorting_layers(),
         }
     }
@@ -288,6 +291,7 @@ impl World {
     pub fn clear(&mut self) {
         self.slots.clear();
         self.pending_oneshots.clear();
+        self.pending_signals.clear();
         // Keep sorting_layers so hydrate can set the table then clear slots.
     }
 
@@ -674,6 +678,24 @@ impl World {
     /// Take pending oneshots (host / editor / CLI). Empty if nothing queued.
     pub fn drain_oneshots(&mut self) -> Vec<Oneshot> {
         core::mem::take(&mut self.pending_oneshots)
+    }
+
+    /// Signals fired this frame (peek). [`Self::tick_timelines`] clears the queue first.
+    pub fn timeline_signals(&self) -> &[TimelineSignal] {
+        &self.pending_signals
+    }
+
+    /// Drain signals fired since the last take or timeline tick.
+    pub fn take_timeline_signals(&mut self) -> Vec<TimelineSignal> {
+        core::mem::take(&mut self.pending_signals)
+    }
+
+    pub(crate) fn push_timeline_signal(&mut self, signal: TimelineSignal) {
+        self.pending_signals.push(signal);
+    }
+
+    pub(crate) fn clear_timeline_signals(&mut self) {
+        self.pending_signals.clear();
     }
 
     pub(crate) fn slot(&self, id: EntityId) -> Option<&Slot> {

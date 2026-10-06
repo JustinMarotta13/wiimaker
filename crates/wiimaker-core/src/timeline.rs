@@ -24,6 +24,31 @@ pub enum TimelineTrackKind {
     Animation,
     Audio,
     Transform,
+    /// Instant marker. Fires `signal` when the playhead crosses `start`.
+    Signal,
+    /// Activates `binding` inside the clip and drives that entity's director.
+    Control,
+}
+
+/// One signal emitted when a Signal marker is crossed.
+///
+/// Queued on [`crate::world::World`] until [`crate::world::World::take_timeline_signals`].
+/// `tick_timelines` clears the queue at the start of the tick, so events belong to that frame.
+/// Scrub (`set_timeline_time`) appends until the next tick or take.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimelineSignal {
+    /// PlayableDirector entity name (empty if unnamed).
+    pub director: String,
+    /// Timeline stem (`assets/<stem>.timeline.json`).
+    pub timeline: String,
+    /// Marker name (Unity signal name).
+    pub signal: String,
+    /// Optional string payload. Empty when the marker has none.
+    pub payload: String,
+    /// Bound receiver entity. Empty when the track is unbound.
+    pub binding: String,
+    /// Marker time on the director (clip `start`).
+    pub time: f32,
 }
 
 /// One clip baked onto a runtime track.
@@ -45,6 +70,10 @@ pub struct TimelineClipRuntime {
     pub volume: f32,
     pub from: [f32; 2],
     pub to: [f32; 2],
+    /// Signal marker name. Empty on non-signal clips.
+    pub signal: String,
+    /// Signal string payload. Empty when omitted.
+    pub payload: String,
 }
 
 impl TimelineClipRuntime {
@@ -161,7 +190,7 @@ impl World {
         }
         let t = d.time;
         self.ensure_timeline_baselines(id);
-        self.apply_director(id, -1.0, t, false);
+        self.apply_director_root(id, -1.0, t, false, false);
         true
     }
 
@@ -178,7 +207,7 @@ impl World {
             b.released = false;
         }
         self.ensure_timeline_baselines(id);
-        self.apply_director(id, -1.0, 0.0, false);
+        self.apply_director_root(id, -1.0, 0.0, false, true);
         true
     }
 
@@ -199,14 +228,22 @@ impl World {
             d.finished = false;
         }
         self.ensure_timeline_baselines(id);
-        self.apply_director(id, prev, t, true);
+        self.apply_director_root(id, prev, t, true, false);
         true
     }
 
     /// Advance playing directors and apply every track.
+    ///
+    /// Clears the signal queue first. Directors driven by a playing Control track
+    /// (and their nested targets) do not advance on their own clock.
     pub fn tick_timelines(&mut self, dt: f32) {
+        self.clear_timeline_signals();
+        let slaves = self.timeline_control_slaves();
         let ids: Vec<_> = self.iter_entities().collect();
         for id in ids {
+            if slaves.iter().any(|s| *s == id) {
+                continue;
+            }
             let playing = self.director(id).is_some_and(|d| d.playing);
             if !playing {
                 continue;
@@ -224,13 +261,13 @@ impl World {
                         d.finished = true;
                     }
                 }
-                self.apply_director(id, prev, 0.0, true);
+                self.apply_director_root(id, prev, 0.0, true, false);
                 continue;
             }
             let t = prev + dt.max(0.0);
             if t >= duration {
                 if loop_ {
-                    self.apply_director(id, prev, duration, true);
+                    self.apply_director_root(id, prev, duration, true, false);
                     let wrapped = t % duration;
                     if let Some(d) = self.director_mut(id) {
                         d.fired.clear();
@@ -241,20 +278,20 @@ impl World {
                             b.released = false;
                         }
                     }
-                    self.apply_director(id, -1.0, wrapped, true);
+                    self.apply_director_root(id, -1.0, wrapped, true, false);
                 } else {
                     if let Some(d) = self.director_mut(id) {
                         d.time = duration;
                         d.playing = false;
                         d.finished = true;
                     }
-                    self.apply_director(id, prev, duration, true);
+                    self.apply_director_root(id, prev, duration, true, true);
                 }
             } else {
                 if let Some(d) = self.director_mut(id) {
                     d.time = t;
                 }
-                self.apply_director(id, prev, t, true);
+                self.apply_director_root(id, prev, t, true, false);
             }
         }
     }
@@ -278,7 +315,7 @@ impl World {
                 continue;
             };
             self.ensure_timeline_baselines(id);
-            self.apply_director(id, -1.0, t, false);
+            self.apply_director_root(id, -1.0, t, false, false);
         }
     }
 
@@ -360,8 +397,96 @@ impl World {
         }
     }
 
-    fn apply_director(&mut self, id: EntityId, prev: f32, time: f32, fire_audio: bool) {
+    fn apply_director_root(
+        &mut self,
+        id: EntityId,
+        prev: f32,
+        time: f32,
+        fire_edges: bool,
+        release_control: bool,
+    ) {
+        let mut stack = Vec::new();
+        self.apply_director(id, prev, time, fire_edges, release_control, &mut stack);
+    }
+
+    /// Playing directors that own a Control track, plus the directors those tracks
+    /// reach. Back-edges (self / cycles) are dropped so a timeline cannot drive itself.
+    fn timeline_control_slaves(&self) -> Vec<EntityId> {
+        let playing: Vec<EntityId> = self
+            .iter_entities()
+            .filter(|id| self.director(*id).is_some_and(|d| d.playing))
+            .collect();
+        let mut slaves = Vec::new();
+        let mut visiting = Vec::new();
+        for id in playing {
+            if slaves.iter().any(|s| *s == id) {
+                continue;
+            }
+            self.walk_control_targets(id, &mut visiting, &mut slaves);
+        }
+        slaves
+    }
+
+    fn walk_control_targets(
+        &self,
+        id: EntityId,
+        visiting: &mut Vec<EntityId>,
+        slaves: &mut Vec<EntityId>,
+    ) {
+        if visiting.iter().any(|v| *v == id) {
+            return;
+        }
+        visiting.push(id);
+        for child in self.control_director_targets(id) {
+            if visiting.iter().any(|v| *v == child) {
+                continue;
+            }
+            if !slaves.iter().any(|s| *s == child) {
+                slaves.push(child);
+            }
+            self.walk_control_targets(child, visiting, slaves);
+        }
+        visiting.pop();
+    }
+
+    /// Other entities with a PlayableDirector named by this director's Control tracks.
+    fn control_director_targets(&self, id: EntityId) -> Vec<EntityId> {
         let Some(tracks) = self.director(id).map(|d| d.tracks.clone()) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for track in &tracks {
+            if track.kind != TimelineTrackKind::Control || track.binding.is_empty() {
+                continue;
+            }
+            let Some(eid) = self.find_by_name(&track.binding) else {
+                continue;
+            };
+            if eid == id || self.director(eid).is_none() {
+                continue;
+            }
+            if !out.iter().any(|e| *e == eid) {
+                out.push(eid);
+            }
+        }
+        out
+    }
+
+    fn apply_director(
+        &mut self,
+        id: EntityId,
+        prev: f32,
+        time: f32,
+        fire_edges: bool,
+        release_control: bool,
+        stack: &mut Vec<EntityId>,
+    ) {
+        if stack.iter().any(|s| *s == id) {
+            return;
+        }
+        stack.push(id);
+        let Some(tracks) = self.director(id).map(|d| d.tracks.clone()) else {
+            stack.pop();
             return;
         };
         let xy_base = self
@@ -380,9 +505,12 @@ impl World {
         self.apply_activation(&tracks, time, &active_base);
         self.apply_transform(&tracks, time, &xy_base);
         self.apply_animation(id, &tracks, time, &anim_base);
-        if fire_audio {
+        if fire_edges {
             self.apply_audio(id, &tracks, prev, time);
+            self.apply_signals(id, &tracks, prev, time);
         }
+        self.apply_control(id, &tracks, prev, time, fire_edges, release_control, stack);
+        stack.pop();
     }
 
     fn apply_activation(
@@ -599,8 +727,7 @@ impl World {
                 }
                 // `prev == start && time > prev` covers a clip that begins at the
                 // playhead (including t = 0 on the first advancing tick).
-                let crossed = time >= clip.start
-                    && (prev < clip.start || (prev == clip.start && time > prev));
+                let crossed = edge_crossed(prev, time, clip.start);
                 if crossed && !fired.contains(&key) {
                     oneshots.push((clip.audio.clone(), clip.volume.clamp(0.0, 1.0)));
                     arm.push(key);
@@ -621,6 +748,165 @@ impl World {
             }
         }
     }
+
+    fn apply_signals(
+        &mut self,
+        id: EntityId,
+        tracks: &[TimelineTrackRuntime],
+        prev: f32,
+        time: f32,
+    ) {
+        let mut events: Vec<TimelineSignal> = Vec::new();
+        let mut arm: Vec<u32> = Vec::new();
+        let mut disarm: Vec<u32> = Vec::new();
+        let fired = self
+            .director(id)
+            .map(|d| d.fired.clone())
+            .unwrap_or_default();
+        let director_name = self.name(id).unwrap_or("").to_string();
+        let timeline = self
+            .director(id)
+            .map(|d| d.timeline.clone())
+            .unwrap_or_default();
+        for (ti, track) in tracks.iter().enumerate() {
+            if track.kind != TimelineTrackKind::Signal {
+                continue;
+            }
+            for (ci, clip) in track.clips.iter().enumerate() {
+                let key = fire_key(ti, ci);
+                let at = clip.start;
+                if time < at {
+                    disarm.push(key);
+                    continue;
+                }
+                // Same crossing rule as Audio: once per playthrough until the
+                // playhead moves strictly before the marker (scrub back, stop,
+                // or loop wrap which clears `fired`). A backward scrub does not
+                // fire. Holding or scrubbing further forward does not fire again.
+                let crossed = edge_crossed(prev, time, at);
+                if crossed && !fired.contains(&key) && !clip.signal.is_empty() {
+                    events.push(TimelineSignal {
+                        director: director_name.clone(),
+                        timeline: timeline.clone(),
+                        signal: clip.signal.clone(),
+                        payload: clip.payload.clone(),
+                        binding: track.binding.clone(),
+                        time: at,
+                    });
+                    arm.push(key);
+                }
+            }
+        }
+        if let Some(d) = self.director_mut(id) {
+            d.fired.retain(|k| !disarm.contains(k));
+            for k in arm {
+                if !d.fired.contains(&k) {
+                    d.fired.push(k);
+                }
+            }
+        }
+        for event in events {
+            self.push_timeline_signal(event);
+        }
+    }
+
+    fn apply_control(
+        &mut self,
+        id: EntityId,
+        tracks: &[TimelineTrackRuntime],
+        prev: f32,
+        time: f32,
+        fire_edges: bool,
+        release_control: bool,
+        stack: &mut Vec<EntityId>,
+    ) {
+        let mut names: Vec<String> = Vec::new();
+        for track in tracks {
+            if track.kind == TimelineTrackKind::Control
+                && !track.binding.is_empty()
+                && !names.iter().any(|n| n == &track.binding)
+            {
+                names.push(track.binding.clone());
+            }
+        }
+        for name in names {
+            let Some(eid) = self.find_by_name(&name) else {
+                continue;
+            };
+            // Self-control and cycles: the target is already on the evaluation stack.
+            if eid == id || stack.iter().any(|s| *s == eid) {
+                continue;
+            }
+            let mut driving: Option<(f32, f32)> = None;
+            if !release_control {
+                for track in tracks {
+                    if track.kind != TimelineTrackKind::Control || track.binding != name {
+                        continue;
+                    }
+                    for clip in &track.clips {
+                        if clip.contains(time) {
+                            driving = Some((clip.start, clip.end));
+                        }
+                    }
+                }
+            }
+            if let Some((start, end)) = driving {
+                self.set_active(eid, true);
+                if self.director(eid).is_some() {
+                    let dur = self.director(eid).map(|d| d.duration).unwrap_or(0.0);
+                    let mut local = (time - start).max(0.0);
+                    if dur > 0.0 {
+                        local = local.min(dur);
+                    }
+                    let prev_inside = prev >= start && prev <= end;
+                    let mut prev_local = if prev_inside {
+                        (prev - start).max(0.0)
+                    } else {
+                        -1.0
+                    };
+                    if dur > 0.0 && prev_local >= 0.0 {
+                        prev_local = prev_local.min(dur);
+                    }
+                    let parent_playing = self.director(id).is_some_and(|d| d.playing);
+                    let child_finished = dur > 0.0 && local >= dur - 1e-4;
+                    if let Some(d) = self.director_mut(eid) {
+                        d.time = local;
+                        d.playing = parent_playing && !child_finished;
+                        d.finished = child_finished;
+                    }
+                    self.apply_director(eid, prev_local, local, fire_edges, false, stack);
+                }
+            } else {
+                self.set_active(eid, false);
+                if self.director(eid).is_some() {
+                    self.stop_controlled(eid, stack);
+                }
+            }
+        }
+    }
+
+    /// Stop a nested director and release its Control targets (does not sample clips).
+    fn stop_controlled(&mut self, id: EntityId, stack: &mut Vec<EntityId>) {
+        if stack.iter().any(|s| *s == id) {
+            return;
+        }
+        let Some(d) = self.director_mut(id) else {
+            return;
+        };
+        d.playing = false;
+        d.finished = false;
+        d.time = 0.0;
+        d.fired.clear();
+        for b in &mut d.anim_base {
+            b.released = false;
+        }
+        self.ensure_timeline_baselines(id);
+        self.apply_director(id, -1.0, 0.0, false, true, stack);
+    }
+}
+
+fn edge_crossed(prev: f32, time: f32, at: f32) -> bool {
+    time >= at && (prev < at || (prev == at && time > prev))
 }
 
 #[cfg(all(feature = "std", test))]
@@ -650,7 +936,20 @@ mod tests {
             volume: 1.0,
             from,
             to,
+            signal: String::new(),
+            payload: String::new(),
         }
+    }
+
+    fn clip_signal(time: f32, name: &str, payload: &str) -> TimelineClipRuntime {
+        let mut clip = clip_base(time, time, true, "", Vec::new(), "", [0.0, 0.0], [0.0, 0.0]);
+        clip.signal = name.into();
+        clip.payload = payload.into();
+        clip
+    }
+
+    fn clip_control(start: f32, end: f32) -> TimelineClipRuntime {
+        clip_base(start, end, true, "", Vec::new(), "", [0.0, 0.0], [0.0, 0.0])
     }
 
     fn clip_xform(start: f32, end: f32, from: [f32; 2], to: [f32; 2]) -> TimelineClipRuntime {
@@ -968,5 +1267,276 @@ mod tests {
             world.animation(player).is_none(),
             "missing pre-timeline Animation is removed outside the clip"
         );
+    }
+
+    fn signal_names(world: &mut World) -> Vec<String> {
+        world
+            .take_timeline_signals()
+            .into_iter()
+            .map(|s| s.signal)
+            .collect()
+    }
+
+    #[test]
+    fn signal_fires_once_per_crossing_scrub_and_restart() {
+        let mut world = World::new();
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 2.0, true, false);
+        d.tracks.push(track(
+            "Cues",
+            TimelineTrackKind::Signal,
+            "Player",
+            vec![
+                clip_signal(0.0, "Begin", ""),
+                clip_signal(0.5, "IntroDone", "go"),
+            ],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+
+        world.tick_timelines(0.05);
+        let fired = world.take_timeline_signals();
+        assert_eq!(
+            fired.len(),
+            1,
+            "marker at 0 fires on the first advancing tick"
+        );
+        assert_eq!(fired[0].signal, "Begin");
+        assert_eq!(fired[0].binding, "Player");
+        assert_eq!(fired[0].director, "Cutscene");
+        assert_eq!(fired[0].timeline, "intro");
+        assert!(fired[0].payload.is_empty());
+        assert!(world.timeline_signals().is_empty());
+
+        world.tick_timelines(0.2);
+        assert!(
+            signal_names(&mut world).is_empty(),
+            "staying before the next marker does not re-fire Begin"
+        );
+
+        world.tick_timelines(0.4);
+        let fired = world.take_timeline_signals();
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].signal, "IntroDone");
+        assert_eq!(fired[0].payload, "go");
+        assert!((fired[0].time - 0.5).abs() < 1e-4);
+
+        world.tick_timelines(0.2);
+        assert!(
+            signal_names(&mut world).is_empty(),
+            "holding past the marker does not double-fire"
+        );
+
+        world.set_timeline_time(dir, 1.2);
+        assert!(
+            signal_names(&mut world).is_empty(),
+            "forward scrub past an already-fired marker does not fire again"
+        );
+        world.set_timeline_time(dir, 0.2);
+        assert!(
+            signal_names(&mut world).is_empty(),
+            "scrub back re-arms without firing"
+        );
+        world.set_timeline_time(dir, 0.8);
+        let fired = world.take_timeline_signals();
+        assert_eq!(fired.len(), 1, "next forward cross fires once");
+        assert_eq!(fired[0].signal, "IntroDone");
+
+        world.set_timeline_time(dir, 0.1);
+        assert!(signal_names(&mut world).is_empty());
+        world.tick_timelines(2.0);
+        let _ = world.take_timeline_signals();
+        {
+            let d = world.director(dir).unwrap();
+            assert!(d.finished);
+            assert!(!d.playing);
+        }
+        assert!(world.play_timeline(dir));
+        assert!(
+            signal_names(&mut world).is_empty(),
+            "play() seeks without firing; the next tick crosses markers"
+        );
+        world.tick_timelines(0.05);
+        assert_eq!(signal_names(&mut world), vec!["Begin".to_string()]);
+    }
+
+    #[test]
+    fn signal_loop_wrap_refires_and_backward_scrub_does_not() {
+        let mut world = World::new();
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 1.0, true, true);
+        d.tracks.push(track(
+            "Cues",
+            TimelineTrackKind::Signal,
+            "",
+            vec![clip_signal(0.25, "Ping", "")],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+
+        world.tick_timelines(0.1);
+        assert!(signal_names(&mut world).is_empty());
+        world.tick_timelines(0.2);
+        assert_eq!(signal_names(&mut world), vec!["Ping".to_string()]);
+        world.tick_timelines(1.0);
+        let d = world.director(dir).unwrap();
+        assert!(d.playing && d.time < 0.5, "wrapped {}", d.time);
+        assert_eq!(
+            signal_names(&mut world),
+            vec!["Ping".to_string()],
+            "loop wrap clears the fired set and the marker fires again"
+        );
+
+        world.set_timeline_time(dir, 0.9);
+        let _ = world.take_timeline_signals();
+        world.set_timeline_time(dir, 0.05);
+        assert!(
+            signal_names(&mut world).is_empty(),
+            "a backward scrub across the marker disarms and does not fire"
+        );
+    }
+
+    #[test]
+    fn signal_jump_fires_each_marker_once() {
+        let mut world = World::new();
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 3.0, false, false);
+        d.tracks.push(track(
+            "Cues",
+            TimelineTrackKind::Signal,
+            "Player",
+            vec![clip_signal(0.4, "A", ""), clip_signal(0.8, "B", "x")],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+        world.set_timeline_time(dir, 1.0);
+        assert_eq!(
+            signal_names(&mut world),
+            vec!["A".to_string(), "B".to_string()]
+        );
+        world.set_timeline_time(dir, 2.0);
+        assert!(signal_names(&mut world).is_empty());
+    }
+
+    #[test]
+    fn control_activates_and_drives_nested_director() {
+        let mut world = World::new();
+        let ghost = world.spawn_named("IntroGhost", Transform::default());
+        let child = world.spawn_named("Child", Transform::default());
+        let mut sub = PlayableDirector::new("sub", 1.0, false, false);
+        sub.tracks.push(track(
+            "Cue",
+            TimelineTrackKind::Signal,
+            "Child",
+            vec![clip_signal(0.0, "SubStart", "")],
+        ));
+        world.set_director(child, Some(sub));
+        let parent = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 3.0, true, false);
+        d.tracks.push(track(
+            "Nest",
+            TimelineTrackKind::Control,
+            "IntroGhost",
+            vec![clip_control(0.5, 1.5)],
+        ));
+        d.tracks.push(track(
+            "Sub",
+            TimelineTrackKind::Control,
+            "Child",
+            vec![clip_control(0.5, 1.5)],
+        ));
+        world.set_director(parent, Some(d));
+        world.capture_timeline_baselines();
+        world.apply_playing_timelines();
+        assert!(!world.is_active(ghost), "appear: off before the clip");
+        assert!(!world.is_active(child));
+        assert!(!world.director(child).unwrap().playing);
+
+        world.tick_timelines(0.6);
+        assert!(world.is_active(ghost));
+        assert!(world.is_active(child));
+        let child_d = world.director(child).unwrap();
+        assert!(
+            (child_d.time - 0.1).abs() < 1e-3,
+            "local time from clip start, got {}",
+            child_d.time
+        );
+        assert!(child_d.playing);
+        assert_eq!(
+            signal_names(&mut world),
+            vec!["SubStart".to_string()],
+            "nested director fires its marker when the control clip enters"
+        );
+
+        world.tick_timelines(0.2);
+        assert!(
+            (world.director(child).unwrap().time - 0.3).abs() < 1e-3,
+            "child follows the parent clock, not a second dt"
+        );
+        assert!(signal_names(&mut world).is_empty());
+
+        world.tick_timelines(1.0);
+        assert!(!world.is_active(ghost), "off after the clip");
+        assert!(!world.is_active(child));
+        let child_d = world.director(child).unwrap();
+        assert!(!child_d.playing);
+        assert!(
+            child_d.time.abs() < 1e-4,
+            "stop snaps the nested director to 0"
+        );
+
+        world.set_timeline_time(parent, 1.0);
+        assert!(world.is_active(child));
+        assert!((world.director(child).unwrap().time - 0.5).abs() < 1e-3);
+        world.stop_timeline(parent);
+        assert!(!world.is_active(ghost));
+        assert!(!world.is_active(child));
+        assert!(!world.director(child).unwrap().playing);
+        assert!(world.director(child).unwrap().time.abs() < 1e-4);
+    }
+
+    #[test]
+    fn control_ignores_self_and_cycles() {
+        let mut world = World::new();
+        let a = world.spawn_named("A", Transform::default());
+        let b = world.spawn_named("B", Transform::default());
+        let mut da = PlayableDirector::new("loop-a", 2.0, true, false);
+        da.tracks.push(track(
+            "Self",
+            TimelineTrackKind::Control,
+            "A",
+            vec![clip_control(0.0, 2.0)],
+        ));
+        da.tracks.push(track(
+            "ToB",
+            TimelineTrackKind::Control,
+            "B",
+            vec![clip_control(0.0, 2.0)],
+        ));
+        world.set_director(a, Some(da));
+        let mut db = PlayableDirector::new("loop-b", 2.0, true, false);
+        db.tracks.push(track(
+            "ToA",
+            TimelineTrackKind::Control,
+            "A",
+            vec![clip_control(0.0, 2.0)],
+        ));
+        world.set_director(b, Some(db));
+        world.capture_timeline_baselines();
+        world.tick_timelines(0.25);
+        world.tick_timelines(0.25);
+        assert!(
+            world.is_active(a),
+            "self-control does not deactivate the director"
+        );
+        assert!(world.is_active(b));
+        let ta = world.director(a).unwrap().time;
+        let tb = world.director(b).unwrap().time;
+        assert!((ta - 0.5).abs() < 1e-3, "A keeps its own clock, got {ta}");
+        assert!(
+            (tb - 0.5).abs() < 1e-3,
+            "B is synced to A's clip and does not also tick, got {tb}"
+        );
+        assert!(ta.is_finite() && tb.is_finite());
     }
 }

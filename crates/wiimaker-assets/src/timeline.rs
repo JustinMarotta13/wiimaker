@@ -7,13 +7,18 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-/// Track kind for v1 timelines.
+/// Track kind. Signal and Control were added after Activation / Animation / Audio / Transform;
+/// older `*.timeline.json` files omit those variants and still deserialize.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimelineTrackKind {
     Activation,
     Animation,
     Audio,
     Transform,
+    /// Instant markers (`start` is the fire time; `end` is usually equal).
+    Signal,
+    /// Clips that activate a target and drive its PlayableDirector.
+    Control,
 }
 
 impl TimelineTrackKind {
@@ -23,6 +28,8 @@ impl TimelineTrackKind {
             "animation" => Some(Self::Animation),
             "audio" => Some(Self::Audio),
             "transform" => Some(Self::Transform),
+            "signal" => Some(Self::Signal),
+            "control" => Some(Self::Control),
             _ => None,
         }
     }
@@ -45,6 +52,12 @@ pub struct TimelineClip {
     pub from: Option<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<[f32; 2]>,
+    /// Signal marker name. Fires when the playhead crosses [`Self::start`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
+    /// Optional string sent with a signal marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<String>,
 }
 
 impl TimelineClip {
@@ -58,6 +71,8 @@ impl TimelineClip {
             volume: None,
             from: None,
             to: None,
+            signal: None,
+            payload: None,
         }
     }
 
@@ -71,6 +86,8 @@ impl TimelineClip {
             volume: None,
             from: None,
             to: None,
+            signal: None,
+            payload: None,
         }
     }
 
@@ -84,6 +101,8 @@ impl TimelineClip {
             volume: Some(volume),
             from: None,
             to: None,
+            signal: None,
+            payload: None,
         }
     }
 
@@ -97,6 +116,41 @@ impl TimelineClip {
             volume: None,
             from: Some(from),
             to: Some(to),
+            signal: None,
+            payload: None,
+        }
+    }
+
+    /// Instant signal marker. `time` is stored as both `start` and `end`.
+    pub fn signal(time: f32, name: impl Into<String>, payload: Option<&str>) -> Self {
+        let payload = payload.map(str::trim).filter(|s| !s.is_empty());
+        Self {
+            start: time,
+            end: time,
+            active: None,
+            clip: None,
+            audio: None,
+            volume: None,
+            from: None,
+            to: None,
+            signal: Some(name.into()),
+            payload: payload.map(str::to_string),
+        }
+    }
+
+    /// Control clip. The track binding is the target entity.
+    pub fn control(start: f32, end: f32) -> Self {
+        Self {
+            start,
+            end,
+            active: None,
+            clip: None,
+            audio: None,
+            volume: None,
+            from: None,
+            to: None,
+            signal: None,
+            payload: None,
         }
     }
 }
@@ -158,6 +212,7 @@ impl TimelineMeta {
                 TimelineTrackKind::Activation
                     | TimelineTrackKind::Animation
                     | TimelineTrackKind::Transform
+                    | TimelineTrackKind::Control
             );
             if needs_binding
                 && track
@@ -204,7 +259,12 @@ impl TimelineMeta {
                             );
                         }
                     }
-                    TimelineTrackKind::Activation => {}
+                    TimelineTrackKind::Signal => {
+                        if clip.signal.as_deref().unwrap_or("").trim().is_empty() {
+                            bail!("timeline track '{}' signal marker missing name", track.name);
+                        }
+                    }
+                    TimelineTrackKind::Activation | TimelineTrackKind::Control => {}
                 }
             }
         }
@@ -338,6 +398,65 @@ mod tests {
         assert_eq!(names, vec!["intro"]);
         let cat = TimelineCatalog::load_dir(&dir).unwrap();
         assert!(cat.lookup("intro").is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_timeline_json_without_signal_or_control_still_loads() {
+        let old = r#"{
+            "duration": 1.5,
+            "tracks": [{
+                "name": "GhostAppear",
+                "kind": "Activation",
+                "binding": "IntroGhost",
+                "clips": [{ "start": 0.5, "end": 1.5, "active": true }]
+            }]
+        }"#;
+        let meta: TimelineMeta = serde_json::from_str(old).unwrap();
+        meta.validate().unwrap();
+        assert_eq!(meta.tracks[0].kind, TimelineTrackKind::Activation);
+        assert!(meta.tracks[0].clips[0].signal.is_none());
+        assert!(meta.tracks[0].clips[0].payload.is_none());
+    }
+
+    #[test]
+    fn signal_and_control_roundtrip() {
+        let dir = env::temp_dir().join(format!("wiimaker-timeline-sc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let meta = TimelineMeta {
+            duration: 3.0,
+            tracks: vec![
+                TimelineTrack {
+                    name: "Cues".into(),
+                    kind: TimelineTrackKind::Signal,
+                    binding: Some("Player".into()),
+                    clips: vec![TimelineClip::signal(1.25, "IntroDone", Some("go"))],
+                },
+                TimelineTrack {
+                    name: "Sub".into(),
+                    kind: TimelineTrackKind::Control,
+                    binding: Some("Child".into()),
+                    clips: vec![TimelineClip::control(0.5, 2.0)],
+                },
+            ],
+        };
+        let (path, _) = write_timeline(&dir, "intro", meta).unwrap();
+        let loaded = TimelineMeta::load(&path).unwrap();
+        assert_eq!(loaded.tracks[0].kind, TimelineTrackKind::Signal);
+        assert_eq!(
+            loaded.tracks[0].clips[0].signal.as_deref(),
+            Some("IntroDone")
+        );
+        assert_eq!(loaded.tracks[0].clips[0].payload.as_deref(), Some("go"));
+        assert!((loaded.tracks[0].clips[0].start - 1.25).abs() < 1e-4);
+        assert_eq!(loaded.tracks[1].kind, TimelineTrackKind::Control);
+        assert_eq!(loaded.tracks[1].binding.as_deref(), Some("Child"));
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.contains("\"audio\""),
+            "unused clip fields stay omitted"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

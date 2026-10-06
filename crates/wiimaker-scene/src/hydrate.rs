@@ -781,6 +781,12 @@ fn apply_scene_director(
                 wiimaker_assets::TimelineTrackKind::Transform => {
                     wiimaker_core::TimelineTrackKind::Transform
                 }
+                wiimaker_assets::TimelineTrackKind::Signal => {
+                    wiimaker_core::TimelineTrackKind::Signal
+                }
+                wiimaker_assets::TimelineTrackKind::Control => {
+                    wiimaker_core::TimelineTrackKind::Control
+                }
             };
             let mut clips = Vec::new();
             for c in &track.clips {
@@ -800,6 +806,8 @@ fn apply_scene_director(
                     volume: c.volume.unwrap_or(1.0),
                     from: c.from.unwrap_or([0.0, 0.0]),
                     to: c.to.unwrap_or([0.0, 0.0]),
+                    signal: c.signal.clone().unwrap_or_default(),
+                    payload: c.payload.clone().unwrap_or_default(),
                 });
             }
             rt.tracks.push(TimelineTrackRuntime {

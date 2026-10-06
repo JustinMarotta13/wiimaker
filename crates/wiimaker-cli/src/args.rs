@@ -561,6 +561,23 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
+    /// Tick a PlayableDirector and report signals fired along the way (`--json`)
+    TimelineSignals {
+        game: String,
+        #[arg(long)]
+        name: String,
+        /// Seconds per tick (default 1/60)
+        #[arg(long, default_value_t = 1.0 / 60.0)]
+        dt: f32,
+        /// How many ticks to accumulate (default 1)
+        #[arg(long, default_value_t = 1)]
+        steps: u32,
+        /// Call play before ticking (default true). Restarts a finished director.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        play: bool,
+        #[arg(long)]
+        scene: Option<String>,
+    },
     /// Remove an entity from the scene (Unity Destroy / despawn)
     Despawn {
         game: String,
@@ -761,7 +778,9 @@ pub enum AssetCmd {
         /// Track `Name:Kind:Binding:start-end:payload` (repeatable).
         /// Activation payload `true|false`. Animation payload is a clip stem.
         /// Audio payload `stem` or `stem:volume`. Transform payload `x,y>x,y`.
-        /// Binding `-` is unbound.
+        /// Signal payload `SignalName` or `SignalName|text` (range is `t-t`).
+        /// Control payload is empty; binding is the target entity.
+        /// Binding `-` is unbound (Signal and Audio).
         #[arg(long = "track")]
         tracks: Vec<String>,
         /// Read a full timeline JSON from stdin
