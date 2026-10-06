@@ -4,18 +4,18 @@ use crate::world::{Animation, EntityId, World};
 
 #[cfg(feature = "std")]
 mod alloc_types {
-    pub use std::string::String;
+    pub use std::string::{String, ToString};
     pub use std::vec::Vec;
 }
 
 #[cfg(not(feature = "std"))]
 mod alloc_types {
     extern crate alloc;
-    pub use alloc::string::String;
+    pub use alloc::string::{String, ToString};
     pub use alloc::vec::Vec;
 }
 
-use alloc_types::{String, Vec};
+use alloc_types::{String, ToString, Vec};
 
 /// Track kind. Mirrors `assets/<name>.timeline.json`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
