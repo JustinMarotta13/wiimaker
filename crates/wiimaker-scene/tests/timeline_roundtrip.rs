@@ -258,3 +258,99 @@ fn readme_ghost_appear_through_scene_hydrate() {
     assert!(!world.is_active(ghost), "Stop returns to t=0, still hidden");
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn hydrate_signal_and_control_tracks() {
+    let dir = tmp_game("signal-control");
+    let mut project = GameProject::new("signal-control");
+    project.default_scene = "scenes/main.scene.json".into();
+    save_project(&dir, &project).unwrap();
+    let assets = dir.join("assets");
+    write_timeline(
+        &assets,
+        "sub",
+        TimelineMeta {
+            duration: 1.0,
+            tracks: vec![TimelineTrack {
+                name: "Cue".into(),
+                kind: TimelineTrackKind::Signal,
+                binding: Some("Child".into()),
+                clips: vec![TimelineClip::signal(0.0, "SubStart", None)],
+            }],
+        },
+    )
+    .unwrap();
+    write_timeline(
+        &assets,
+        "intro",
+        TimelineMeta {
+            duration: 3.0,
+            tracks: vec![
+                TimelineTrack {
+                    name: "Cues".into(),
+                    kind: TimelineTrackKind::Signal,
+                    binding: Some("Player".into()),
+                    clips: vec![TimelineClip::signal(0.25, "IntroDone", Some("go"))],
+                },
+                TimelineTrack {
+                    name: "Nest".into(),
+                    kind: TimelineTrackKind::Control,
+                    binding: Some("Child".into()),
+                    clips: vec![TimelineClip::control(0.5, 1.5)],
+                },
+            ],
+        },
+    )
+    .unwrap();
+
+    let mut scene = wiimaker_scene::Scene::new("main");
+    add_entity(&mut scene, "Director", &MutateOpts::default()).unwrap();
+    add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
+    add_entity(&mut scene, "Child", &MutateOpts::default()).unwrap();
+    add_component_playable_director(&mut scene, "Director", "intro", true, false).unwrap();
+    add_component_playable_director(&mut scene, "Child", "sub", false, false).unwrap();
+
+    let timelines = TimelineCatalog::load_dir(&assets).unwrap();
+    let mut world = hydrate_lenient_with_all_catalogs(
+        &scene,
+        &TextureMap::new(),
+        None,
+        None,
+        None,
+        None,
+        Some(&timelines),
+    );
+    let director = world.find_by_name("Director").unwrap();
+    let child = world.find_by_name("Child").unwrap();
+    assert_eq!(world.director(director).unwrap().tracks.len(), 2);
+    assert_eq!(
+        world.director(director).unwrap().tracks[0].kind,
+        wiimaker_core::TimelineTrackKind::Signal
+    );
+    assert_eq!(
+        world.director(director).unwrap().tracks[1].kind,
+        wiimaker_core::TimelineTrackKind::Control
+    );
+
+    world.tick_timelines(0.1);
+    assert!(world.take_timeline_signals().is_empty());
+    world.tick_timelines(0.2);
+    let signals = world.take_timeline_signals();
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].signal, "IntroDone");
+    assert_eq!(signals[0].payload, "go");
+    assert_eq!(signals[0].binding, "Player");
+    assert!(!world.is_active(child));
+
+    world.tick_timelines(0.3);
+    assert!(world.is_active(child));
+    let sub = world.director(child).unwrap();
+    assert!(sub.playing);
+    assert!(sub.time < 0.2, "nested local time {}", sub.time);
+    let nested = world.take_timeline_signals();
+    assert!(
+        nested.iter().any(|s| s.signal == "SubStart"),
+        "control clip starts the child director: {nested:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

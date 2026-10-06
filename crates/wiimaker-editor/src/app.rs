@@ -194,6 +194,16 @@ pub(crate) struct EditorApp {
     pub(crate) live_input: Input,
     /// Last Game-view letterboxed image rect (screen px) for mouse → IR.
     pub(crate) game_view_ir_rect: Option<egui::Rect>,
+    /// Timeline asset authoring drafts (session-only; asset writes are not scene undo).
+    pub(crate) tl_signal_track: String,
+    pub(crate) tl_signal_name: String,
+    pub(crate) tl_signal_payload: String,
+    pub(crate) tl_signal_binding: String,
+    pub(crate) tl_signal_time: f32,
+    pub(crate) tl_control_track: String,
+    pub(crate) tl_control_target: String,
+    pub(crate) tl_control_start: f32,
+    pub(crate) tl_control_end: f32,
 }
 
 #[derive(Clone)]
@@ -274,6 +284,15 @@ impl EditorApp {
             last_play_hit: None,
             live_input: Input::new(),
             game_view_ir_rect: None,
+            tl_signal_track: "Cues".into(),
+            tl_signal_name: "IntroDone".into(),
+            tl_signal_payload: String::new(),
+            tl_signal_binding: String::new(),
+            tl_signal_time: 0.0,
+            tl_control_track: "Control".into(),
+            tl_control_target: String::new(),
+            tl_control_start: 0.0,
+            tl_control_end: 1.0,
         };
         app.reload_assets()?;
         app.refresh_scenes();
@@ -1598,11 +1617,21 @@ impl EditorApp {
             }
             Err(e) => self.log_line(ConsoleLevel::Error, format!("play tick: {e}")),
         }
-        if !plugin {
+        let signal_lines = if plugin {
+            self.play_session
+                .as_mut()
+                .and_then(|s| s.world_mut())
+                .map(crate::ui_timeline::take_timeline_signal_lines)
+                .unwrap_or_default()
+        } else {
             let assets = self.project.assets_path(&self.game_dir);
             for err in self.host_audio.play_world(&mut self.world, &assets) {
                 self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
             }
+            crate::ui_timeline::take_timeline_signal_lines(&mut self.world)
+        };
+        for line in signal_lines {
+            self.console_push(ConsoleLevel::Info, line);
         }
     }
 
@@ -1766,6 +1795,9 @@ impl eframe::App for EditorApp {
             let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
             if self.timeline_preview {
                 self.world.tick_timelines(dt);
+                for line in crate::ui_timeline::take_timeline_signal_lines(&mut self.world) {
+                    self.console_push(ConsoleLevel::Info, line);
+                }
                 let ids: Vec<_> = self.world.iter_entities().collect();
                 for id in ids {
                     wiimaker_scene::apply_animation_frame(

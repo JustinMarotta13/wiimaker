@@ -204,3 +204,113 @@ fn director_play_on_awake_does_not_insert_audio_source() {
         "director-only entity must not gain an AudioSource"
     );
 }
+
+#[test]
+fn timeline_signal_and_control_parse_and_signals_json() {
+    let dir = tmp_game("signals");
+    let game = dir.to_str().unwrap();
+
+    let wrote = wiimaker()
+        .args([
+            "asset",
+            "timeline",
+            game,
+            "intro",
+            "--duration",
+            "2",
+            "--track",
+            "Cues:Signal:Player:0.20-0.20:IntroDone|go",
+            "--track",
+            "Nest:Control:IntroGhost:0.5-1.5:",
+            "--json",
+        ])
+        .output()
+        .expect("timeline");
+    assert!(
+        wrote.status.success(),
+        "timeline failed: {}",
+        String::from_utf8_lossy(&wrote.stderr)
+    );
+    let text = fs::read_to_string(dir.join("assets/intro.timeline.json")).unwrap();
+    assert!(text.contains("\"Signal\""), "{text}");
+    assert!(text.contains("\"Control\""), "{text}");
+    assert!(text.contains("IntroDone"), "{text}");
+    assert!(text.contains("IntroGhost"), "{text}");
+
+    let bad = wiimaker()
+        .args([
+            "asset",
+            "timeline",
+            game,
+            "nope",
+            "--track",
+            "X:Nope:Y:0-1:",
+        ])
+        .output()
+        .expect("bad kind");
+    assert!(!bad.status.success(), "unknown kind should fail");
+    let err = String::from_utf8_lossy(&bad.stderr);
+    assert!(err.contains("Signal") && err.contains("Control"), "{err}");
+
+    let add = wiimaker()
+        .args([
+            "entity",
+            "add-component",
+            game,
+            "--name",
+            "Director",
+            "PlayableDirector",
+            "--timeline",
+            "intro",
+            "--play-on-awake",
+            "true",
+            "--json",
+        ])
+        .output()
+        .expect("add");
+    assert!(
+        add.status.success(),
+        "add: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let fired = wiimaker()
+        .args([
+            "entity",
+            "timeline-signals",
+            game,
+            "--name",
+            "Director",
+            "--dt",
+            "0.25",
+            "--steps",
+            "1",
+            "--json",
+        ])
+        .output()
+        .expect("signals");
+    assert!(
+        fired.status.success(),
+        "timeline-signals: {}",
+        String::from_utf8_lossy(&fired.stderr)
+    );
+    let body = String::from_utf8_lossy(&fired.stdout);
+    assert!(body.contains("IntroDone"), "{body}");
+    assert!(body.contains("\"payload\": \"go\""), "{body}");
+    assert!(body.contains("\"binding\": \"Player\""), "{body}");
+
+    let status = wiimaker()
+        .args([
+            "entity",
+            "timeline-status",
+            game,
+            "--name",
+            "Director",
+            "--json",
+        ])
+        .output()
+        .expect("status");
+    assert!(status.status.success());
+    let body = String::from_utf8_lossy(&status.stdout);
+    assert!(body.contains("\"signals\""), "{body}");
+}

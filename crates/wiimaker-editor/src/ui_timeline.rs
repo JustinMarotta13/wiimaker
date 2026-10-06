@@ -1,7 +1,7 @@
 //! Timeline window + Playable Director transport (dark Pro).
 
 use eframe::egui::{self, Color32, Rect, RichText, Sense, Stroke, Vec2};
-use wiimaker_assets::TimelineTrackKind;
+use wiimaker_assets::{TimelineClip, TimelineMeta, TimelineTrack, TimelineTrackKind};
 use wiimaker_core::world::World;
 
 use crate::app::{EditorApp, PlayMode};
@@ -59,6 +59,18 @@ impl EditorApp {
                     id,
                 );
             }
+        }
+        let lines = if plugin {
+            self.play_session
+                .as_mut()
+                .and_then(|s| s.world_mut())
+                .map(take_timeline_signal_lines)
+                .unwrap_or_default()
+        } else {
+            take_timeline_signal_lines(&mut self.world)
+        };
+        for line in lines {
+            self.console_push(crate::app::ConsoleLevel::Info, line);
         }
     }
 
@@ -168,16 +180,51 @@ impl EditorApp {
                     Vec2::new(track_w, row_h - 2.0),
                 );
                 painter.rect_filled(lane, 0.0, theme::BG_SUNKEN);
-                for clip in &track.clips {
-                    let x0 = lane.left() + lane.width() * (clip.start / duration).clamp(0.0, 1.0);
-                    let x1 = lane.left() + lane.width() * (clip.end / duration).clamp(0.0, 1.0);
-                    let block = Rect::from_min_max(
-                        egui::pos2(x0, lane.top() + 2.0),
-                        egui::pos2(x1.max(x0 + 2.0), lane.bottom() - 2.0),
-                    );
-                    painter.rect_filled(block, 2.0, track_color(track.kind));
+                if track.kind == TimelineTrackKind::Signal {
+                    for clip in &track.clips {
+                        let x =
+                            lane.left() + lane.width() * (clip.start / duration).clamp(0.0, 1.0);
+                        let center = egui::pos2(x, lane.center().y);
+                        paint_signal_marker(&painter, center, track_color(track.kind));
+                        let label = clip.signal.as_deref().unwrap_or("");
+                        if !label.is_empty() {
+                            painter.text(
+                                center + Vec2::new(7.0, 0.0),
+                                egui::Align2::LEFT_CENTER,
+                                label,
+                                egui::FontId::proportional(10.0),
+                                theme::TEXT,
+                            );
+                        }
+                    }
+                } else {
+                    for clip in &track.clips {
+                        let x0 =
+                            lane.left() + lane.width() * (clip.start / duration).clamp(0.0, 1.0);
+                        let x1 = lane.left() + lane.width() * (clip.end / duration).clamp(0.0, 1.0);
+                        let block = Rect::from_min_max(
+                            egui::pos2(x0, lane.top() + 2.0),
+                            egui::pos2(x1.max(x0 + 2.0), lane.bottom() - 2.0),
+                        );
+                        painter.rect_filled(block, 2.0, track_color(track.kind));
+                        if track.kind == TimelineTrackKind::Control {
+                            let label = track
+                                .binding
+                                .as_deref()
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or("Control");
+                            painter.with_clip_rect(block).text(
+                                block.left_center() + Vec2::new(4.0, 0.0),
+                                egui::Align2::LEFT_CENTER,
+                                label,
+                                egui::FontId::proportional(10.0),
+                                theme::TEXT,
+                            );
+                        }
+                    }
                 }
             }
+            self.ui_timeline_authoring(ui, &stem);
         } else {
             theme::muted(ui, &format!("missing assets/{stem}.timeline.json"));
         }
@@ -245,20 +292,218 @@ impl EditorApp {
                 }
             });
             for track in &meta.tracks {
-                let binding = track.binding.as_deref().unwrap_or("—");
+                let binding = track.binding.as_deref().unwrap_or("-");
                 ui.label(
                     RichText::new(format!(
-                        "{}  {:?}  {}  ({} clips)",
+                        "{}  {}  {}  ({} clips)",
                         track.name,
-                        track.kind,
+                        kind_label(track.kind),
                         binding,
                         track.clips.len()
                     ))
                     .size(12.0)
                     .color(theme::TEXT),
                 );
+                if track.kind == TimelineTrackKind::Signal {
+                    for clip in &track.clips {
+                        let payload = clip.payload.as_deref().unwrap_or("");
+                        let extra = if payload.is_empty() {
+                            String::new()
+                        } else {
+                            format!("  {payload}")
+                        };
+                        ui.label(
+                            RichText::new(format!(
+                                "    {:.2}  {}{extra}",
+                                clip.start,
+                                clip.signal.as_deref().unwrap_or("Signal")
+                            ))
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
+                        );
+                    }
+                }
             }
+            self.ui_timeline_authoring(ui, &stem);
         });
+    }
+
+    fn ui_timeline_authoring(&mut self, ui: &mut egui::Ui, stem: &str) {
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Add Signal Marker")
+                .size(12.0)
+                .color(theme::TEXT_MUTED),
+        );
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Track").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tl_signal_track)
+                    .desired_width(72.0)
+                    .hint_text("Cues"),
+            );
+            ui.label(RichText::new("Signal").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tl_signal_name)
+                    .desired_width(88.0)
+                    .hint_text("IntroDone"),
+            );
+            ui.label(RichText::new("Payload").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tl_signal_payload)
+                    .desired_width(64.0)
+                    .hint_text("optional"),
+            );
+            ui.label(RichText::new("On").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tl_signal_binding)
+                    .desired_width(72.0)
+                    .hint_text("entity"),
+            );
+            ui.label(RichText::new("Time").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::DragValue::new(&mut self.tl_signal_time)
+                    .speed(0.01)
+                    .range(0.0..=600.0),
+            );
+        });
+        if ui
+            .add(
+                egui::Button::new(RichText::new("Add Signal Marker").color(theme::TEXT))
+                    .fill(theme::BG_RAISED),
+            )
+            .clicked()
+        {
+            self.commit_signal_marker(stem);
+        }
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Add Control Clip")
+                .size(12.0)
+                .color(theme::TEXT_MUTED),
+        );
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Track").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tl_control_track)
+                    .desired_width(72.0)
+                    .hint_text("Control"),
+            );
+            ui.label(RichText::new("Target").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tl_control_target)
+                    .desired_width(88.0)
+                    .hint_text("entity"),
+            );
+            ui.label(RichText::new("Start").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::DragValue::new(&mut self.tl_control_start)
+                    .speed(0.01)
+                    .range(0.0..=600.0),
+            );
+            ui.label(RichText::new("End").color(theme::TEXT_MUTED));
+            ui.add(
+                egui::DragValue::new(&mut self.tl_control_end)
+                    .speed(0.01)
+                    .range(0.0..=600.0),
+            );
+        });
+        if ui
+            .add(
+                egui::Button::new(RichText::new("Add Control Clip").color(theme::TEXT))
+                    .fill(theme::BG_RAISED),
+            )
+            .clicked()
+        {
+            self.commit_control_clip(stem);
+        }
+    }
+
+    fn commit_signal_marker(&mut self, stem: &str) {
+        let track_name = self.tl_signal_track.trim().to_string();
+        let signal = self.tl_signal_name.trim().to_string();
+        if track_name.is_empty() || signal.is_empty() {
+            self.status = "signal marker needs a track name and a signal name".into();
+            return;
+        }
+        let time = self.tl_signal_time.max(0.0);
+        let payload = {
+            let p = self.tl_signal_payload.trim();
+            if p.is_empty() {
+                None
+            } else {
+                Some(p.to_string())
+            }
+        };
+        let binding = {
+            let b = self.tl_signal_binding.trim();
+            if b.is_empty() || b == "-" {
+                None
+            } else {
+                Some(b.to_string())
+            }
+        };
+        let Some(mut meta) = self.timeline_catalog.lookup(stem).cloned() else {
+            self.status = format!("missing assets/{stem}.timeline.json");
+            return;
+        };
+        let clip = TimelineClip::signal(time, signal.clone(), payload.as_deref());
+        push_clip(
+            &mut meta,
+            TimelineTrack {
+                name: track_name,
+                kind: TimelineTrackKind::Signal,
+                binding,
+                clips: vec![clip],
+            },
+        );
+        self.save_timeline_meta(stem, meta);
+    }
+
+    fn commit_control_clip(&mut self, stem: &str) {
+        let track_name = self.tl_control_track.trim().to_string();
+        let target = self.tl_control_target.trim().to_string();
+        if track_name.is_empty() || target.is_empty() || target == "-" {
+            self.status = "control clip needs a track name and a target entity".into();
+            return;
+        }
+        let start = self.tl_control_start.max(0.0);
+        let end = self.tl_control_end.max(0.0);
+        if end < start {
+            self.status = "control clip end is before start".into();
+            return;
+        }
+        let Some(mut meta) = self.timeline_catalog.lookup(stem).cloned() else {
+            self.status = format!("missing assets/{stem}.timeline.json");
+            return;
+        };
+        push_clip(
+            &mut meta,
+            TimelineTrack {
+                name: track_name,
+                kind: TimelineTrackKind::Control,
+                binding: Some(target),
+                clips: vec![TimelineClip::control(start, end)],
+            },
+        );
+        self.save_timeline_meta(stem, meta);
+    }
+
+    fn save_timeline_meta(&mut self, stem: &str, meta: TimelineMeta) {
+        let rel = std::path::PathBuf::from(format!("assets/{stem}.timeline.json"));
+        let path = self.game_dir.join(&rel);
+        if let Err(e) = meta.save(&path) {
+            self.status = format!("timeline save: {e}");
+            return;
+        }
+        if let Err(e) = self.reload_assets() {
+            self.status = format!("timeline reload: {e}");
+            return;
+        }
+        if self.play_mode == PlayMode::Edit {
+            self.rehydrate();
+        }
+        self.status = format!("saved {stem}.timeline.json");
     }
 
     fn live_director_time(&self, name: Option<&str>) -> Option<(f32, bool)> {
@@ -277,11 +522,74 @@ impl EditorApp {
     }
 }
 
+fn kind_label(kind: TimelineTrackKind) -> &'static str {
+    match kind {
+        TimelineTrackKind::Activation => "Activation",
+        TimelineTrackKind::Animation => "Animation",
+        TimelineTrackKind::Audio => "Audio",
+        TimelineTrackKind::Transform => "Transform",
+        TimelineTrackKind::Signal => "Signal",
+        TimelineTrackKind::Control => "Control",
+    }
+}
+
 fn track_color(kind: TimelineTrackKind) -> Color32 {
     match kind {
         TimelineTrackKind::Activation => Color32::from_rgb(76, 140, 196),
         TimelineTrackKind::Animation => Color32::from_rgb(196, 140, 64),
         TimelineTrackKind::Audio => Color32::from_rgb(72, 150, 110),
         TimelineTrackKind::Transform => Color32::from_rgb(150, 110, 186),
+        TimelineTrackKind::Signal => Color32::from_rgb(220, 196, 96),
+        TimelineTrackKind::Control => Color32::from_rgb(70, 158, 168),
     }
+}
+
+fn paint_signal_marker(painter: &egui::Painter, center: egui::Pos2, color: Color32) {
+    let r = 5.0;
+    let pts = vec![
+        egui::pos2(center.x, center.y - r),
+        egui::pos2(center.x + r * 0.72, center.y),
+        egui::pos2(center.x, center.y + r),
+        egui::pos2(center.x - r * 0.72, center.y),
+    ];
+    painter.add(egui::Shape::convex_polygon(
+        pts,
+        color,
+        Stroke::new(1.0_f32, Color32::from_rgb(236, 232, 214)),
+    ));
+}
+
+fn push_clip(meta: &mut TimelineMeta, track: TimelineTrack) {
+    if let Some(existing) = meta
+        .tracks
+        .iter_mut()
+        .find(|t| t.name == track.name && t.kind == track.kind && t.binding == track.binding)
+    {
+        existing.clips.extend(track.clips);
+    } else {
+        meta.tracks.push(track);
+    }
+}
+
+/// Drain fired signals into Console lines. Empty when nothing crossed this frame.
+pub(crate) fn take_timeline_signal_lines(world: &mut World) -> Vec<String> {
+    world
+        .take_timeline_signals()
+        .into_iter()
+        .map(|s| {
+            let who = if s.binding.is_empty() {
+                "unbound".to_string()
+            } else {
+                s.binding
+            };
+            if s.payload.is_empty() {
+                format!("signal {} @ {:.3} ({who})", s.signal, s.time)
+            } else {
+                format!(
+                    "signal {} @ {:.3} ({who}) · {}",
+                    s.signal, s.time, s.payload
+                )
+            }
+        })
+        .collect()
 }

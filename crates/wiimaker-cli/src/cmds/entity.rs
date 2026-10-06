@@ -7,28 +7,34 @@ use wiimaker_scene::{
     add_component_camera, add_component_collider, add_component_disc, add_component_follow,
     add_component_grid_mover, add_component_playable_director, add_component_sprite,
     add_component_text, add_component_tilemap, add_entity, apply_instance_fields_to_prefab,
-    apply_instance_to_base, apply_prefab, apply_prefab_scene_inherit, apply_variant_override_to_base,
-    apply_variant_override_to_base_in_scene, attach_prefab_instance, create_prefab_variant,
-    duplicate_entity, entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered,
-    find_game_dir, instantiate_prefab, load_prefab, load_prefab_for_instance,
-    normalize_prefab_source, plan_prefab_scene_inherit, prefab_chain_status, prefab_tree_overrides,
-    refresh_variant_overrides, remove_component_animation, remove_component_animator,
-    remove_component_audio_source, remove_component_camera, remove_component_collider,
-    remove_component_disc, remove_component_follow, remove_component_grid_mover,
-    remove_component_playable_director, remove_component_sprite, remove_component_text,
-    remove_component_tilemap, remove_entity, rename_entity, resolve_prefab, resolve_prefab_asset,
-    revert_prefab_instance, save_prefab, save_scene, set_component_enabled, set_entity_anim,
-    set_entity_animator_bool, set_entity_animator_float, set_entity_audio_source,
-    set_entity_controller, set_entity_follow, set_entity_grid_mover, set_entity_parent,
-    set_entity_playable_director, set_entity_rotation_z, set_entity_scale, set_entity_sorting,
-    set_entity_sprite_pivot, set_entity_text, set_entity_transform, unpack_prefab_instance,
-    variant_from_instance, ApplyBaseTarget, MutateOpts, Scene, SceneColliderKind, SceneDir,
-    SceneTextAlign,
+    apply_instance_to_base, apply_prefab, apply_prefab_scene_inherit,
+    apply_variant_override_to_base, apply_variant_override_to_base_in_scene,
+    attach_prefab_instance, create_prefab_variant, duplicate_entity, entities_overlap,
+    entity_overlaps, entity_to_prefab, entity_triggers_entered, find_game_dir, instantiate_prefab,
+    load_prefab, load_prefab_for_instance, normalize_prefab_source, plan_prefab_scene_inherit,
+    prefab_chain_status, prefab_tree_overrides, refresh_variant_overrides,
+    remove_component_animation, remove_component_animator, remove_component_audio_source,
+    remove_component_camera, remove_component_collider, remove_component_disc,
+    remove_component_follow, remove_component_grid_mover, remove_component_playable_director,
+    remove_component_sprite, remove_component_text, remove_component_tilemap, remove_entity,
+    rename_entity, resolve_prefab, resolve_prefab_asset, revert_prefab_instance, save_prefab,
+    save_scene, set_component_enabled, set_entity_anim, set_entity_animator_bool,
+    set_entity_animator_float, set_entity_audio_source, set_entity_controller, set_entity_follow,
+    set_entity_grid_mover, set_entity_parent, set_entity_playable_director, set_entity_rotation_z,
+    set_entity_scale, set_entity_sorting, set_entity_sprite_pivot, set_entity_text,
+    set_entity_transform, unpack_prefab_instance, variant_from_instance, ApplyBaseTarget,
+    MutateOpts, Scene, SceneColliderKind, SceneDir, SceneTextAlign,
 };
 
 use crate::args::EntityCmd;
 use crate::cmds::scene::open_scene;
 use crate::util::emit_ok;
+
+struct SignalQuery {
+    dt: f32,
+    steps: u32,
+    play: bool,
+}
 
 fn timeline_transport(
     root: &Path,
@@ -38,6 +44,7 @@ fn timeline_transport(
     json: bool,
     play: bool,
     stop: bool,
+    signals: Option<SignalQuery>,
 ) -> Result<()> {
     let (gd, project, _path, sc) = open_scene(root, game, scene)?;
     let ent = sc
@@ -63,14 +70,37 @@ fn timeline_transport(
     let id = world
         .find_by_name(name)
         .ok_or_else(|| anyhow::anyhow!("entity '{name}' missing after hydrate"))?;
-    if play {
+    let mut fired = Vec::new();
+    if let Some(q) = signals {
+        if q.play {
+            world.play_timeline(id);
+        }
+        let steps = q.steps.max(1);
+        for _ in 0..steps {
+            world.tick_timelines(q.dt);
+            fired.extend(world.take_timeline_signals());
+        }
+    } else if play {
         world.play_timeline(id);
+        fired.extend(world.take_timeline_signals());
     } else if stop {
         world.stop_timeline(id);
+        fired.extend(world.take_timeline_signals());
+    } else {
+        fired.extend(world.take_timeline_signals());
     }
     let d = world
         .director(id)
         .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no runtime PlayableDirector"))?;
+    #[derive(Serialize)]
+    struct SignalOut {
+        director: String,
+        timeline: String,
+        signal: String,
+        payload: String,
+        binding: String,
+        time: f32,
+    }
     #[derive(Serialize)]
     struct Out {
         ok: bool,
@@ -83,7 +113,20 @@ fn timeline_transport(
         play_on_awake: bool,
         #[serde(rename = "loop")]
         loop_: bool,
+        signals: Vec<SignalOut>,
     }
+    let signals_out: Vec<SignalOut> = fired
+        .into_iter()
+        .map(|s| SignalOut {
+            director: s.director,
+            timeline: s.timeline,
+            signal: s.signal,
+            payload: s.payload,
+            binding: s.binding,
+            time: s.time,
+        })
+        .collect();
+    let signal_n = signals_out.len();
     let out = Out {
         ok: true,
         name: name.to_string(),
@@ -93,14 +136,28 @@ fn timeline_transport(
         finished: d.finished,
         play_on_awake: scene_d.play_on_awake,
         loop_: scene_d.loop_,
+        signals: signals_out,
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
         println!(
-            "{name}: timeline={} time={:.3} playing={} finished={}",
+            "{name}: timeline={} time={:.3} playing={} finished={} signals={signal_n}",
             out.timeline, out.time, out.playing, out.finished
         );
+        for sig in &out.signals {
+            if sig.payload.is_empty() {
+                println!(
+                    "  signal {} @ {:.3} on {}",
+                    sig.signal, sig.time, sig.binding
+                );
+            } else {
+                println!(
+                    "  signal {} @ {:.3} on {} · {}",
+                    sig.signal, sig.time, sig.binding, sig.payload
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -798,15 +855,53 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             }
             Ok(())
         }
-        EntityCmd::TimelinePlay { game, name, scene } => {
-            timeline_transport(root, &game, &name, scene.as_deref(), json, true, false)
-        }
-        EntityCmd::TimelineStop { game, name, scene } => {
-            timeline_transport(root, &game, &name, scene.as_deref(), json, false, true)
-        }
-        EntityCmd::TimelineStatus { game, name, scene } => {
-            timeline_transport(root, &game, &name, scene.as_deref(), json, false, false)
-        }
+        EntityCmd::TimelinePlay { game, name, scene } => timeline_transport(
+            root,
+            &game,
+            &name,
+            scene.as_deref(),
+            json,
+            true,
+            false,
+            None,
+        ),
+        EntityCmd::TimelineStop { game, name, scene } => timeline_transport(
+            root,
+            &game,
+            &name,
+            scene.as_deref(),
+            json,
+            false,
+            true,
+            None,
+        ),
+        EntityCmd::TimelineStatus { game, name, scene } => timeline_transport(
+            root,
+            &game,
+            &name,
+            scene.as_deref(),
+            json,
+            false,
+            false,
+            None,
+        ),
+        EntityCmd::TimelineSignals {
+            game,
+            name,
+            dt,
+            steps,
+            play,
+            scene,
+        } => timeline_transport(
+            root,
+            &game,
+            &name,
+            scene.as_deref(),
+            json,
+            false,
+            false,
+            Some(SignalQuery { dt, steps, play }),
+        ),
         EntityCmd::Despawn { game, name, scene } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             remove_entity(&mut sc, &name)?;

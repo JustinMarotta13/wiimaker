@@ -557,7 +557,9 @@ fn parse_timeline_flags(duration: f32, tracks: &[String]) -> Result<TimelineMeta
             anyhow::bail!("--track '{spec}' needs Name:Kind:Binding:start-end:payload");
         }
         let kind = TimelineTrackKind::parse(kind_s).ok_or_else(|| {
-            anyhow::anyhow!("--track '{spec}' kind must be Activation|Animation|Audio|Transform")
+            anyhow::anyhow!(
+                "--track '{spec}' kind must be Activation|Animation|Audio|Transform|Signal|Control"
+            )
         })?;
         let (start_s, end_s) = range.split_once('-').ok_or_else(|| {
             anyhow::anyhow!("--track '{spec}' range must be start-end (e.g. 0.5-4)")
@@ -611,6 +613,18 @@ fn parse_timeline_flags(duration: f32, tracks: &[String]) -> Result<TimelineMeta
                 })?;
                 TimelineClip::transform(start, end, parse_xy(from_s)?, parse_xy(to_s)?)
             }
+            TimelineTrackKind::Signal => {
+                let (name, extra) = payload.split_once('|').unwrap_or((payload, ""));
+                if name.trim().is_empty() {
+                    anyhow::bail!(
+                        "--track '{spec}' signal payload is SignalName or SignalName|text (range is t-t)"
+                    );
+                }
+                let extra = extra.trim();
+                let payload = if extra.is_empty() { None } else { Some(extra) };
+                TimelineClip::signal(start, name.trim(), payload)
+            }
+            TimelineTrackKind::Control => TimelineClip::control(start, end),
         };
         if let Some(existing) = out
             .iter_mut()
