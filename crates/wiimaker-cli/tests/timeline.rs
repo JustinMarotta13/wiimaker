@@ -503,7 +503,10 @@ fn timeline_curve_add_key_accepts_negative_value() {
         String::from_utf8_lossy(&add.stderr)
     );
     let body = String::from_utf8_lossy(&add.stdout);
-    assert!(body.contains("\"v\": -40.0") || body.contains("\"v\": -40"), "{body}");
+    assert!(
+        body.contains("\"v\": -40.0") || body.contains("\"v\": -40"),
+        "{body}"
+    );
 
     let sample = wiimaker()
         .args([
@@ -535,6 +538,99 @@ fn timeline_curve_add_key_accepts_negative_value() {
     let body = String::from_utf8_lossy(&sample.stdout);
     assert!(
         body.contains("\"v\": -40.0") || body.contains("\"v\": -40"),
+        "{body}"
+    );
+}
+
+#[test]
+fn timeline_curve_add_key_same_t_reports_replaced() {
+    let dir = tmp_game("replace");
+    let game = dir.to_str().unwrap();
+    let wrote = wiimaker()
+        .args([
+            "asset",
+            "timeline",
+            game,
+            "intro",
+            "--duration",
+            "4",
+            "--track",
+            "PacSwoop:Transform:MainCamera:0-2:0,0>10,0",
+            "--json",
+        ])
+        .output()
+        .expect("timeline");
+    assert!(
+        wrote.status.success(),
+        "timeline: {}",
+        String::from_utf8_lossy(&wrote.stderr)
+    );
+
+    let first = wiimaker()
+        .args([
+            "asset",
+            "timeline-curve",
+            "add-key",
+            game,
+            "--timeline",
+            "intro",
+            "--track",
+            "PacSwoop",
+            "--prop",
+            "x",
+            "--t",
+            "0",
+            "--v",
+            "-40",
+            "--json",
+        ])
+        .output()
+        .expect("add-key");
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let body = String::from_utf8_lossy(&first.stdout);
+    assert!(body.contains("\"replaced\": false"), "{body}");
+
+    let again = wiimaker()
+        .args([
+            "asset",
+            "timeline-curve",
+            "add-key",
+            game,
+            "--timeline",
+            "intro",
+            "--track",
+            "PacSwoop",
+            "--prop",
+            "x",
+            "--t",
+            "0.0001",
+            "--v",
+            "5",
+            "--interp",
+            "ease",
+            "--json",
+        ])
+        .output()
+        .expect("replace");
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    let body = String::from_utf8_lossy(&again.stdout);
+    assert!(body.contains("\"replaced\": true"), "{body}");
+    assert!(body.contains("\"interp\": \"ease\""), "{body}");
+    assert_eq!(
+        body.matches("\"interp\"").count(),
+        1,
+        "same t must not insert a second key: {body}"
+    );
+    assert!(
+        body.contains("\"v\": 5.0") || body.contains("\"v\": 5"),
         "{body}"
     );
 }
