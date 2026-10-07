@@ -872,6 +872,7 @@ fn print_curve_edit(json: bool, timeline: &str, path: &Path, edit: &CurveEdit) -
             clip: usize,
             prop: String,
             index: Option<usize>,
+            replaced: bool,
             keys: Vec<KeyOut>,
         }
         println!(
@@ -884,6 +885,7 @@ fn print_curve_edit(json: bool, timeline: &str, path: &Path, edit: &CurveEdit) -
                 clip: edit.clip,
                 prop: edit.prop.as_str().to_string(),
                 index: edit.index,
+                replaced: edit.replaced,
                 keys: edit
                     .keys
                     .iter()
@@ -896,8 +898,9 @@ fn print_curve_edit(json: bool, timeline: &str, path: &Path, edit: &CurveEdit) -
             })?
         );
     } else {
+        let note = if edit.replaced { " replaced" } else { "" };
         println!(
-            "{} clip {} {} ({} keys)",
+            "{} clip {} {} ({} keys){note}",
             edit.track,
             edit.clip,
             edit.prop.as_str(),

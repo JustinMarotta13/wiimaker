@@ -1078,12 +1078,8 @@ fn paint_curve_lane(
         paint_key_diamond(&painter, center, color, sel);
     }
     let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
-    let hit = pointer.and_then(|pos| {
-        positions
-            .iter()
-            .find(|(_, c)| c.distance(pos) <= 7.0)
-            .map(|(i, _)| *i)
-    });
+    let live = pointer.map(|pos| curve_lane_pointer(pos, block, clip.span(), &positions));
+    let hit = live.and_then(|m| m.index);
     if let Some(p) = prop {
         if resp.clicked_by(PointerButton::Primary) {
             if let Some(index) = hit {
@@ -1106,13 +1102,7 @@ fn paint_curve_lane(
                 })
             });
             if let (Some(index), Some(pos)) = (index, resp.interact_pointer_pos()) {
-                let span = clip.span();
-                let u = if block.width() <= 1.0 {
-                    0.0
-                } else {
-                    ((pos.x - block.left()) / block.width()).clamp(0.0, 1.0)
-                };
-                let t = (span * u).clamp(0.0, span);
+                let t = curve_lane_pointer(pos, block, clip.span(), &positions).t;
                 let v = y_to_value(pos.y, lo, hi, block);
                 edits.push(CurveUiEdit::Select(TlCurveKeySel {
                     track: track.name.clone(),
@@ -1133,9 +1123,47 @@ fn paint_curve_lane(
             }
         }
     }
+    // The context menu lives on the popup layer, so interact/hover on this lane
+    // are None for every frame the menu is open. Capture at the right-click.
+    let menu_id = ui.make_persistent_id((
+        "curve-lane-menu",
+        track.name.as_str(),
+        clip_i,
+        prop.map(|p| p.as_str()).unwrap_or(""),
+    ));
+    if resp.secondary_clicked() {
+        let pos = resp
+            .interact_pointer_pos()
+            .or(resp.hover_pos())
+            .or_else(|| ui.input(|i| i.pointer.interact_pos()));
+        if let Some(pos) = pos {
+            let mapped = curve_lane_pointer(pos, block, clip.span(), &positions);
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(
+                    menu_id,
+                    CurveLaneMenuCapture {
+                        pos,
+                        hit: mapped.index,
+                    },
+                );
+            });
+            if let (Some(p), Some(index)) = (prop, mapped.index) {
+                edits.push(CurveUiEdit::Select(TlCurveKeySel {
+                    track: track.name.clone(),
+                    clip: clip_i,
+                    prop: p.as_str().to_string(),
+                    index,
+                }));
+            }
+        }
+    }
     let track_name = track.name.clone();
     let kind = track.kind;
     resp.context_menu(|ui| {
+        let captured = ui
+            .ctx()
+            .data(|data| data.get_temp::<CurveLaneMenuCapture>(menu_id));
+        let hit = captured.and_then(|c| c.hit);
         ui.style_mut().visuals.widgets.inactive.weak_bg_fill = theme::BG_RAISED;
         if let Some(p) = prop {
             if let Some(index) = hit {
@@ -1168,15 +1196,8 @@ fn paint_curve_lane(
                 });
             }
             if ui.button("Add Key").clicked() {
-                let local = pointer
-                    .map(|pos| {
-                        let u = if block.width() <= 1.0 {
-                            0.0
-                        } else {
-                            ((pos.x - block.left()) / block.width()).clamp(0.0, 1.0)
-                        };
-                        clip.span() * u
-                    })
+                let local = captured
+                    .map(|c| curve_lane_pointer(c.pos, block, clip.span(), &[]).t)
                     .unwrap_or(0.0);
                 let v = sample_clip_prop(Some(clip), p, local).unwrap_or(0.0);
                 edits.push(CurveUiEdit::AddKey {
@@ -1225,6 +1246,49 @@ fn paint_curve_lane(
     });
 }
 
+/// Diamond hit radius in screen pixels.
+const KEY_HIT_RADIUS: f32 = 7.0;
+
+/// Pointer captured when the lane context menu opens.
+/// The popup covers the lane, so later frames cannot read hover position.
+#[derive(Clone, Copy)]
+struct CurveLaneMenuCapture {
+    pos: egui::Pos2,
+    hit: Option<usize>,
+}
+
+/// Clip-local time and the key under a pointer in the curve lane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CurveLanePointer {
+    t: f32,
+    index: Option<usize>,
+}
+
+/// Map a screen pointer to clip-local time and the key diamond under it.
+///
+/// Time uses x only (`0` at `block.left()`, `span` at `block.right()`).
+/// A key hits when its center is within [`KEY_HIT_RADIUS`].
+fn curve_lane_pointer(
+    pos: egui::Pos2,
+    block: Rect,
+    span: f32,
+    key_centers: &[(usize, egui::Pos2)],
+) -> CurveLanePointer {
+    let u = if block.width() <= 1.0 {
+        0.0
+    } else {
+        ((pos.x - block.left()) / block.width()).clamp(0.0, 1.0)
+    };
+    let index = key_centers
+        .iter()
+        .find(|(_, center)| center.distance(pos) <= KEY_HIT_RADIUS)
+        .map(|(i, _)| *i);
+    CurveLanePointer {
+        t: span.max(0.0) * u,
+        index,
+    }
+}
+
 fn value_range(keys: &[CurveKey]) -> (f32, f32) {
     if keys.is_empty() {
         return (-1.0, 1.0);
@@ -1267,4 +1331,46 @@ fn paint_key_diamond(painter: &egui::Painter, center: egui::Pos2, color: Color32
         Stroke::new(1.0_f32, Color32::from_rgb(20, 20, 20))
     };
     painter.add(egui::Shape::convex_polygon(pts, color, stroke));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn block() -> Rect {
+        Rect::from_min_max(egui::pos2(100.0, 10.0), egui::pos2(300.0, 70.0))
+    }
+
+    #[test]
+    fn curve_lane_pointer_maps_x_to_time_and_hit_index() {
+        let block = block();
+        let span = 1.0;
+        // 30% across a 200px clip → clip-local t = 0.3 (the host-GUI miss was t = 0).
+        let at = curve_lane_pointer(egui::pos2(160.0, 40.0), block, span, &[]);
+        assert!((at.t - 0.3).abs() < 1e-5, "t={}", at.t);
+        assert_eq!(at.index, None);
+
+        let key = (2usize, egui::pos2(160.0, 40.0));
+        let on_key = curve_lane_pointer(egui::pos2(160.0, 40.0), block, span, &[key]);
+        assert_eq!(on_key.index, Some(2));
+        assert!((on_key.t - 0.3).abs() < 1e-5);
+
+        let near = curve_lane_pointer(egui::pos2(166.0, 40.0), block, span, &[key]);
+        assert_eq!(near.index, Some(2));
+        let miss = curve_lane_pointer(egui::pos2(168.0, 40.0), block, span, &[key]);
+        assert_eq!(miss.index, None);
+
+        let left = curve_lane_pointer(egui::pos2(40.0, 90.0), block, span, &[key]);
+        assert!((left.t - 0.0).abs() < 1e-6);
+        let right = curve_lane_pointer(egui::pos2(480.0, 0.0), block, 2.0, &[]);
+        assert!((right.t - 2.0).abs() < 1e-6);
+
+        // Y does not change time.
+        let high = curve_lane_pointer(egui::pos2(160.0, 0.0), block, span, &[]);
+        assert!((high.t - 0.3).abs() < 1e-5);
+
+        let thin = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 20.0));
+        let flat = curve_lane_pointer(egui::pos2(0.5, 10.0), thin, 2.0, &[]);
+        assert!((flat.t - 0.0).abs() < 1e-6);
+    }
 }

@@ -42,7 +42,12 @@ pub struct CurveEdit {
     pub prop: CurveProp,
     pub index: Option<usize>,
     pub keys: Vec<CurveKey>,
+    /// `add-key` replaced a key within `|Δt| <= 1e-4` instead of inserting another.
+    pub replaced: bool,
 }
+
+/// Two keys at this clip-local separation are the same time.
+const KEY_T_MATCH: f32 = 1e-4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CurveSample {
@@ -113,10 +118,29 @@ fn finish(
         prop,
         index,
         keys,
+        replaced: false,
     }
 }
 
+/// Index of the key closest to `t` when one sits within [`KEY_T_MATCH`].
+fn matching_key_index(keys: &[CurveKey], t: f32) -> Option<usize> {
+    keys.iter()
+        .enumerate()
+        .filter(|(_, k)| (k.t - t).abs() <= KEY_T_MATCH)
+        .min_by(|(_, a), (_, b)| {
+            (a.t - t)
+                .abs()
+                .partial_cmp(&(b.t - t).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(i, _)| i)
+}
+
 /// Insert a key. Creates the curve array when it is missing. Keys are re-sorted.
+///
+/// A key already within `|Δt| <= 1e-4` is not duplicated: its value and interp
+/// are replaced and [`CurveEdit::replaced`] is true. The stored time stays the
+/// existing key's `t`.
 pub fn curve_add_key(
     meta: &mut TimelineMeta,
     track: &str,
@@ -133,18 +157,31 @@ pub fn curve_add_key(
         .ok_or_else(|| anyhow::anyhow!("track '{track}' has no clip {clip_i}"))?;
     let curves = ensure_curves(clip);
     let list = slot(curves, prop);
-    let key = CurveKey { t, v, interp };
+    let mut replaced = false;
     match list {
-        Some(keys) => keys.push(key),
-        None => *list = Some(vec![key]),
+        Some(keys) => {
+            if let Some(i) = matching_key_index(keys, t) {
+                keys[i].v = v;
+                keys[i].interp = interp;
+                replaced = true;
+            } else {
+                keys.push(CurveKey { t, v, interp });
+            }
+        }
+        None => *list = Some(vec![CurveKey { t, v, interp }]),
     }
     let keys = slot(curves, prop).as_mut().unwrap();
     sort_curve_keys(keys);
-    let index = keys
-        .iter()
-        .rposition(|k| (k.t - t).abs() < 1e-5 && (k.v - v).abs() < 1e-5)
-        .unwrap_or(0);
-    Ok(finish(meta, track_i, clip_i, prop, Some(index)))
+    let index = if replaced {
+        matching_key_index(keys, t).unwrap_or(0)
+    } else {
+        keys.iter()
+            .rposition(|k| (k.t - t).abs() < 1e-5 && (k.v - v).abs() < 1e-5)
+            .unwrap_or(0)
+    };
+    let mut edit = finish(meta, track_i, clip_i, prop, Some(index));
+    edit.replaced = replaced;
+    Ok(edit)
 }
 
 /// Remove by index, or by clip-local time when `index` is `None`.
@@ -563,5 +600,60 @@ mod tests {
         assert!((samples[2].v - 10.0).abs() < 1e-4);
         let y = curve_sample(&meta, "Slide", 0, CurveProp::Y, 1.0, 1.0, 1).unwrap();
         assert!((y[0].v - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn add_key_same_t_replaces_value_and_interp() {
+        let mut meta = slide();
+        let first = curve_add_key(
+            &mut meta,
+            "Slide",
+            0,
+            CurveProp::X,
+            0.0,
+            -40.0,
+            CurveInterp::Linear,
+        )
+        .unwrap();
+        assert!(!first.replaced);
+        assert_eq!(first.keys.len(), 1);
+        assert!((first.keys[0].t - 0.0).abs() < 1e-6);
+
+        let replaced = curve_add_key(
+            &mut meta,
+            "Slide",
+            0,
+            CurveProp::X,
+            1e-4,
+            12.0,
+            CurveInterp::Ease,
+        )
+        .unwrap();
+        assert!(replaced.replaced);
+        assert_eq!(replaced.index, Some(0));
+        assert_eq!(replaced.keys.len(), 1);
+        assert!(
+            (replaced.keys[0].t - 0.0).abs() < 1e-6,
+            "stored t stays the existing key"
+        );
+        assert!((replaced.keys[0].v - 12.0).abs() < 1e-6);
+        assert_eq!(replaced.keys[0].interp, CurveInterp::Ease);
+
+        let inserted = curve_add_key(
+            &mut meta,
+            "Slide",
+            0,
+            CurveProp::X,
+            1e-4 + 1e-5,
+            3.0,
+            CurveInterp::Constant,
+        )
+        .unwrap();
+        assert!(!inserted.replaced);
+        assert_eq!(inserted.keys.len(), 2);
+        assert!(inserted
+            .keys
+            .iter()
+            .any(|k| (k.t - (1e-4 + 1e-5)).abs() < 1e-6 && (k.v - 3.0).abs() < 1e-6));
     }
 }

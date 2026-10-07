@@ -827,6 +827,9 @@ pub enum AssetCmd {
 #[derive(Subcommand, Debug)]
 pub enum TimelineCurveCmd {
     /// Insert a key. Creates the curve when it is missing.
+    /// If a key already exists at this clip-local t (|Δt| <= 1e-4), its value
+    /// and interp are replaced instead of inserting a duplicate. `--json` then
+    /// sets `"replaced": true` (false when a new key is inserted).
     AddKey {
         game: String,
         #[arg(long)]
