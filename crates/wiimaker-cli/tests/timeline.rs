@@ -452,3 +452,89 @@ fn timeline_curve_add_key_sample_and_status_pose() {
     assert!(body.contains("MainCamera"), "{body}");
     assert!(body.contains("\"x\":"), "{body}");
 }
+
+#[test]
+fn timeline_curve_add_key_accepts_negative_value() {
+    let dir = tmp_game("neg");
+    let game = dir.to_str().unwrap();
+    let wrote = wiimaker()
+        .args([
+            "asset",
+            "timeline",
+            game,
+            "intro",
+            "--duration",
+            "4",
+            "--track",
+            "PacSwoop:Transform:MainCamera:0-2:0,0>10,0",
+            "--json",
+        ])
+        .output()
+        .expect("timeline");
+    assert!(
+        wrote.status.success(),
+        "timeline: {}",
+        String::from_utf8_lossy(&wrote.stderr)
+    );
+
+    let add = wiimaker()
+        .args([
+            "asset",
+            "timeline-curve",
+            "add-key",
+            game,
+            "--timeline",
+            "intro",
+            "--track",
+            "PacSwoop",
+            "--prop",
+            "x",
+            "--t",
+            "0",
+            "--v",
+            "-40",
+            "--json",
+        ])
+        .output()
+        .expect("add-key");
+    assert!(
+        add.status.success(),
+        "add-key: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let body = String::from_utf8_lossy(&add.stdout);
+    assert!(body.contains("\"v\": -40.0") || body.contains("\"v\": -40"), "{body}");
+
+    let sample = wiimaker()
+        .args([
+            "asset",
+            "timeline-curve",
+            "sample",
+            game,
+            "--timeline",
+            "intro",
+            "--track",
+            "PacSwoop",
+            "--prop",
+            "x",
+            "--from",
+            "0",
+            "--to",
+            "0",
+            "--steps",
+            "1",
+            "--json",
+        ])
+        .output()
+        .expect("sample");
+    assert!(
+        sample.status.success(),
+        "sample: {}",
+        String::from_utf8_lossy(&sample.stderr)
+    );
+    let body = String::from_utf8_lossy(&sample.stdout);
+    assert!(
+        body.contains("\"v\": -40.0") || body.contains("\"v\": -40"),
+        "{body}"
+    );
+}

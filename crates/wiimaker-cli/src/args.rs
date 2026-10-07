@@ -839,9 +839,9 @@ pub enum TimelineCurveCmd {
         #[arg(long)]
         prop: String,
         /// Clip-local seconds
-        #[arg(long)]
+        #[arg(long, allow_negative_numbers = true)]
         t: f32,
-        #[arg(long)]
+        #[arg(long, allow_negative_numbers = true)]
         v: f32,
         /// `linear`, `constant`, or `ease` (default linear)
         #[arg(long, default_value = "linear")]
@@ -860,7 +860,7 @@ pub enum TimelineCurveCmd {
         prop: String,
         #[arg(long)]
         index: Option<usize>,
-        #[arg(long)]
+        #[arg(long, allow_negative_numbers = true)]
         t: Option<f32>,
     },
     /// Move a key (time is clamped by the caller; stored as given)
@@ -876,9 +876,9 @@ pub enum TimelineCurveCmd {
         prop: String,
         #[arg(long)]
         index: usize,
-        #[arg(long)]
+        #[arg(long, allow_negative_numbers = true)]
         t: f32,
-        #[arg(long)]
+        #[arg(long, allow_negative_numbers = true)]
         v: f32,
     },
     /// Set interpolation on one key
@@ -933,9 +933,9 @@ pub enum TimelineCurveCmd {
         clip: usize,
         #[arg(long)]
         prop: String,
-        #[arg(long, default_value_t = 0.0)]
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
         from: f32,
-        #[arg(long, default_value_t = 1.0)]
+        #[arg(long, default_value_t = 1.0, allow_negative_numbers = true)]
         to: f32,
         /// Number of samples (inclusive endpoints when >= 2)
         #[arg(long, default_value_t = 5)]
