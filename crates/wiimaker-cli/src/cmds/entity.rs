@@ -45,6 +45,7 @@ fn timeline_transport(
     play: bool,
     stop: bool,
     signals: Option<SignalQuery>,
+    advance: Option<(f32, u32)>,
 ) -> Result<()> {
     let (gd, project, _path, sc) = open_scene(root, game, scene)?;
     let ent = sc
@@ -89,6 +90,18 @@ fn timeline_transport(
     } else {
         fired.extend(world.take_timeline_signals());
     }
+    if let Some((dt, steps)) = advance {
+        if steps > 0 {
+            let playing = world.director(id).is_some_and(|d| d.playing);
+            if !playing {
+                world.play_timeline(id);
+            }
+            for _ in 0..steps {
+                world.tick_timelines(dt);
+                fired.extend(world.take_timeline_signals());
+            }
+        }
+    }
     let d = world
         .director(id)
         .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no runtime PlayableDirector"))?;
@@ -114,6 +127,13 @@ fn timeline_transport(
         #[serde(rename = "loop")]
         loop_: bool,
         signals: Vec<SignalOut>,
+        pose: Vec<PoseOut>,
+    }
+    #[derive(Serialize)]
+    struct PoseOut {
+        name: String,
+        x: f32,
+        y: f32,
     }
     let signals_out: Vec<SignalOut> = fired
         .into_iter()
@@ -127,16 +147,45 @@ fn timeline_transport(
         })
         .collect();
     let signal_n = signals_out.len();
+    let pose_names: Vec<String> = {
+        let mut names = Vec::new();
+        for track in &d.tracks {
+            if track.kind == wiimaker_core::TimelineTrackKind::Transform
+                && !track.binding.is_empty()
+                && !names.iter().any(|n| n == &track.binding)
+            {
+                names.push(track.binding.clone());
+            }
+        }
+        names
+    };
+    let timeline_name = d.timeline.clone();
+    let time = d.time;
+    let playing = d.playing;
+    let finished = d.finished;
+    let pose = pose_names
+        .into_iter()
+        .filter_map(|binding| {
+            let eid = world.find_by_name(&binding)?;
+            let xf = world.transform(eid)?;
+            Some(PoseOut {
+                name: binding,
+                x: xf.translation.x,
+                y: xf.translation.y,
+            })
+        })
+        .collect();
     let out = Out {
         ok: true,
         name: name.to_string(),
-        timeline: d.timeline.clone(),
-        time: d.time,
-        playing: d.playing,
-        finished: d.finished,
+        timeline: timeline_name,
+        time,
+        playing,
+        finished,
         play_on_awake: scene_d.play_on_awake,
         loop_: scene_d.loop_,
         signals: signals_out,
+        pose,
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&out)?);
@@ -145,6 +194,9 @@ fn timeline_transport(
             "{name}: timeline={} time={:.3} playing={} finished={} signals={signal_n}",
             out.timeline, out.time, out.playing, out.finished
         );
+        for p in &out.pose {
+            println!("  {} x={:.3} y={:.3}", p.name, p.x, p.y);
+        }
         for sig in &out.signals {
             if sig.payload.is_empty() {
                 println!(
@@ -864,6 +916,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             true,
             false,
             None,
+            None,
         ),
         EntityCmd::TimelineStop { game, name, scene } => timeline_transport(
             root,
@@ -874,8 +927,15 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             false,
             true,
             None,
+            None,
         ),
-        EntityCmd::TimelineStatus { game, name, scene } => timeline_transport(
+        EntityCmd::TimelineStatus {
+            game,
+            name,
+            scene,
+            steps,
+            dt,
+        } => timeline_transport(
             root,
             &game,
             &name,
@@ -884,6 +944,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             false,
             false,
             None,
+            Some((dt, steps)),
         ),
         EntityCmd::TimelineSignals {
             game,
@@ -901,6 +962,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             false,
             false,
             Some(SignalQuery { dt, steps, play }),
+            None,
         ),
         EntityCmd::Despawn { game, name, scene } => {
             let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;

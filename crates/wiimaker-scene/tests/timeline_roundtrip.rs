@@ -32,24 +32,28 @@ fn intro() -> TimelineMeta {
                 name: "GhostAppear".into(),
                 kind: TimelineTrackKind::Activation,
                 binding: Some("IntroGhost".into()),
+                property: None,
                 clips: vec![TimelineClip::activation(0.5, 4.0, true)],
             },
             TimelineTrack {
                 name: "PlayerMove".into(),
                 kind: TimelineTrackKind::Animation,
                 binding: Some("Player".into()),
+                property: None,
                 clips: vec![TimelineClip::animation(0.0, 2.0, "chomp")],
             },
             TimelineTrack {
                 name: "Stinger".into(),
                 kind: TimelineTrackKind::Audio,
                 binding: None,
+                property: None,
                 clips: vec![TimelineClip::audio(0.0, 0.5, "beep", 1.0)],
             },
             TimelineTrack {
                 name: "CamSlide".into(),
                 kind: TimelineTrackKind::Transform,
                 binding: Some("MainCamera".into()),
+                property: None,
                 clips: vec![TimelineClip::transform(
                     0.0,
                     2.0,
@@ -198,12 +202,14 @@ fn readme_ghost_appear_through_scene_hydrate() {
                 name: "GhostAppear".into(),
                 kind: TimelineTrackKind::Activation,
                 binding: Some("IntroGhost".into()),
+                property: None,
                 clips: vec![TimelineClip::activation(0.5, 4.0, true)],
             },
             TimelineTrack {
                 name: "CamSlide".into(),
                 kind: TimelineTrackKind::Transform,
                 binding: Some("MainCamera".into()),
+                property: None,
                 clips: vec![TimelineClip::transform(
                     0.0,
                     2.0,
@@ -275,6 +281,7 @@ fn hydrate_signal_and_control_tracks() {
                 name: "Cue".into(),
                 kind: TimelineTrackKind::Signal,
                 binding: Some("Child".into()),
+                property: None,
                 clips: vec![TimelineClip::signal(0.0, "SubStart", None)],
             }],
         },
@@ -290,12 +297,14 @@ fn hydrate_signal_and_control_tracks() {
                     name: "Cues".into(),
                     kind: TimelineTrackKind::Signal,
                     binding: Some("Player".into()),
+                    property: None,
                     clips: vec![TimelineClip::signal(0.25, "IntroDone", Some("go"))],
                 },
                 TimelineTrack {
                     name: "Nest".into(),
                     kind: TimelineTrackKind::Control,
                     binding: Some("Child".into()),
+                    property: None,
                     clips: vec![TimelineClip::control(0.5, 1.5)],
                 },
             ],
@@ -351,6 +360,116 @@ fn hydrate_signal_and_control_tracks() {
     assert!(
         nested.iter().any(|s| s.signal == "SubStart"),
         "control clip starts the child director: {nested:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn legacy_from_to_file_matches_lerp_and_curves_override() {
+    let dir = tmp_game("curves");
+    let mut project = GameProject::new("curve-test");
+    project.default_scene = "scenes/main.scene.json".into();
+    save_project(&dir, &project).unwrap();
+    let assets = dir.join("assets");
+    let legacy = r#"{
+        "duration": 4.0,
+        "tracks": [{
+            "name": "CamSlide",
+            "kind": "Transform",
+            "binding": "MainCamera",
+            "clips": [{ "start": 0.0, "end": 2.0, "from": [320.0, 240.0], "to": [400.0, 240.0] }]
+        }]
+    }"#;
+    fs::write(assets.join("intro.timeline.json"), legacy).unwrap();
+    let mut scene = wiimaker_scene::Scene::new("main");
+    add_entity(&mut scene, "Director", &MutateOpts::default()).unwrap();
+    add_entity(&mut scene, "MainCamera", &MutateOpts::default()).unwrap();
+    add_component_playable_director(&mut scene, "Director", "intro", true, false).unwrap();
+    let timelines = TimelineCatalog::load_dir(&assets).unwrap();
+    let mut world = hydrate_lenient_with_all_catalogs(
+        &scene,
+        &TextureMap::new(),
+        None,
+        None,
+        None,
+        None,
+        Some(&timelines),
+    );
+    let director = world.find_by_name("Director").unwrap();
+    let cam = world.find_by_name("MainCamera").unwrap();
+    world.set_timeline_time(director, 1.0);
+    assert!((world.transform(cam).unwrap().translation.x - 360.0).abs() < 1e-2);
+    world.set_timeline_time(director, 3.0);
+    assert!((world.transform(cam).unwrap().translation.x - 400.0).abs() < 1e-2);
+
+    let curved = r#"{
+        "duration": 4.0,
+        "tracks": [{
+            "name": "CamSlide",
+            "kind": "Transform",
+            "binding": "MainCamera",
+            "clips": [{
+                "start": 0.0,
+                "end": 2.0,
+                "from": [0.0, 0.0],
+                "to": [0.0, 80.0],
+                "curves": { "x": [
+                    {"t": 0.0, "v": 0.0, "interp": "linear"},
+                    {"t": 2.0, "v": 10.0, "interp": "linear"}
+                ]}
+            }]
+        }]
+    }"#;
+    fs::write(assets.join("intro.timeline.json"), curved).unwrap();
+    let timelines = TimelineCatalog::load_dir(&assets).unwrap();
+    let mut world = hydrate_lenient_with_all_catalogs(
+        &scene,
+        &TextureMap::new(),
+        None,
+        None,
+        None,
+        None,
+        Some(&timelines),
+    );
+    let director = world.find_by_name("Director").unwrap();
+    let cam = world.find_by_name("MainCamera").unwrap();
+    world.set_timeline_time(director, 1.0);
+    let xf = world.transform(cam).unwrap();
+    assert!((xf.translation.x - 5.0).abs() < 1e-2, "curved x");
+    assert!((xf.translation.y - 40.0).abs() < 1e-2, "y stays from→to");
+
+    let bad = r#"{
+        "duration": 2.0,
+        "tracks": [{
+            "name": "Spin",
+            "kind": "Float",
+            "binding": "MainCamera",
+            "property": "Transform.foo",
+            "clips": [{
+                "start": 0.0,
+                "end": 1.0,
+                "curves": {
+                    "value": [],
+                    "x": [{"t": 5.0, "v": 1.0, "interp": "bezier"}]
+                }
+            }]
+        }]
+    }"#;
+    fs::write(assets.join("bad.timeline.json"), bad).unwrap();
+    let diag = diagnose(&dir, &project);
+    let msgs: Vec<_> = diag.issues.iter().map(|i| i.message.as_str()).collect();
+    assert!(
+        msgs.iter().any(|m| m.contains("unknown float property")),
+        "{msgs:?}"
+    );
+    assert!(msgs.iter().any(|m| m.contains("is empty")), "{msgs:?}");
+    assert!(
+        msgs.iter().any(|m| m.contains("outside the clip")),
+        "{msgs:?}"
+    );
+    assert!(
+        msgs.iter().any(|m| m.contains("unknown interp")),
+        "{msgs:?}"
     );
     let _ = fs::remove_dir_all(&dir);
 }

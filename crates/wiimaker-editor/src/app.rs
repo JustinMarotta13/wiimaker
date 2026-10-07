@@ -204,6 +204,19 @@ pub(crate) struct EditorApp {
     pub(crate) tl_control_target: String,
     pub(crate) tl_control_start: f32,
     pub(crate) tl_control_end: f32,
+    /// Timeline curve lanes expanded by track name (session-only).
+    pub(crate) tl_curve_open: Vec<String>,
+    /// Selected curve key in the Timeline dock.
+    pub(crate) tl_curve_key: Option<TlCurveKeySel>,
+}
+
+/// Selected key on a timeline curve (asset edit, not scene undo).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TlCurveKeySel {
+    pub(crate) track: String,
+    pub(crate) clip: usize,
+    pub(crate) prop: String,
+    pub(crate) index: usize,
 }
 
 #[derive(Clone)]
@@ -293,6 +306,8 @@ impl EditorApp {
             tl_control_target: String::new(),
             tl_control_start: 0.0,
             tl_control_end: 1.0,
+            tl_curve_open: Vec::new(),
+            tl_curve_key: None,
         };
         app.reload_assets()?;
         app.refresh_scenes();

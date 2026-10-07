@@ -19,6 +19,8 @@ pub enum TimelineTrackKind {
     Signal,
     /// Clips that activate a target and drive its PlayableDirector.
     Control,
+    /// One authored float (`property` on the track, keys in `curves.value`).
+    Float,
 }
 
 impl TimelineTrackKind {
@@ -30,9 +32,103 @@ impl TimelineTrackKind {
             "transform" => Some(Self::Transform),
             "signal" => Some(Self::Signal),
             "control" => Some(Self::Control),
+            "float" => Some(Self::Float),
             _ => None,
         }
     }
+}
+
+/// Blend from this key to the next. Unknown strings still load so doctor can warn.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum CurveInterp {
+    #[default]
+    Linear,
+    Constant,
+    Ease,
+    Unknown(String),
+}
+
+impl CurveInterp {
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "linear" => Self::Linear,
+            "constant" => Self::Constant,
+            "ease" => Self::Ease,
+            "" => Self::Linear,
+            other => Self::Unknown(other.to_string()),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Linear => "linear",
+            Self::Constant => "constant",
+            Self::Ease => "ease",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
+
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unknown(_))
+    }
+
+    pub fn to_core(&self) -> wiimaker_core::CurveInterp {
+        match self {
+            Self::Constant => wiimaker_core::CurveInterp::Constant,
+            Self::Ease => wiimaker_core::CurveInterp::Ease,
+            Self::Linear | Self::Unknown(_) => wiimaker_core::CurveInterp::Linear,
+        }
+    }
+}
+
+impl Serialize for CurveInterp {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CurveInterp {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(Self::parse(&s))
+    }
+}
+
+/// One key. `t` is clip-local seconds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CurveKey {
+    pub t: f32,
+    pub v: f32,
+    #[serde(default)]
+    pub interp: CurveInterp,
+}
+
+/// Optional curves on a clip. Missing axes keep the Transform `from`→`to` lerp.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineCurves {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<Vec<CurveKey>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<Vec<CurveKey>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Vec<CurveKey>>,
+}
+
+/// Float properties the runtime actually writes.
+pub fn known_float_property(name: &str) -> bool {
+    matches!(
+        name,
+        "Transform.rotation" | "Transform.scale_x" | "Transform.scale_y" | "Sprite.alpha"
+    )
+}
+
+pub fn float_property_names() -> &'static [&'static str] {
+    &[
+        "Transform.rotation",
+        "Transform.scale_x",
+        "Transform.scale_y",
+        "Sprite.alpha",
+    ]
 }
 
 /// One clip on a timeline track. Unused fields stay omitted in JSON.
@@ -58,6 +154,27 @@ pub struct TimelineClip {
     /// Optional string sent with a signal marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<String>,
+    /// Keyframed curves. Omitted on older timelines (those keep `from`→`to`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curves: Option<TimelineCurves>,
+}
+
+impl Default for TimelineClip {
+    fn default() -> Self {
+        Self {
+            start: 0.0,
+            end: 0.0,
+            active: None,
+            clip: None,
+            audio: None,
+            volume: None,
+            from: None,
+            to: None,
+            signal: None,
+            payload: None,
+            curves: None,
+        }
+    }
 }
 
 impl TimelineClip {
@@ -66,13 +183,7 @@ impl TimelineClip {
             start,
             end,
             active: Some(active),
-            clip: None,
-            audio: None,
-            volume: None,
-            from: None,
-            to: None,
-            signal: None,
-            payload: None,
+            ..Self::default()
         }
     }
 
@@ -80,14 +191,8 @@ impl TimelineClip {
         Self {
             start,
             end,
-            active: None,
             clip: Some(clip.into()),
-            audio: None,
-            volume: None,
-            from: None,
-            to: None,
-            signal: None,
-            payload: None,
+            ..Self::default()
         }
     }
 
@@ -95,14 +200,9 @@ impl TimelineClip {
         Self {
             start,
             end,
-            active: None,
-            clip: None,
             audio: Some(audio.into()),
             volume: Some(volume),
-            from: None,
-            to: None,
-            signal: None,
-            payload: None,
+            ..Self::default()
         }
     }
 
@@ -110,14 +210,9 @@ impl TimelineClip {
         Self {
             start,
             end,
-            active: None,
-            clip: None,
-            audio: None,
-            volume: None,
             from: Some(from),
             to: Some(to),
-            signal: None,
-            payload: None,
+            ..Self::default()
         }
     }
 
@@ -127,14 +222,9 @@ impl TimelineClip {
         Self {
             start: time,
             end: time,
-            active: None,
-            clip: None,
-            audio: None,
-            volume: None,
-            from: None,
-            to: None,
             signal: Some(name.into()),
             payload: payload.map(str::to_string),
+            ..Self::default()
         }
     }
 
@@ -143,15 +233,12 @@ impl TimelineClip {
         Self {
             start,
             end,
-            active: None,
-            clip: None,
-            audio: None,
-            volume: None,
-            from: None,
-            to: None,
-            signal: None,
-            payload: None,
+            ..Self::default()
         }
+    }
+
+    pub fn span(&self) -> f32 {
+        (self.end - self.start).max(0.0)
     }
 }
 
@@ -162,6 +249,9 @@ pub struct TimelineTrack {
     pub kind: TimelineTrackKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<String>,
+    /// Float track property (`Transform.rotation`, `Transform.scale_x`, `Transform.scale_y`, `Sprite.alpha`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub property: Option<String>,
     #[serde(default)]
     pub clips: Vec<TimelineClip>,
 }
@@ -182,8 +272,9 @@ impl TimelineMeta {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        let meta: Self =
+        let mut meta: Self =
             serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+        meta.normalize_curves();
         meta.validate()?;
         Ok(meta)
     }
@@ -197,6 +288,25 @@ impl TimelineMeta {
         let text = serde_json::to_string_pretty(self)?;
         fs::write(path, text + "\n").with_context(|| format!("write {}", path.display()))?;
         Ok(())
+    }
+
+    /// Sort curve keys by time. Empty arrays stay so doctor can warn.
+    pub fn normalize_curves(&mut self) {
+        for track in &mut self.tracks {
+            for clip in &mut track.clips {
+                if let Some(curves) = clip.curves.as_mut() {
+                    if let Some(keys) = curves.x.as_mut() {
+                        sort_curve_keys(keys);
+                    }
+                    if let Some(keys) = curves.y.as_mut() {
+                        sort_curve_keys(keys);
+                    }
+                    if let Some(keys) = curves.value.as_mut() {
+                        sort_curve_keys(keys);
+                    }
+                }
+            }
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -213,6 +323,7 @@ impl TimelineMeta {
                     | TimelineTrackKind::Animation
                     | TimelineTrackKind::Transform
                     | TimelineTrackKind::Control
+                    | TimelineTrackKind::Float
             );
             if needs_binding
                 && track
@@ -264,12 +375,18 @@ impl TimelineMeta {
                             bail!("timeline track '{}' signal marker missing name", track.name);
                         }
                     }
-                    TimelineTrackKind::Activation | TimelineTrackKind::Control => {}
+                    TimelineTrackKind::Activation
+                    | TimelineTrackKind::Control
+                    | TimelineTrackKind::Float => {}
                 }
             }
         }
         Ok(())
     }
+}
+
+pub(crate) fn sort_curve_keys(keys: &mut [CurveKey]) {
+    keys.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(std::cmp::Ordering::Equal));
 }
 
 /// Write / overwrite `assets/<name>.timeline.json`.
@@ -352,24 +469,28 @@ mod tests {
                     name: "GhostAppear".into(),
                     kind: TimelineTrackKind::Activation,
                     binding: Some("IntroGhost".into()),
+                    property: None,
                     clips: vec![TimelineClip::activation(0.5, 4.0, true)],
                 },
                 TimelineTrack {
                     name: "PlayerMove".into(),
                     kind: TimelineTrackKind::Animation,
                     binding: Some("Player".into()),
+                    property: None,
                     clips: vec![TimelineClip::animation(0.0, 2.0, "chomp")],
                 },
                 TimelineTrack {
                     name: "Stinger".into(),
                     kind: TimelineTrackKind::Audio,
                     binding: None,
+                    property: None,
                     clips: vec![TimelineClip::audio(0.0, 0.5, "beep", 1.0)],
                 },
                 TimelineTrack {
                     name: "CamSlide".into(),
                     kind: TimelineTrackKind::Transform,
                     binding: Some("MainCamera".into()),
+                    property: None,
                     clips: vec![TimelineClip::transform(
                         0.0,
                         2.0,
@@ -431,12 +552,14 @@ mod tests {
                     name: "Cues".into(),
                     kind: TimelineTrackKind::Signal,
                     binding: Some("Player".into()),
+                    property: None,
                     clips: vec![TimelineClip::signal(1.25, "IntroDone", Some("go"))],
                 },
                 TimelineTrack {
                     name: "Sub".into(),
                     kind: TimelineTrackKind::Control,
                     binding: Some("Child".into()),
+                    property: None,
                     clips: vec![TimelineClip::control(0.5, 2.0)],
                 },
             ],
@@ -458,5 +581,54 @@ mod tests {
             "unused clip fields stay omitted"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unsorted_curve_keys_sort_on_load_and_old_files_omit_curves() {
+        let raw = r#"{
+            "duration": 2.0,
+            "tracks": [{
+                "name": "Slide",
+                "kind": "Transform",
+                "binding": "Cam",
+                "clips": [{
+                    "start": 0.0,
+                    "end": 2.0,
+                    "from": [0.0, 0.0],
+                    "to": [10.0, 0.0],
+                    "curves": { "x": [
+                        {"t": 2.0, "v": 10.0, "interp": "linear"},
+                        {"t": 0.0, "v": 0.0, "interp": "ease"}
+                    ]}
+                }]
+            }]
+        }"#;
+        let meta: TimelineMeta = serde_json::from_str(raw).unwrap();
+        let mut meta = meta;
+        meta.normalize_curves();
+        meta.validate().unwrap();
+        let keys = meta.tracks[0].clips[0]
+            .curves
+            .as_ref()
+            .unwrap()
+            .x
+            .as_ref()
+            .unwrap();
+        assert!((keys[0].t - 0.0).abs() < 1e-6);
+        assert_eq!(keys[0].interp, CurveInterp::Ease);
+        assert!(meta.tracks[0].clips[0].curves.as_ref().unwrap().y.is_none());
+
+        let old = r#"{
+            "duration": 1.0,
+            "tracks": [{
+                "name": "Slide",
+                "kind": "Transform",
+                "binding": "Cam",
+                "clips": [{ "start": 0.0, "end": 1.0, "from": [0.0, 0.0], "to": [1.0, 0.0] }]
+            }]
+        }"#;
+        let old: TimelineMeta = serde_json::from_str(old).unwrap();
+        assert!(old.tracks[0].clips[0].curves.is_none());
+        assert!(old.tracks[0].property.is_none());
     }
 }

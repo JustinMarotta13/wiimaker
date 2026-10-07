@@ -314,3 +314,227 @@ fn timeline_signal_and_control_parse_and_signals_json() {
     let body = String::from_utf8_lossy(&status.stdout);
     assert!(body.contains("\"signals\""), "{body}");
 }
+
+#[test]
+fn timeline_curve_add_key_sample_and_status_pose() {
+    let dir = tmp_game("curves");
+    let game = dir.to_str().unwrap();
+    let wrote = wiimaker()
+        .args([
+            "asset",
+            "timeline",
+            game,
+            "intro",
+            "--duration",
+            "4",
+            "--track",
+            "CamSlide:Transform:MainCamera:0-2:0,0>10,0|y:0,0,ease;2,10,ease",
+            "--json",
+        ])
+        .output()
+        .expect("timeline");
+    assert!(
+        wrote.status.success(),
+        "timeline: {}",
+        String::from_utf8_lossy(&wrote.stderr)
+    );
+
+    let add = wiimaker()
+        .args([
+            "--json",
+            "asset",
+            "timeline-curve",
+            "add-key",
+            game,
+            "--timeline",
+            "intro",
+            "--track",
+            "CamSlide",
+            "--clip",
+            "0",
+            "--prop",
+            "x",
+            "--t",
+            "1",
+            "--v",
+            "2",
+            "--interp",
+            "ease",
+        ])
+        .output()
+        .expect("add-key");
+    assert!(
+        add.status.success(),
+        "add-key: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let body = String::from_utf8_lossy(&add.stdout);
+    assert!(body.contains("\"interp\": \"ease\""), "{body}");
+
+    let sample = wiimaker()
+        .args([
+            "--json",
+            "asset",
+            "timeline-curve",
+            "sample",
+            game,
+            "--timeline",
+            "intro",
+            "--track",
+            "CamSlide",
+            "--prop",
+            "y",
+            "--from",
+            "0",
+            "--to",
+            "2",
+            "--steps",
+            "5",
+        ])
+        .output()
+        .expect("sample");
+    assert!(
+        sample.status.success(),
+        "sample: {}",
+        String::from_utf8_lossy(&sample.stderr)
+    );
+    let body = String::from_utf8_lossy(&sample.stdout);
+    assert!(body.contains("\"v\":"), "{body}");
+    // u=0.25 smoothstep is 0.15625 * 10 = 1.5625, not the linear 2.5.
+    assert!(
+        body.contains("1.5625") || body.contains("1.562"),
+        "ease sample should be non-linear: {body}"
+    );
+
+    let add_dir = wiimaker()
+        .args([
+            "entity",
+            "add-component",
+            game,
+            "--name",
+            "Director",
+            "PlayableDirector",
+            "--timeline",
+            "intro",
+            "--play-on-awake",
+            "true",
+            "--json",
+        ])
+        .output()
+        .expect("director");
+    assert!(
+        add_dir.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add_dir.stderr)
+    );
+
+    let status = wiimaker()
+        .args([
+            "--json",
+            "entity",
+            "timeline-status",
+            game,
+            "--name",
+            "Director",
+            "--dt",
+            "0.5",
+            "--steps",
+            "1",
+        ])
+        .output()
+        .expect("status");
+    assert!(
+        status.status.success(),
+        "status: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let body = String::from_utf8_lossy(&status.stdout);
+    assert!(body.contains("MainCamera"), "{body}");
+    assert!(body.contains("\"x\":"), "{body}");
+}
+
+#[test]
+fn timeline_curve_add_key_accepts_negative_value() {
+    let dir = tmp_game("neg");
+    let game = dir.to_str().unwrap();
+    let wrote = wiimaker()
+        .args([
+            "asset",
+            "timeline",
+            game,
+            "intro",
+            "--duration",
+            "4",
+            "--track",
+            "PacSwoop:Transform:MainCamera:0-2:0,0>10,0",
+            "--json",
+        ])
+        .output()
+        .expect("timeline");
+    assert!(
+        wrote.status.success(),
+        "timeline: {}",
+        String::from_utf8_lossy(&wrote.stderr)
+    );
+
+    let add = wiimaker()
+        .args([
+            "asset",
+            "timeline-curve",
+            "add-key",
+            game,
+            "--timeline",
+            "intro",
+            "--track",
+            "PacSwoop",
+            "--prop",
+            "x",
+            "--t",
+            "0",
+            "--v",
+            "-40",
+            "--json",
+        ])
+        .output()
+        .expect("add-key");
+    assert!(
+        add.status.success(),
+        "add-key: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let body = String::from_utf8_lossy(&add.stdout);
+    assert!(body.contains("\"v\": -40.0") || body.contains("\"v\": -40"), "{body}");
+
+    let sample = wiimaker()
+        .args([
+            "asset",
+            "timeline-curve",
+            "sample",
+            game,
+            "--timeline",
+            "intro",
+            "--track",
+            "PacSwoop",
+            "--prop",
+            "x",
+            "--from",
+            "0",
+            "--to",
+            "0",
+            "--steps",
+            "1",
+            "--json",
+        ])
+        .output()
+        .expect("sample");
+    assert!(
+        sample.status.success(),
+        "sample: {}",
+        String::from_utf8_lossy(&sample.stderr)
+    );
+    let body = String::from_utf8_lossy(&sample.stdout);
+    assert!(
+        body.contains("\"v\": -40.0") || body.contains("\"v\": -40"),
+        "{body}"
+    );
+}
