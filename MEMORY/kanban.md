@@ -29,13 +29,13 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Now
 
-**Recommended next morning (2026-10-08):** Blend trees / Animator layers. Timeline curves shipped 2026-10-07. Signal / Control shipped 2026-10-06. Apply to Base / Open Base shipped 2026-10-05.
+**Recommended next morning (2026-10-08):** Blend trees — Animator `*.controller.json` 1D/2D blend on Float params (heading / speed) so Pac-Man and ghosts pick walk cells from `GridMover` without a Bool-transition grid. GUI + CLI twin. Host-first (WSCN unchanged). Timeline curves shipped 2026-10-07. Signal / Control shipped 2026-10-06. Apply to Base / Open Base shipped 2026-10-05.
 
 ---
 
 ## Later
 
-- WSCN bake of Animator or PlayableDirector (host-first until then).
+- Animator layers. WSCN bake of Animator or PlayableDirector (host-first until then).
 
 ---
 
@@ -181,5 +181,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**Blend trees / Animator layers.** Timeline curves shipped 2026-10-07. Signal / Control tracks shipped 2026-10-06. Apply to Base / Open Base shipped 2026-10-05. Timeline / PlayableDirector shipped 2026-10-04. Animator shipped 2026-10-03. Prefab variants shipped 2026-10-02. Nested prefabs shipped 2026-10-01. Motion gestures shipped 2026-09-30. IR pointer / sensor-bar aiming shipped 2026-09-29.
+**Blend trees** (Animator 1D/2D on Float params — Pac-Man / ghost heading). Timeline curves shipped 2026-10-07. Signal / Control tracks shipped 2026-10-06. Apply to Base / Open Base shipped 2026-10-05. Timeline / PlayableDirector shipped 2026-10-04. Animator shipped 2026-10-03. Prefab variants shipped 2026-10-02. Nested prefabs shipped 2026-10-01. Motion gestures shipped 2026-09-30. IR pointer / sensor-bar aiming shipped 2026-09-29.
 
