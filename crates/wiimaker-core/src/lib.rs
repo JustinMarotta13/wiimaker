@@ -52,7 +52,8 @@ pub use tilemap::{
 };
 pub use time::Clock;
 pub use timeline::{
-    PlayableDirector, TimelineClipRuntime, TimelineSignal, TimelineTrackKind, TimelineTrackRuntime,
+    Curve, CurveInterp, CurveKey, PlayableDirector, TimelineClipRuntime, TimelineSignal,
+    TimelineTrackKind, TimelineTrackRuntime,
 };
 #[cfg(feature = "std")]
 pub use wiimote_map::format_input_status;

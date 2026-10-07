@@ -787,6 +787,9 @@ fn apply_scene_director(
                 wiimaker_assets::TimelineTrackKind::Control => {
                     wiimaker_core::TimelineTrackKind::Control
                 }
+                wiimaker_assets::TimelineTrackKind::Float => {
+                    wiimaker_core::TimelineTrackKind::Float
+                }
             };
             let mut clips = Vec::new();
             for c in &track.clips {
@@ -808,17 +811,37 @@ fn apply_scene_director(
                     to: c.to.unwrap_or([0.0, 0.0]),
                     signal: c.signal.clone().unwrap_or_default(),
                     payload: c.payload.clone().unwrap_or_default(),
+                    curve_x: runtime_curve(c.curves.as_ref().and_then(|k| k.x.as_deref())),
+                    curve_y: runtime_curve(c.curves.as_ref().and_then(|k| k.y.as_deref())),
+                    curve_value: runtime_curve(c.curves.as_ref().and_then(|k| k.value.as_deref())),
                 });
             }
             rt.tracks.push(TimelineTrackRuntime {
                 name: track.name.clone(),
                 kind,
                 binding,
+                property: track.property.clone().unwrap_or_default(),
                 clips,
             });
         }
     }
     world.set_director(id, Some(rt));
+}
+
+fn runtime_curve(keys: Option<&[wiimaker_assets::CurveKey]>) -> Option<wiimaker_core::Curve> {
+    let keys = keys?;
+    if keys.is_empty() {
+        return None;
+    }
+    Some(wiimaker_core::Curve::from_keys(
+        keys.iter()
+            .map(|k| wiimaker_core::CurveKey {
+                t: k.t,
+                v: k.v,
+                interp: k.interp.to_core(),
+            })
+            .collect(),
+    ))
 }
 
 fn runtime_condition(

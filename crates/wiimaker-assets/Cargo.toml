@@ -6,6 +6,7 @@ license.workspace = true
 description = "Asset cooker — PNG/WAV/OBJ to .wpack for Broadway"
 
 [dependencies]
+wiimaker-core = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

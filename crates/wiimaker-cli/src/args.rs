@@ -553,11 +553,17 @@ pub enum EntityCmd {
         #[arg(long)]
         scene: Option<String>,
     },
-    /// Report PlayableDirector time, playing, finished, and timeline stem (`--json`)
+    /// Report PlayableDirector time, playing, finished, timeline stem, and bound XY (`--json`)
     TimelineStatus {
         game: String,
         #[arg(long)]
         name: String,
+        /// Tick this many times before reporting (0 = current playhead, usually 0)
+        #[arg(long, default_value_t = 0)]
+        steps: u32,
+        /// Seconds per step when `--steps` is set
+        #[arg(long, default_value_t = 1.0 / 60.0)]
+        dt: f32,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -777,10 +783,14 @@ pub enum AssetCmd {
         duration: f32,
         /// Track `Name:Kind:Binding:start-end:payload` (repeatable).
         /// Activation payload `true|false`. Animation payload is a clip stem.
-        /// Audio payload `stem` or `stem:volume`. Transform payload `x,y>x,y`.
+        /// Audio payload `stem` or `stem:volume`. Transform payload `x,y>x,y`
+        /// with optional `|x:t,v,interp;...|y:...`.
         /// Signal payload `SignalName` or `SignalName|text` (range is `t-t`).
         /// Control payload is empty; binding is the target entity.
+        /// Float payload is `Transform.rotation|value:t,v,interp;...`
+        /// (`Transform.scale_x`, `Transform.scale_y`, `Sprite.alpha` too).
         /// Binding `-` is unbound (Signal and Audio).
+        /// Full JSON via `--stdin` may include `curves`.
         #[arg(long = "track")]
         tracks: Vec<String>,
         /// Read a full timeline JSON from stdin
@@ -790,6 +800,11 @@ pub enum AssetCmd {
     /// List `*.timeline.json` stems
     ListTimelines {
         game: String,
+    },
+    /// Keyframed curves on a timeline clip
+    TimelineCurve {
+        #[command(subcommand)]
+        cmd: TimelineCurveCmd,
     },
     /// List `*.wav` clip stems under assets/
     ListWavs {
@@ -806,6 +821,125 @@ pub enum AssetCmd {
         /// Wait for the clip to finish when a device is present (default true)
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         wait: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TimelineCurveCmd {
+    /// Insert a key. Creates the curve when it is missing.
+    AddKey {
+        game: String,
+        #[arg(long)]
+        timeline: String,
+        #[arg(long)]
+        track: String,
+        #[arg(long, default_value_t = 0)]
+        clip: usize,
+        /// `x`, `y`, or `value`
+        #[arg(long)]
+        prop: String,
+        /// Clip-local seconds
+        #[arg(long)]
+        t: f32,
+        #[arg(long)]
+        v: f32,
+        /// `linear`, `constant`, or `ease` (default linear)
+        #[arg(long, default_value = "linear")]
+        interp: String,
+    },
+    /// Remove a key by `--index` or clip-local `--t`
+    RemoveKey {
+        game: String,
+        #[arg(long)]
+        timeline: String,
+        #[arg(long)]
+        track: String,
+        #[arg(long, default_value_t = 0)]
+        clip: usize,
+        #[arg(long)]
+        prop: String,
+        #[arg(long)]
+        index: Option<usize>,
+        #[arg(long)]
+        t: Option<f32>,
+    },
+    /// Move a key (time is clamped by the caller; stored as given)
+    MoveKey {
+        game: String,
+        #[arg(long)]
+        timeline: String,
+        #[arg(long)]
+        track: String,
+        #[arg(long, default_value_t = 0)]
+        clip: usize,
+        #[arg(long)]
+        prop: String,
+        #[arg(long)]
+        index: usize,
+        #[arg(long)]
+        t: f32,
+        #[arg(long)]
+        v: f32,
+    },
+    /// Set interpolation on one key
+    SetInterp {
+        game: String,
+        #[arg(long)]
+        timeline: String,
+        #[arg(long)]
+        track: String,
+        #[arg(long, default_value_t = 0)]
+        clip: usize,
+        #[arg(long)]
+        prop: String,
+        #[arg(long)]
+        index: usize,
+        #[arg(long)]
+        interp: String,
+    },
+    /// Seed an X or Y curve from the clip `from`→`to` (or `value` on a Float track)
+    AddCurve {
+        game: String,
+        #[arg(long)]
+        timeline: String,
+        #[arg(long)]
+        track: String,
+        #[arg(long, default_value_t = 0)]
+        clip: usize,
+        /// `x`, `y`, or `value`
+        #[arg(long)]
+        prop: String,
+    },
+    /// Drop one curve. The axis falls back to `from`→`to`.
+    RemoveCurve {
+        game: String,
+        #[arg(long)]
+        timeline: String,
+        #[arg(long)]
+        track: String,
+        #[arg(long, default_value_t = 0)]
+        clip: usize,
+        #[arg(long)]
+        prop: String,
+    },
+    /// Sample a curve. `--from`/`--to` are clip-local seconds.
+    Sample {
+        game: String,
+        #[arg(long)]
+        timeline: String,
+        #[arg(long)]
+        track: String,
+        #[arg(long, default_value_t = 0)]
+        clip: usize,
+        #[arg(long)]
+        prop: String,
+        #[arg(long, default_value_t = 0.0)]
+        from: f32,
+        #[arg(long, default_value_t = 1.0)]
+        to: f32,
+        /// Number of samples (inclusive endpoints when >= 2)
+        #[arg(long, default_value_t = 5)]
+        steps: usize,
     },
 }
 

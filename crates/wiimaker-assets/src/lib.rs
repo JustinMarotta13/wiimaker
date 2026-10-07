@@ -18,6 +18,7 @@ mod controller;
 mod font;
 mod sprites;
 mod timeline;
+mod timeline_curve;
 mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
@@ -36,8 +37,13 @@ pub use sprites::{
     SpriteCatalog, SpriteCell, SpriteSheetMeta,
 };
 pub use timeline::{
-    list_timelines, write_timeline, TimelineCatalog, TimelineClip, TimelineMeta, TimelineTrack,
+    float_property_names, known_float_property, list_timelines, write_timeline, CurveInterp,
+    CurveKey, TimelineCatalog, TimelineClip, TimelineCurves, TimelineMeta, TimelineTrack,
     TimelineTrackKind,
+};
+pub use timeline_curve::{
+    apply_curve_suffix, curve_add_curve, curve_add_key, curve_move_key, curve_remove_curve,
+    curve_remove_key, curve_sample, curve_set_interp, CurveEdit, CurveProp, CurveSample,
 };
 pub use wav::{
     inspect_wav, list_wav_clips, load_pcm16_wav, resolve_wav, spawn_wav_player, write_beep_wav,

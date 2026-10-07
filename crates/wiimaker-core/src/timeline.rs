@@ -17,6 +17,81 @@ mod alloc_types {
 
 use alloc_types::{String, ToString, Vec};
 
+/// How to blend from this key to the next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CurveInterp {
+    Linear,
+    /// Hold this key's value until the next key.
+    Constant,
+    /// Smoothstep (cubic ease-in-out) toward the next key.
+    Ease,
+}
+
+/// One key on a runtime curve. `t` is clip-local seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveKey {
+    pub t: f32,
+    pub v: f32,
+    pub interp: CurveInterp,
+}
+
+/// Sorted keyframe curve. Sample holds the first value before the first key
+/// and the last value after the last key.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Curve {
+    pub keys: Vec<CurveKey>,
+}
+
+impl Curve {
+    /// Sort by time. Unsorted authoring input is normalized here and on asset load.
+    pub fn from_keys(mut keys: Vec<CurveKey>) -> Self {
+        keys.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(core::cmp::Ordering::Equal));
+        Self { keys }
+    }
+
+    /// `None` when the curve has no keys.
+    pub fn sample(&self, t: f32) -> Option<f32> {
+        let keys = &self.keys;
+        if keys.is_empty() {
+            return None;
+        }
+        if keys.len() == 1 || t <= keys[0].t {
+            return Some(keys[0].v);
+        }
+        let last = keys.len() - 1;
+        if t >= keys[last].t {
+            return Some(keys[last].v);
+        }
+        let mut idx = 0;
+        for (i, key) in keys.iter().enumerate() {
+            if key.t <= t {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+        if idx >= last {
+            return Some(keys[last].v);
+        }
+        let a = &keys[idx];
+        let b = &keys[idx + 1];
+        let span = b.t - a.t;
+        if (-1e-8_f32..=1e-8_f32).contains(&span) {
+            return Some(b.v);
+        }
+        let u = ((t - a.t) / span).clamp(0.0, 1.0);
+        let w = match a.interp {
+            CurveInterp::Constant => 0.0,
+            CurveInterp::Linear => u,
+            CurveInterp::Ease => {
+                let u = u.clamp(0.0, 1.0);
+                u * u * (3.0 - 2.0 * u)
+            }
+        };
+        Some(a.v + (b.v - a.v) * w)
+    }
+}
+
 /// Track kind. Mirrors `assets/<name>.timeline.json`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimelineTrackKind {
@@ -28,6 +103,8 @@ pub enum TimelineTrackKind {
     Signal,
     /// Activates `binding` inside the clip and drives that entity's director.
     Control,
+    /// One float property (`Transform.rotation`, `Transform.scale_x`, `Transform.scale_y`, `Sprite.alpha`).
+    Float,
 }
 
 /// One signal emitted when a Signal marker is crossed.
@@ -74,6 +151,12 @@ pub struct TimelineClipRuntime {
     pub signal: String,
     /// Signal string payload. Empty when omitted.
     pub payload: String,
+    /// Clip-local X curve. `None` keeps the `from`→`to` lerp on X.
+    pub curve_x: Option<Curve>,
+    /// Clip-local Y curve. `None` keeps the `from`→`to` lerp on Y.
+    pub curve_y: Option<Curve>,
+    /// Float-track curve (`curves.value`).
+    pub curve_value: Option<Curve>,
 }
 
 impl TimelineClipRuntime {
@@ -93,6 +176,8 @@ pub struct TimelineTrackRuntime {
     pub name: String,
     pub kind: TimelineTrackKind,
     pub binding: String,
+    /// Float property id. Empty on other kinds.
+    pub property: String,
     pub clips: Vec<TimelineClipRuntime>,
 }
 
@@ -122,6 +207,14 @@ struct ActiveBaseline {
     active: bool,
 }
 
+/// Pre-timeline value for a Float track property.
+#[derive(Clone, Debug)]
+struct FloatBaseline {
+    name: String,
+    property: String,
+    value: f32,
+}
+
 /// Unity PlayableDirector. Authored stem + live transport + baked tracks.
 #[derive(Clone, Debug)]
 pub struct PlayableDirector {
@@ -138,6 +231,7 @@ pub struct PlayableDirector {
     xy_base: Vec<XyBaseline>,
     anim_base: Vec<AnimBaseline>,
     active_base: Vec<ActiveBaseline>,
+    float_base: Vec<FloatBaseline>,
     baselines_ready: bool,
 }
 
@@ -161,6 +255,7 @@ impl PlayableDirector {
             xy_base: Vec::new(),
             anim_base: Vec::new(),
             active_base: Vec::new(),
+            float_base: Vec::new(),
             baselines_ready: false,
         }
     }
@@ -333,6 +428,7 @@ impl World {
         let mut xy = Vec::new();
         let mut anims = Vec::new();
         let mut actives = Vec::new();
+        let mut floats = Vec::new();
         for track in &tracks {
             if track.binding.is_empty() {
                 continue;
@@ -386,12 +482,27 @@ impl World {
                     active: self.is_active(eid),
                 });
             }
+            if track.kind == TimelineTrackKind::Float
+                && !track.property.is_empty()
+                && !floats.iter().any(|b: &FloatBaseline| {
+                    b.name == track.binding && b.property == track.property
+                })
+            {
+                if let Some(value) = self.read_float_property(&track.binding, &track.property) {
+                    floats.push(FloatBaseline {
+                        name: track.binding.clone(),
+                        property: track.property.clone(),
+                        value,
+                    });
+                }
+            }
         }
         if let Some(d) = self.director_mut(id) {
             if !d.baselines_ready {
                 d.xy_base = xy;
                 d.anim_base = anims;
                 d.active_base = actives;
+                d.float_base = floats;
                 d.baselines_ready = true;
             }
         }
@@ -501,9 +612,14 @@ impl World {
             .director(id)
             .map(|d| d.active_base.clone())
             .unwrap_or_default();
+        let float_base = self
+            .director(id)
+            .map(|d| d.float_base.clone())
+            .unwrap_or_default();
 
         self.apply_activation(&tracks, time, &active_base);
         self.apply_transform(&tracks, time, &xy_base);
+        self.apply_float(&tracks, time, &float_base);
         self.apply_animation(id, &tracks, time, &anim_base);
         if fire_edges {
             self.apply_audio(id, &tracks, prev, time);
@@ -582,14 +698,11 @@ impl World {
                 for clip in &track.clips {
                     any = true;
                     if clip.contains(time) {
-                        let t = clip.local_t(time);
-                        pose = Some([
-                            clip.from[0] + (clip.to[0] - clip.from[0]) * t,
-                            clip.from[1] + (clip.to[1] - clip.from[1]) * t,
-                        ]);
+                        pose = Some([eval_axis(clip, time, 0), eval_axis(clip, time, 1)]);
                     } else if time > clip.end && clip.end >= last_end {
                         last_end = clip.end;
-                        last_to = Some(clip.to);
+                        last_to =
+                            Some([eval_axis(clip, clip.end, 0), eval_axis(clip, clip.end, 1)]);
                     }
                 }
             }
@@ -610,6 +723,113 @@ impl World {
                     }
                 }
             }
+        }
+    }
+
+    fn apply_float(&mut self, tracks: &[TimelineTrackRuntime], time: f32, base: &[FloatBaseline]) {
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        for track in tracks {
+            if track.kind == TimelineTrackKind::Float
+                && !track.binding.is_empty()
+                && !track.property.is_empty()
+                && !pairs
+                    .iter()
+                    .any(|(n, p)| n == &track.binding && p == &track.property)
+            {
+                pairs.push((track.binding.clone(), track.property.clone()));
+            }
+        }
+        for (name, prop) in pairs {
+            let mut pose: Option<f32> = None;
+            let mut last_end = f32::NEG_INFINITY;
+            let mut last_v: Option<f32> = None;
+            let mut any = false;
+            for track in tracks {
+                if track.kind != TimelineTrackKind::Float
+                    || track.binding != name
+                    || track.property != prop
+                {
+                    continue;
+                }
+                for clip in &track.clips {
+                    let Some(curve) = clip.curve_value.as_ref() else {
+                        continue;
+                    };
+                    if curve.keys.is_empty() {
+                        continue;
+                    }
+                    any = true;
+                    if clip.contains(time) {
+                        pose = curve.sample(time - clip.start);
+                    } else if time > clip.end && clip.end >= last_end {
+                        last_end = clip.end;
+                        last_v = curve.sample(clip.end - clip.start);
+                    }
+                }
+            }
+            let value = if let Some(v) = pose {
+                Some(v)
+            } else if time > 0.0 {
+                last_v.or_else(|| {
+                    base.iter()
+                        .find(|b| b.name == name && b.property == prop)
+                        .map(|b| b.value)
+                })
+            } else if any {
+                base.iter()
+                    .find(|b| b.name == name && b.property == prop)
+                    .map(|b| b.value)
+            } else {
+                None
+            };
+            if let Some(v) = value {
+                self.write_float_property(&name, &prop, v);
+            }
+        }
+    }
+
+    fn read_float_property(&self, name: &str, property: &str) -> Option<f32> {
+        let id = self.find_by_name(name)?;
+        match property {
+            "Transform.rotation" => {
+                let xf = self.transform(id)?;
+                let (z, _, _) = xf.rotation.to_euler(glam::EulerRot::ZYX);
+                Some(z.to_degrees())
+            }
+            "Transform.scale_x" => self.transform(id).map(|t| t.scale.x),
+            "Transform.scale_y" => self.transform(id).map(|t| t.scale.y),
+            "Sprite.alpha" => self.sprite(id).map(|s| s.color.a as f32 / 255.0),
+            _ => None,
+        }
+    }
+
+    fn write_float_property(&mut self, name: &str, property: &str, value: f32) {
+        let Some(id) = self.find_by_name(name) else {
+            return;
+        };
+        match property {
+            "Transform.rotation" => {
+                if let Some(xf) = self.transform_mut(id) {
+                    xf.rotation = crate::math::Quat::from_rotation_z(value.to_radians());
+                }
+            }
+            "Transform.scale_x" => {
+                if let Some(xf) = self.transform_mut(id) {
+                    xf.scale.x = value;
+                }
+            }
+            "Transform.scale_y" => {
+                if let Some(xf) = self.transform_mut(id) {
+                    xf.scale.y = value;
+                }
+            }
+            "Sprite.alpha" => {
+                if let Some(sprite) = self.sprite_mut(id) {
+                    let scaled = value.clamp(0.0, 1.0) * 255.0;
+                    sprite.color.a = (scaled + 0.5) as u8;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -909,6 +1129,27 @@ fn edge_crossed(prev: f32, time: f32, at: f32) -> bool {
     time >= at && (prev < at || (prev == at && time > prev))
 }
 
+/// X (`axis == 0`) or Y. A curve replaces that axis; the other axis stays `from`→`to`.
+fn eval_axis(clip: &TimelineClipRuntime, time: f32, axis: u8) -> f32 {
+    let local = time - clip.start;
+    let curve = if axis == 0 {
+        clip.curve_x.as_ref()
+    } else {
+        clip.curve_y.as_ref()
+    };
+    if let Some(curve) = curve {
+        if let Some(v) = curve.sample(local) {
+            return v;
+        }
+    }
+    let u = clip.local_t(time);
+    if axis == 0 {
+        clip.from[0] + (clip.to[0] - clip.from[0]) * u
+    } else {
+        clip.from[1] + (clip.to[1] - clip.from[1]) * u
+    }
+}
+
 #[cfg(all(feature = "std", test))]
 mod tests {
     use super::*;
@@ -938,6 +1179,9 @@ mod tests {
             to,
             signal: String::new(),
             payload: String::new(),
+            curve_x: None,
+            curve_y: None,
+            curve_value: None,
         }
     }
 
@@ -1005,6 +1249,7 @@ mod tests {
             name: name.into(),
             kind,
             binding: binding.into(),
+            property: String::new(),
             clips,
         }
     }
@@ -1019,6 +1264,7 @@ mod tests {
             name: "CamSlide".into(),
             kind: TimelineTrackKind::Transform,
             binding: "MainCamera".into(),
+            property: String::new(),
             clips: vec![clip_xform(0.0, 2.0, [320.0, 240.0], [400.0, 240.0])],
         });
         world.set_director(dir, Some(d));
@@ -1538,5 +1784,229 @@ mod tests {
             "B is synced to A's clip and does not also tick, got {tb}"
         );
         assert!(ta.is_finite() && tb.is_finite());
+    }
+
+    fn key(t: f32, v: f32, interp: CurveInterp) -> CurveKey {
+        CurveKey { t, v, interp }
+    }
+
+    #[test]
+    fn curve_sample_interp_edges_and_sort() {
+        let linear = Curve::from_keys(vec![
+            key(0.0, 0.0, CurveInterp::Linear),
+            key(2.0, 10.0, CurveInterp::Linear),
+        ]);
+        assert!((linear.sample(-1.0).unwrap() - 0.0).abs() < 1e-4);
+        assert!((linear.sample(0.0).unwrap() - 0.0).abs() < 1e-4);
+        assert!((linear.sample(1.0).unwrap() - 5.0).abs() < 1e-4);
+        assert!((linear.sample(3.0).unwrap() - 10.0).abs() < 1e-4);
+
+        let constant = Curve::from_keys(vec![
+            key(0.0, 1.0, CurveInterp::Constant),
+            key(1.0, 9.0, CurveInterp::Linear),
+        ]);
+        assert!((constant.sample(0.0).unwrap() - 1.0).abs() < 1e-4);
+        assert!((constant.sample(0.99).unwrap() - 1.0).abs() < 1e-4);
+        assert!((constant.sample(1.0).unwrap() - 9.0).abs() < 1e-4);
+
+        let ease = Curve::from_keys(vec![
+            key(0.0, 0.0, CurveInterp::Ease),
+            key(2.0, 10.0, CurveInterp::Linear),
+        ]);
+        let mid = ease.sample(1.0).unwrap();
+        assert!(
+            (mid - 5.0).abs() < 1e-3,
+            "smoothstep midpoint is linear, got {mid}"
+        );
+        let quarter = ease.sample(0.5).unwrap();
+        let expect = 10.0 * (0.25 * 0.25 * (3.0 - 2.0 * 0.25));
+        assert!(
+            (quarter - expect).abs() < 1e-3,
+            "ease at u=0.25 should be {expect}, got {quarter}"
+        );
+        assert!((quarter - 2.5).abs() > 0.5, "ease is not linear at u=0.25");
+
+        let single = Curve::from_keys(vec![key(0.4, 3.5, CurveInterp::Linear)]);
+        assert!((single.sample(0.0).unwrap() - 3.5).abs() < 1e-4);
+        assert!((single.sample(9.0).unwrap() - 3.5).abs() < 1e-4);
+
+        assert!(Curve::default().sample(0.0).is_none());
+
+        let unsorted = Curve::from_keys(vec![
+            key(2.0, 10.0, CurveInterp::Linear),
+            key(0.0, 0.0, CurveInterp::Linear),
+        ]);
+        assert!((unsorted.keys[0].t - 0.0).abs() < 1e-6);
+        assert!((unsorted.sample(1.0).unwrap() - 5.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn transform_curve_puts_entity_at_expected_xy() {
+        let mut world = World::new();
+        let cam = world.spawn_named("MainCamera", Transform::from_xy(10.0, 10.0));
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut clip = clip_xform(0.0, 2.0, [0.0, 0.0], [10.0, 100.0]);
+        clip.curve_x = Some(Curve::from_keys(vec![
+            key(0.0, 0.0, CurveInterp::Linear),
+            key(2.0, 10.0, CurveInterp::Linear),
+        ]));
+        clip.curve_y = Some(Curve::from_keys(vec![
+            key(0.0, 0.0, CurveInterp::Ease),
+            key(2.0, 10.0, CurveInterp::Linear),
+        ]));
+        let mut d = PlayableDirector::new("intro", 4.0, true, false);
+        d.tracks.push(track(
+            "Slide",
+            TimelineTrackKind::Transform,
+            "MainCamera",
+            vec![clip],
+        ));
+        world.set_director(dir, Some(d));
+        world.capture_timeline_baselines();
+        world.set_timeline_time(dir, 0.5);
+        let xf = world.transform(cam).unwrap();
+        assert!(
+            (xf.translation.x - 2.5).abs() < 1e-3,
+            "linear x, got {}",
+            xf.translation.x
+        );
+        let y_ease = 10.0 * (0.25 * 0.25 * (3.0 - 2.0 * 0.25));
+        assert!(
+            (xf.translation.y - y_ease).abs() < 1e-3,
+            "ease y, got {} want {y_ease}",
+            xf.translation.y
+        );
+        world.set_timeline_time(dir, 3.0);
+        let xf = world.transform(cam).unwrap();
+        assert!((xf.translation.x - 10.0).abs() < 1e-3, "hold last x key");
+        assert!((xf.translation.y - 10.0).abs() < 1e-3, "hold last y key");
+        world.stop_timeline(dir);
+        let xf = world.transform(cam).unwrap();
+        assert!((xf.translation.x - 0.0).abs() < 1e-3);
+        assert!((xf.translation.y - 0.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn transform_curve_on_one_axis_keeps_from_to_on_the_other() {
+        let mut world = World::new();
+        let cam = world.spawn_named("MainCamera", Transform::from_xy(1.0, 1.0));
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut clip = clip_xform(0.0, 2.0, [0.0, 0.0], [10.0, 80.0]);
+        clip.curve_x = Some(Curve::from_keys(vec![
+            key(0.0, 4.0, CurveInterp::Constant),
+            key(2.0, 6.0, CurveInterp::Linear),
+        ]));
+        let mut d = PlayableDirector::new("intro", 4.0, true, false);
+        d.tracks.push(track(
+            "Slide",
+            TimelineTrackKind::Transform,
+            "MainCamera",
+            vec![clip],
+        ));
+        world.set_director(dir, Some(d));
+        world.set_timeline_time(dir, 1.0);
+        let xf = world.transform(cam).unwrap();
+        assert!(
+            (xf.translation.x - 4.0).abs() < 1e-3,
+            "constant x until t=2"
+        );
+        assert!((xf.translation.y - 40.0).abs() < 1e-3, "y still from→to");
+    }
+
+    #[test]
+    fn legacy_from_to_without_curves_matches_lerp() {
+        let mut world = World::new();
+        let cam = world.spawn_named("MainCamera", Transform::from_xy(10.0, 10.0));
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut d = PlayableDirector::new("intro", 4.0, true, false);
+        d.tracks.push(track(
+            "CamSlide",
+            TimelineTrackKind::Transform,
+            "MainCamera",
+            vec![clip_xform(0.0, 2.0, [320.0, 240.0], [400.0, 240.0])],
+        ));
+        world.set_director(dir, Some(d));
+        world.set_timeline_time(dir, 1.0);
+        let xf = world.transform(cam).unwrap();
+        assert!((xf.translation.x - 360.0).abs() < 1e-3);
+        assert!((xf.translation.y - 240.0).abs() < 1e-3);
+        world.set_timeline_time(dir, 3.0);
+        let xf = world.transform(cam).unwrap();
+        assert!((xf.translation.x - 400.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn float_curve_drives_rotation_scale_and_sprite_alpha() {
+        use crate::draw::TextureId;
+        use crate::math::Vec2;
+        use crate::world::Sprite;
+
+        let mut world = World::new();
+        let id = world.spawn_named("Orb", Transform::from_xy(0.0, 0.0));
+        world.set_sprite(id, Some(Sprite::new(TextureId(0), Vec2::new(16.0, 16.0))));
+        let dir = world.spawn_named("Cutscene", Transform::default());
+        let mut rot = clip_base(0.0, 2.0, true, "", Vec::new(), "", [0.0, 0.0], [0.0, 0.0]);
+        rot.curve_value = Some(Curve::from_keys(vec![
+            key(0.0, 0.0, CurveInterp::Linear),
+            key(2.0, 90.0, CurveInterp::Linear),
+        ]));
+        let mut sx = clip_base(0.0, 2.0, true, "", Vec::new(), "", [0.0, 0.0], [0.0, 0.0]);
+        sx.curve_value = Some(Curve::from_keys(vec![
+            key(0.0, 1.0, CurveInterp::Linear),
+            key(2.0, 3.0, CurveInterp::Linear),
+        ]));
+        let mut alpha = clip_base(0.0, 2.0, true, "", Vec::new(), "", [0.0, 0.0], [0.0, 0.0]);
+        alpha.curve_value = Some(Curve::from_keys(vec![
+            key(0.0, 1.0, CurveInterp::Ease),
+            key(2.0, 0.0, CurveInterp::Linear),
+        ]));
+        let mut d = PlayableDirector::new("intro", 4.0, true, false);
+        d.tracks.push(TimelineTrackRuntime {
+            name: "Spin".into(),
+            kind: TimelineTrackKind::Float,
+            binding: "Orb".into(),
+            property: "Transform.rotation".into(),
+            clips: vec![rot],
+        });
+        d.tracks.push(TimelineTrackRuntime {
+            name: "Grow".into(),
+            kind: TimelineTrackKind::Float,
+            binding: "Orb".into(),
+            property: "Transform.scale_x".into(),
+            clips: vec![sx],
+        });
+        d.tracks.push(TimelineTrackRuntime {
+            name: "Fade".into(),
+            kind: TimelineTrackKind::Float,
+            binding: "Orb".into(),
+            property: "Sprite.alpha".into(),
+            clips: vec![alpha],
+        });
+        world.set_director(dir, Some(d));
+        world.set_timeline_time(dir, 1.0);
+        let xf = world.transform(id).unwrap();
+        let (z, _, _) = xf.rotation.to_euler(glam::EulerRot::ZYX);
+        assert!(
+            (z.to_degrees() - 45.0).abs() < 0.5,
+            "rotation degrees, got {}",
+            z.to_degrees()
+        );
+        assert!((xf.scale.x - 2.0).abs() < 1e-3, "scale_x");
+        let a = world.sprite(id).unwrap().color.a;
+        let u = 0.5_f32;
+        let s = u * u * (3.0 - 2.0 * u);
+        let expect = ((1.0 + (0.0 - 1.0) * s) * 255.0).round() as u8;
+        assert_eq!(a, expect, "eased alpha");
+        world.set_timeline_time(dir, 3.0);
+        let (z, _, _) = world
+            .transform(id)
+            .unwrap()
+            .rotation
+            .to_euler(glam::EulerRot::ZYX);
+        assert!(
+            (z.to_degrees() - 90.0).abs() < 0.5,
+            "hold last rotation key"
+        );
+        assert_eq!(world.sprite(id).unwrap().color.a, 0);
     }
 }

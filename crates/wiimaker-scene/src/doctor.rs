@@ -160,7 +160,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
                             });
                         }
                     }
-                    for clip in &track.clips {
+                    for (clip_i, clip) in track.clips.iter().enumerate() {
                         if let Some(stem) = clip.clip.as_deref().filter(|s| !s.is_empty()) {
                             if !anim_names.iter().any(|n| n == stem) {
                                 issues.push(Issue {
@@ -182,6 +182,26 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
                                     ),
                                 });
                             }
+                        }
+                        warn_clip_curves(&mut issues, tname, track, clip_i, clip);
+                    }
+                    if track.kind == wiimaker_assets::TimelineTrackKind::Float {
+                        match track.property.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                            Some(prop) if wiimaker_assets::known_float_property(prop) => {}
+                            Some(prop) => issues.push(Issue {
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "timeline '{tname}': track '{}' unknown float property '{prop}'",
+                                    track.name
+                                ),
+                            }),
+                            None => issues.push(Issue {
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "timeline '{tname}': track '{}' float track missing property",
+                                    track.name
+                                ),
+                            }),
                         }
                     }
                 }
@@ -277,6 +297,59 @@ fn check_build_scenes(game_dir: &Path, project: &GameProject, issues: &mut Vec<I
                 severity: Severity::Warning,
                 message: format!("build scene missing: {rel}"),
             });
+        }
+    }
+}
+
+fn warn_clip_curves(
+    issues: &mut Vec<Issue>,
+    tname: &str,
+    track: &wiimaker_assets::TimelineTrack,
+    clip_i: usize,
+    clip: &wiimaker_assets::TimelineClip,
+) {
+    let Some(curves) = &clip.curves else {
+        return;
+    };
+    let span = clip.span();
+    for (prop, keys) in [
+        ("x", curves.x.as_ref()),
+        ("y", curves.y.as_ref()),
+        ("value", curves.value.as_ref()),
+    ] {
+        let Some(keys) = keys else {
+            continue;
+        };
+        if keys.is_empty() {
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: format!(
+                    "timeline '{tname}': track '{}' clip {clip_i} curve '{prop}' is empty",
+                    track.name
+                ),
+            });
+            continue;
+        }
+        for (ki, key) in keys.iter().enumerate() {
+            if key.t < -1e-3 || key.t > span + 1e-3 {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "timeline '{tname}': track '{}' clip {clip_i} curve '{prop}' key {ki} t={:.4} is outside the clip",
+                        track.name, key.t
+                    ),
+                });
+            }
+            if !key.interp.is_known() {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "timeline '{tname}': track '{}' clip {clip_i} curve '{prop}' key {ki} unknown interp '{}'",
+                        track.name,
+                        key.interp.as_str()
+                    ),
+                });
+            }
         }
     }
 }

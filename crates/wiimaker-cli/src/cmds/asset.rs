@@ -7,12 +7,13 @@ use wiimaker_assets::{
     inspect_wav, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
     resolve_wav, set_sprite_pivot, slice_sheet, spawn_wav_player, write_anim_clip,
     write_animator_controller, write_timeline, AnimatorControllerMeta, ControllerCondition,
-    ControllerParam, ControllerParamType, ControllerState, ControllerTransition, SpriteCatalog,
-    TimelineClip, TimelineMeta, TimelineTrack, TimelineTrackKind,
+    ControllerParam, ControllerParamType, ControllerState, ControllerTransition, CurveEdit,
+    CurveInterp, CurveProp, SpriteCatalog, TimelineClip, TimelineMeta, TimelineTrack,
+    TimelineTrackKind,
 };
 use wiimaker_scene::{find_game_dir, load_project};
 
-use crate::args::AssetCmd;
+use crate::args::{AssetCmd, TimelineCurveCmd};
 
 pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
     match cmd {
@@ -340,6 +341,7 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             }
             Ok(())
         }
+        AssetCmd::TimelineCurve { cmd } => timeline_curve_cmd(root, cmd, json),
         AssetCmd::ListTimelines { game } => {
             let game_dir = find_game_dir(root, &game)?;
             let project = load_project(&game_dir)?;
@@ -558,7 +560,7 @@ fn parse_timeline_flags(duration: f32, tracks: &[String]) -> Result<TimelineMeta
         }
         let kind = TimelineTrackKind::parse(kind_s).ok_or_else(|| {
             anyhow::anyhow!(
-                "--track '{spec}' kind must be Activation|Animation|Audio|Transform|Signal|Control"
+                "--track '{spec}' kind must be Activation|Animation|Audio|Transform|Signal|Control|Float"
             )
         })?;
         let (start_s, end_s) = range.split_once('-').ok_or_else(|| {
@@ -577,7 +579,17 @@ fn parse_timeline_flags(duration: f32, tracks: &[String]) -> Result<TimelineMeta
         } else {
             Some(binding_s.to_string())
         };
-        let clip = match kind {
+        let (payload, curve_spec) = match kind {
+            TimelineTrackKind::Transform | TimelineTrackKind::Float => {
+                match payload.split_once('|') {
+                    Some((head, rest)) => (head.trim(), Some(rest)),
+                    None => (payload, None),
+                }
+            }
+            _ => (payload, None),
+        };
+        let mut property = None;
+        let mut clip = match kind {
             TimelineTrackKind::Activation => {
                 let active = if payload.is_empty() {
                     true
@@ -613,6 +625,15 @@ fn parse_timeline_flags(duration: f32, tracks: &[String]) -> Result<TimelineMeta
                 })?;
                 TimelineClip::transform(start, end, parse_xy(from_s)?, parse_xy(to_s)?)
             }
+            TimelineTrackKind::Float => {
+                if payload.is_empty() {
+                    anyhow::bail!(
+                        "--track '{spec}' float payload is a property (Transform.rotation|value:...)"
+                    );
+                }
+                property = Some(payload.to_string());
+                TimelineClip::control(start, end)
+            }
             TimelineTrackKind::Signal => {
                 let (name, extra) = payload.split_once('|').unwrap_or((payload, ""));
                 if name.trim().is_empty() {
@@ -626,16 +647,20 @@ fn parse_timeline_flags(duration: f32, tracks: &[String]) -> Result<TimelineMeta
             }
             TimelineTrackKind::Control => TimelineClip::control(start, end),
         };
-        if let Some(existing) = out
-            .iter_mut()
-            .find(|t| t.name == name && t.kind == kind && t.binding == binding)
-        {
+        if let Some(spec) = curve_spec {
+            wiimaker_assets::apply_curve_suffix(&mut clip, spec)
+                .with_context(|| format!("--track '{spec}' curves"))?;
+        }
+        if let Some(existing) = out.iter_mut().find(|t| {
+            t.name == name && t.kind == kind && t.binding == binding && t.property == property
+        }) {
             existing.clips.push(clip);
         } else {
             out.push(TimelineTrack {
                 name: name.to_string(),
                 kind,
                 binding,
+                property,
                 clips: vec![clip],
             });
         }
@@ -644,6 +669,242 @@ fn parse_timeline_flags(duration: f32, tracks: &[String]) -> Result<TimelineMeta
         duration,
         tracks: out,
     })
+}
+
+fn timeline_curve_cmd(root: &Path, cmd: TimelineCurveCmd, json: bool) -> Result<()> {
+    match cmd {
+        TimelineCurveCmd::Sample {
+            game,
+            timeline,
+            track,
+            clip,
+            prop,
+            from,
+            to,
+            steps,
+        } => {
+            let (_path, meta) = load_timeline(root, &game, &timeline)?;
+            let prop = parse_curve_prop(&prop)?;
+            let samples =
+                wiimaker_assets::curve_sample(&meta, &track, clip, prop, from, to, steps)?;
+            if json {
+                #[derive(Serialize)]
+                struct Sample {
+                    t: f32,
+                    v: f32,
+                }
+                #[derive(Serialize)]
+                struct Out {
+                    ok: bool,
+                    timeline: String,
+                    track: String,
+                    clip: usize,
+                    prop: String,
+                    samples: Vec<Sample>,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Out {
+                        ok: true,
+                        timeline,
+                        track,
+                        clip,
+                        prop: prop.as_str().to_string(),
+                        samples: samples
+                            .into_iter()
+                            .map(|s| Sample { t: s.t, v: s.v })
+                            .collect(),
+                    })?
+                );
+            } else {
+                for s in samples {
+                    println!("{:.4}\t{:.4}", s.t, s.v);
+                }
+            }
+            Ok(())
+        }
+        other => {
+            let (game, timeline) = {
+                let (game, timeline) = curve_target(&other);
+                (game.to_string(), timeline.to_string())
+            };
+            let (path, mut meta) = load_timeline(root, &game, &timeline)?;
+            let edit = match other {
+                TimelineCurveCmd::AddKey {
+                    track,
+                    clip,
+                    prop,
+                    t,
+                    v,
+                    interp,
+                    ..
+                } => wiimaker_assets::curve_add_key(
+                    &mut meta,
+                    &track,
+                    clip,
+                    parse_curve_prop(&prop)?,
+                    t,
+                    v,
+                    parse_curve_interp(&interp)?,
+                )?,
+                TimelineCurveCmd::RemoveKey {
+                    track,
+                    clip,
+                    prop,
+                    index,
+                    t,
+                    ..
+                } => wiimaker_assets::curve_remove_key(
+                    &mut meta,
+                    &track,
+                    clip,
+                    parse_curve_prop(&prop)?,
+                    index,
+                    t,
+                )?,
+                TimelineCurveCmd::MoveKey {
+                    track,
+                    clip,
+                    prop,
+                    index,
+                    t,
+                    v,
+                    ..
+                } => wiimaker_assets::curve_move_key(
+                    &mut meta,
+                    &track,
+                    clip,
+                    parse_curve_prop(&prop)?,
+                    index,
+                    t,
+                    v,
+                )?,
+                TimelineCurveCmd::SetInterp {
+                    track,
+                    clip,
+                    prop,
+                    index,
+                    interp,
+                    ..
+                } => wiimaker_assets::curve_set_interp(
+                    &mut meta,
+                    &track,
+                    clip,
+                    parse_curve_prop(&prop)?,
+                    index,
+                    parse_curve_interp(&interp)?,
+                )?,
+                TimelineCurveCmd::AddCurve {
+                    track, clip, prop, ..
+                } => wiimaker_assets::curve_add_curve(
+                    &mut meta,
+                    &track,
+                    clip,
+                    parse_curve_prop(&prop)?,
+                )?,
+                TimelineCurveCmd::RemoveCurve {
+                    track, clip, prop, ..
+                } => wiimaker_assets::curve_remove_curve(
+                    &mut meta,
+                    &track,
+                    clip,
+                    parse_curve_prop(&prop)?,
+                )?,
+                TimelineCurveCmd::Sample { .. } => unreachable!(),
+            };
+            meta.save(&path)?;
+            print_curve_edit(json, &timeline, &path, &edit)
+        }
+    }
+}
+
+fn curve_target(cmd: &TimelineCurveCmd) -> (&str, &str) {
+    match cmd {
+        TimelineCurveCmd::AddKey { game, timeline, .. }
+        | TimelineCurveCmd::RemoveKey { game, timeline, .. }
+        | TimelineCurveCmd::MoveKey { game, timeline, .. }
+        | TimelineCurveCmd::SetInterp { game, timeline, .. }
+        | TimelineCurveCmd::AddCurve { game, timeline, .. }
+        | TimelineCurveCmd::RemoveCurve { game, timeline, .. }
+        | TimelineCurveCmd::Sample { game, timeline, .. } => (game, timeline),
+    }
+}
+
+fn load_timeline(
+    root: &Path,
+    game: &str,
+    name: &str,
+) -> Result<(std::path::PathBuf, TimelineMeta)> {
+    let game_dir = find_game_dir(root, game)?;
+    let project = load_project(&game_dir)?;
+    let assets = project.assets_path(&game_dir);
+    let path = TimelineMeta::path(&assets, name);
+    let meta = TimelineMeta::load(&path)?;
+    Ok((path, meta))
+}
+
+fn parse_curve_prop(s: &str) -> Result<CurveProp> {
+    CurveProp::parse(s).ok_or_else(|| anyhow::anyhow!("--prop must be x|y|value, got '{s}'"))
+}
+
+fn parse_curve_interp(s: &str) -> Result<CurveInterp> {
+    let interp = CurveInterp::parse(s);
+    if !interp.is_known() {
+        anyhow::bail!("--interp must be linear|constant|ease, got '{s}'");
+    }
+    Ok(interp)
+}
+
+fn print_curve_edit(json: bool, timeline: &str, path: &Path, edit: &CurveEdit) -> Result<()> {
+    if json {
+        #[derive(Serialize)]
+        struct KeyOut {
+            t: f32,
+            v: f32,
+            interp: String,
+        }
+        #[derive(Serialize)]
+        struct Out {
+            ok: bool,
+            path: String,
+            timeline: String,
+            track: String,
+            clip: usize,
+            prop: String,
+            index: Option<usize>,
+            keys: Vec<KeyOut>,
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&Out {
+                ok: true,
+                path: path.display().to_string(),
+                timeline: timeline.to_string(),
+                track: edit.track.clone(),
+                clip: edit.clip,
+                prop: edit.prop.as_str().to_string(),
+                index: edit.index,
+                keys: edit
+                    .keys
+                    .iter()
+                    .map(|k| KeyOut {
+                        t: k.t,
+                        v: k.v,
+                        interp: k.interp.as_str().to_string(),
+                    })
+                    .collect(),
+            })?
+        );
+    } else {
+        println!(
+            "{} clip {} {} ({} keys)",
+            edit.track,
+            edit.clip,
+            edit.prop.as_str(),
+            edit.keys.len()
+        );
+    }
+    Ok(())
 }
 
 fn parse_xy(s: &str) -> Result<[f32; 2]> {
