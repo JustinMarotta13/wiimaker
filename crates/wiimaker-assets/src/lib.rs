@@ -23,8 +23,9 @@ mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
 pub use controller::{
-    is_any_state, list_animator_controllers, write_animator_controller, AnimatorControllerCatalog,
-    AnimatorControllerMeta, ControllerCondition, ControllerParam, ControllerParamType,
+    is_any_state, list_animator_controllers, write_animator_controller, write_state_blend_tree,
+    write_state_clip, AnimatorControllerCatalog, AnimatorControllerMeta, BlendDimension,
+    BlendMotion, BlendTreeMeta, ControllerCondition, ControllerParam, ControllerParamType,
     ControllerState, ControllerTransition,
 };
 pub use font::{

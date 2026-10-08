@@ -69,13 +69,139 @@ impl ControllerParam {
     }
 }
 
-/// One named state → clip stem.
+/// Blend dimension on a state (`"1D"` / `"2D"` in JSON).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BlendDimension {
+    #[serde(rename = "1D")]
+    OneD,
+    #[serde(rename = "2D")]
+    TwoD,
+}
+
+impl BlendDimension {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_uppercase().as_str() {
+            "1D" => Some(Self::OneD),
+            "2D" => Some(Self::TwoD),
+            _ => None,
+        }
+    }
+
+    pub fn param_count(self) -> usize {
+        match self {
+            Self::OneD => 1,
+            Self::TwoD => 2,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OneD => "1D",
+            Self::TwoD => "2D",
+        }
+    }
+}
+
+/// Child motion in a blend tree: `threshold` for 1D, `position` `[x, y]` for 2D.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BlendMotion {
+    pub clip: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 2]>,
+}
+
+/// 1D or 2D blend tree. `params` lists Float parameter names (one for 1D, X then Y for 2D).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BlendTreeMeta {
+    #[serde(rename = "type")]
+    pub dimension: BlendDimension,
+    pub params: Vec<String>,
+    #[serde(default)]
+    pub motions: Vec<BlendMotion>,
+}
+
+impl BlendTreeMeta {
+    pub fn validate(&self, state: &str) -> Result<()> {
+        let want = self.dimension.param_count();
+        if self.params.len() != want {
+            bail!(
+                "state '{state}' blend tree {} needs {want} param(s), got {}",
+                self.dimension.as_str(),
+                self.params.len()
+            );
+        }
+        for p in &self.params {
+            if p.trim().is_empty() {
+                bail!("state '{state}' blend tree has an empty param name");
+            }
+        }
+        if self.dimension == BlendDimension::TwoD && self.params[0] == self.params[1] {
+            bail!("state '{state}' blend tree 2D needs two different params");
+        }
+        for m in &self.motions {
+            if m.clip.is_empty() {
+                bail!("state '{state}' blend motion has empty clip");
+            }
+            match self.dimension {
+                BlendDimension::OneD => {
+                    if m.position.is_some() {
+                        bail!(
+                            "state '{state}' 1D motion '{}' uses position (use threshold)",
+                            m.clip
+                        );
+                    }
+                    match m.threshold {
+                        Some(t) if t.is_finite() => {}
+                        _ => bail!(
+                            "state '{state}' 1D motion '{}' needs a finite threshold",
+                            m.clip
+                        ),
+                    }
+                }
+                BlendDimension::TwoD => {
+                    if m.threshold.is_some() {
+                        bail!(
+                            "state '{state}' 2D motion '{}' uses threshold (use position)",
+                            m.clip
+                        );
+                    }
+                    match m.position {
+                        Some(p) if p[0].is_finite() && p[1].is_finite() => {}
+                        _ => bail!(
+                            "state '{state}' 2D motion '{}' needs a finite position",
+                            m.clip
+                        ),
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One named state → clip stem, or a blend tree (then `clip` stays empty).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ControllerState {
     pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub clip: String,
     #[serde(default = "default_speed")]
     pub speed: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend_tree: Option<BlendTreeMeta>,
+}
+
+impl ControllerState {
+    pub fn plain(name: impl Into<String>, clip: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            clip: clip.into(),
+            speed: default_speed(),
+            blend_tree: None,
+        }
+    }
 }
 
 /// Transition condition (AND together on a transition).
@@ -151,8 +277,13 @@ impl AnimatorControllerMeta {
             if s.name.is_empty() {
                 bail!("animator state name must not be empty");
             }
-            if s.clip.is_empty() {
-                bail!("animator state '{}' has empty clip", s.name);
+            match (&s.blend_tree, s.clip.is_empty()) {
+                (Some(_), false) => {
+                    bail!("animator state '{}' sets both clip and blend_tree", s.name)
+                }
+                (Some(bt), true) => bt.validate(&s.name)?,
+                (None, true) => bail!("animator state '{}' has empty clip", s.name),
+                (None, false) => {}
             }
             if seen.insert(s.name.as_str(), ()).is_some() {
                 bail!("duplicate animator state '{}'", s.name);
@@ -205,6 +336,55 @@ pub fn write_animator_controller(
     }
     meta.validate()?;
     let path = AnimatorControllerMeta::path(assets_dir, name);
+    meta.save(&path)?;
+    Ok((path, meta))
+}
+
+/// Set `state` to a blend tree on an existing controller (adds the state when missing).
+///
+/// CLI `asset blend-tree` and the editor Inspector both call this, so their files match.
+pub fn write_state_blend_tree(
+    assets_dir: &Path,
+    controller: &str,
+    state: &str,
+    tree: BlendTreeMeta,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    tree.validate(state)?;
+    let path = AnimatorControllerMeta::path(assets_dir, controller);
+    let mut meta = AnimatorControllerMeta::load(&path)?;
+    match meta.states.iter_mut().find(|s| s.name == state) {
+        Some(s) => {
+            s.clip.clear();
+            s.blend_tree = Some(tree);
+        }
+        None => meta.states.push(ControllerState {
+            name: state.to_string(),
+            clip: String::new(),
+            speed: default_speed(),
+            blend_tree: Some(tree),
+        }),
+    }
+    meta.save(&path)?;
+    Ok((path, meta))
+}
+
+/// Replace `state`'s blend tree with a plain clip. The state must already exist.
+pub fn write_state_clip(
+    assets_dir: &Path,
+    controller: &str,
+    state: &str,
+    clip: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    if clip.trim().is_empty() {
+        bail!("state '{state}' clip must not be empty");
+    }
+    let path = AnimatorControllerMeta::path(assets_dir, controller);
+    let mut meta = AnimatorControllerMeta::load(&path)?;
+    let Some(s) = meta.states.iter_mut().find(|s| s.name == state) else {
+        bail!("animator controller '{controller}' has no state '{state}'");
+    };
+    s.clip = clip.to_string();
+    s.blend_tree = None;
     meta.save(&path)?;
     Ok((path, meta))
 }
@@ -275,16 +455,8 @@ mod tests {
                 default: Some(serde_json::json!(false)),
             }],
             states: vec![
-                ControllerState {
-                    name: "Idle".into(),
-                    clip: "idle".into(),
-                    speed: 1.0,
-                },
-                ControllerState {
-                    name: "Walk".into(),
-                    clip: "walk".into(),
-                    speed: 1.0,
-                },
+                ControllerState::plain("Idle", "idle"),
+                ControllerState::plain("Walk", "walk"),
             ],
             transitions: vec![
                 ControllerTransition {
@@ -334,5 +506,189 @@ mod tests {
         let mut m = sample();
         m.default_state = "Nope".into();
         assert!(m.validate().is_err());
+    }
+
+    fn motion1d(clip: &str, t: f32) -> BlendMotion {
+        BlendMotion {
+            clip: clip.into(),
+            threshold: Some(t),
+            position: None,
+        }
+    }
+
+    fn motion2d(clip: &str, x: f32, y: f32) -> BlendMotion {
+        BlendMotion {
+            clip: clip.into(),
+            threshold: None,
+            position: Some([x, y]),
+        }
+    }
+
+    fn tree1d() -> BlendTreeMeta {
+        BlendTreeMeta {
+            dimension: BlendDimension::OneD,
+            params: vec!["Speed".into()],
+            motions: vec![motion1d("idle", 0.0), motion1d("walk", 1.0)],
+        }
+    }
+
+    fn tree2d() -> BlendTreeMeta {
+        BlendTreeMeta {
+            dimension: BlendDimension::TwoD,
+            params: vec!["DirX".into(), "DirY".into()],
+            motions: vec![
+                motion2d("idle", 0.0, 0.0),
+                motion2d("up", 0.0, -1.0),
+                motion2d("right", 1.0, 0.0),
+            ],
+        }
+    }
+
+    fn with_blend(tree: BlendTreeMeta) -> AnimatorControllerMeta {
+        AnimatorControllerMeta {
+            default_state: "Locomotion".into(),
+            parameters: vec![ControllerParam {
+                name: "Speed".into(),
+                kind: ControllerParamType::Float,
+                default: Some(serde_json::json!(0.0)),
+            }],
+            states: vec![ControllerState {
+                name: "Locomotion".into(),
+                clip: String::new(),
+                speed: 1.0,
+                blend_tree: Some(tree),
+            }],
+            transitions: Vec::new(),
+        }
+    }
+
+    fn tmp_dir(label: &str) -> std::path::PathBuf {
+        let dir = env::temp_dir().join(format!("wiimaker-blend-{label}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn legacy_controller_json_resaves_byte_identical() {
+        let legacy = "{\n  \"default\": \"Idle\",\n  \"parameters\": [\n    {\n      \"name\": \"Moving\",\n      \"type\": \"Bool\",\n      \"default\": false\n    }\n  ],\n  \"states\": [\n    {\n      \"name\": \"Idle\",\n      \"clip\": \"idle\",\n      \"speed\": 1.0\n    }\n  ],\n  \"transitions\": []\n}\n";
+        let dir = tmp_dir("legacy");
+        let path = dir.join("p.controller.json");
+        fs::write(&path, legacy).unwrap();
+        let meta = AnimatorControllerMeta::load(&path).unwrap();
+        assert!(meta.states[0].blend_tree.is_none());
+        meta.save(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn blend_tree_roundtrip_is_identical() {
+        for tree in [tree1d(), tree2d()] {
+            let meta = with_blend(tree.clone());
+            let dir = tmp_dir("roundtrip");
+            let (path, _) = write_animator_controller(&dir, "ctrl", meta).unwrap();
+            let first = fs::read_to_string(&path).unwrap();
+            let loaded = AnimatorControllerMeta::load(&path).unwrap();
+            assert_eq!(loaded.states[0].blend_tree.as_ref(), Some(&tree));
+            assert!(loaded.states[0].clip.is_empty());
+            loaded.save(&path).unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), first);
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn blend_tree_json_shape() {
+        let text = serde_json::to_string(&with_blend(tree1d())).unwrap();
+        assert!(text.contains("\"type\":\"1D\""), "{text}");
+        assert!(text.contains("\"params\":[\"Speed\"]"), "{text}");
+        assert!(text.contains("\"threshold\":1.0"), "{text}");
+        assert!(!text.contains("\"clip\":\"\""), "{text}");
+        let text2 = serde_json::to_string(&with_blend(tree2d())).unwrap();
+        assert!(text2.contains("\"type\":\"2D\""), "{text2}");
+        assert!(text2.contains("\"position\":[0.0,-1.0]"), "{text2}");
+    }
+
+    #[test]
+    fn validate_rejects_bad_blend_trees() {
+        let mut t = tree1d();
+        t.params.push("Extra".into());
+        assert!(with_blend(t).validate().is_err());
+
+        let mut t = tree1d();
+        t.motions[0].threshold = None;
+        assert!(with_blend(t).validate().is_err());
+
+        let mut t = tree2d();
+        t.motions[0].position = None;
+        assert!(with_blend(t).validate().is_err());
+
+        let mut t = tree2d();
+        t.motions[1].threshold = Some(0.5);
+        assert!(with_blend(t).validate().is_err());
+
+        let mut t = tree2d();
+        t.params[1] = t.params[0].clone();
+        assert!(with_blend(t).validate().is_err());
+
+        let mut t = tree1d();
+        t.motions[0].threshold = Some(f32::INFINITY);
+        assert!(with_blend(t).validate().is_err());
+
+        let mut m = with_blend(tree1d());
+        m.states[0].clip = "idle".into();
+        assert!(m.validate().is_err());
+
+        let mut m = with_blend(tree1d());
+        m.states[0].blend_tree = None;
+        assert!(m.validate().is_err());
+    }
+
+    #[test]
+    fn empty_blend_tree_is_allowed() {
+        let t = BlendTreeMeta {
+            dimension: BlendDimension::OneD,
+            params: vec!["Speed".into()],
+            motions: Vec::new(),
+        };
+        assert!(with_blend(t).validate().is_ok());
+    }
+
+    #[test]
+    fn write_state_blend_tree_adds_or_replaces_and_clip_restores() {
+        let dir = tmp_dir("write");
+        let mut base = sample();
+        base.parameters.push(ControllerParam {
+            name: "Speed".into(),
+            kind: ControllerParamType::Float,
+            default: Some(serde_json::json!(0.0)),
+        });
+        write_animator_controller(&dir, "player", base).unwrap();
+
+        let (path, meta) = write_state_blend_tree(&dir, "player", "Locomotion", tree1d()).unwrap();
+        assert!(path.ends_with("player.controller.json"));
+        assert_eq!(meta.state("Locomotion").unwrap().blend_tree, Some(tree1d()));
+
+        let (_, meta) = write_state_blend_tree(&dir, "player", "Walk", tree2d()).unwrap();
+        assert!(meta.state("Walk").unwrap().clip.is_empty());
+        assert_eq!(meta.state("Walk").unwrap().blend_tree, Some(tree2d()));
+
+        let (_, meta) = write_state_blend_tree(&dir, "player", "Walk", tree1d()).unwrap();
+        assert!(meta.state("Walk").unwrap().blend_tree.is_some());
+        assert!(meta.state("Walk").unwrap().clip.is_empty());
+
+        let (_, meta) = write_state_clip(&dir, "player", "Walk", "walk").unwrap();
+        assert!(meta.state("Walk").unwrap().blend_tree.is_none());
+        assert_eq!(meta.state("Walk").unwrap().clip, "walk");
+
+        assert!(write_state_clip(&dir, "player", "Nope", "walk").is_err());
+        assert!(write_state_blend_tree(&dir, "player", "X", {
+            let mut t = tree1d();
+            t.params.clear();
+            t
+        })
+        .is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
