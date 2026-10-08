@@ -7,6 +7,7 @@ mod dock;
 mod sprite_editor;
 mod theme;
 mod ui_console;
+mod ui_controller;
 mod ui_hierarchy;
 mod ui_inspector;
 mod ui_project;
