@@ -35,16 +35,8 @@ fn player_controller() -> AnimatorControllerMeta {
             default: Some(serde_json::json!(false)),
         }],
         states: vec![
-            ControllerState {
-                name: "Idle".into(),
-                clip: "idle".into(),
-                speed: 1.0,
-            },
-            ControllerState {
-                name: "Walk".into(),
-                clip: "walk".into(),
-                speed: 1.0,
-            },
+            ControllerState::plain("Idle", "idle"),
+            ControllerState::plain("Walk", "walk"),
         ],
         transitions: vec![
             ControllerTransition {

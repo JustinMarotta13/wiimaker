@@ -9,7 +9,8 @@ use crate::project::GameProject;
 use crate::scene::{load_scene, Scene};
 use wiimaker_assets::{
     inspect_wav, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
-    AnimClipMeta, AnimatorControllerMeta, SpriteCatalog, TimelineMeta,
+    AnimClipMeta, AnimatorControllerMeta, BlendDimension, BlendTreeMeta, ControllerParam,
+    ControllerParamType, ControllerState, SpriteCatalog, TimelineMeta,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -217,7 +218,9 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         match AnimatorControllerMeta::load(&path) {
             Ok(meta) => {
                 for s in &meta.states {
-                    if !anim_names.iter().any(|n| n == &s.clip) {
+                    if let Some(bt) = &s.blend_tree {
+                        check_blend_tree(cname, s, bt, &meta.parameters, &anim_names, &mut issues);
+                    } else if !anim_names.iter().any(|n| n == &s.clip) {
                         issues.push(Issue {
                             severity: Severity::Warning,
                             message: format!(
@@ -393,6 +396,78 @@ fn warn_unknown_sorting_layer(
                 ent.name
             ),
         });
+    }
+}
+
+fn check_blend_tree(
+    cname: &str,
+    state: &ControllerState,
+    tree: &BlendTreeMeta,
+    params: &[ControllerParam],
+    anim_names: &[String],
+    issues: &mut Vec<Issue>,
+) {
+    let mut warn = |message: String| {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message,
+        })
+    };
+    let st = &state.name;
+    if tree.motions.is_empty() {
+        warn(format!(
+            "controller '{cname}': blend state '{st}' has no motions"
+        ));
+    }
+    for p in &tree.params {
+        match params.iter().find(|d| &d.name == p) {
+            None => warn(format!(
+                "controller '{cname}': blend state '{st}' param '{p}' is not declared"
+            )),
+            Some(d) if d.kind != ControllerParamType::Float => warn(format!(
+                "controller '{cname}': blend state '{st}' param '{p}' must be Float"
+            )),
+            Some(_) => {}
+        }
+    }
+    for m in &tree.motions {
+        if !anim_names.iter().any(|n| n == &m.clip) {
+            warn(format!(
+                "controller '{cname}': blend state '{st}' motion clip '{}' missing (expected assets/{}.anim.json)",
+                m.clip, m.clip
+            ));
+        }
+    }
+    if tree.dimension == BlendDimension::TwoD {
+        for m in &tree.motions {
+            if let Some([x, y]) = m.position {
+                if x.abs() > 1.0 || y.abs() > 1.0 {
+                    warn(format!(
+                        "controller '{cname}': blend state '{st}' motion '{}' position ({x}, {y}) is outside -1..1",
+                        m.clip
+                    ));
+                }
+            }
+        }
+    }
+    for (i, a) in tree.motions.iter().enumerate() {
+        for b in &tree.motions[i + 1..] {
+            let same = match tree.dimension {
+                BlendDimension::OneD => a.threshold == b.threshold,
+                BlendDimension::TwoD => a.position == b.position,
+            };
+            if same {
+                warn(format!(
+                    "controller '{cname}': blend state '{st}' motions '{}' and '{}' share a {} (weight splits evenly)",
+                    a.clip,
+                    b.clip,
+                    match tree.dimension {
+                        BlendDimension::OneD => "threshold",
+                        BlendDimension::TwoD => "position",
+                    }
+                ));
+            }
+        }
     }
 }
 
