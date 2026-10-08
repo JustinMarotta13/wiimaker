@@ -5,8 +5,6 @@
 //! motions split their point's weight equally, so a stacked pair behaves like
 //! one motion with a shared clip choice.
 
-use crate::float::sqrt;
-
 #[cfg(feature = "std")]
 mod alloc_types {
     pub use std::vec::Vec;
@@ -29,9 +27,19 @@ fn zeros(n: usize) -> Vec<f32> {
     v
 }
 
+fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    dx * dx + dy * dy
+}
+
+fn sanitize_input(x: f32, lo: f32, hi: f32) -> f32 {
+    (if x.is_nan() { 0.0 } else { x }).clamp(lo, hi)
+}
+
 /// Piecewise-linear weights over sorted-by-value thresholds.
 ///
-/// The input is NaN-safe (NaN reads as 0) and clamped to `[min, max]` of the thresholds.
+/// The input is NaN-safe (NaN reads as 0) and then clamped to `[min, max]` of the thresholds.
 /// Equal thresholds split their share evenly.
 pub fn weights_1d(thresholds: &[f32], x: f32) -> Vec<f32> {
     let mut out = zeros(thresholds.len());
@@ -44,11 +52,7 @@ pub fn weights_1d(thresholds: &[f32], x: f32) -> Vec<f32> {
         min_t = min_t.min(t);
         max_t = max_t.max(t);
     }
-    let x = if x.is_nan() {
-        0.0
-    } else {
-        x.clamp(min_t, max_t)
-    };
+    let x = sanitize_input(x, min_t, max_t);
 
     let hits = thresholds.iter().filter(|&&t| (t - x).abs() <= EPS).count();
     if hits > 0 {
@@ -93,20 +97,17 @@ pub fn weights_1d(thresholds: &[f32], x: f32) -> Vec<f32> {
     out
 }
 
-fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
-    let dx = a[0] - b[0];
-    let dy = a[1] - b[1];
-    dx * dx + dy * dy
-}
-
-/// Radial hat weights over 2D motion positions.
+/// Gradient-band weights over 2D motion positions.
 ///
-/// The query is clamped into the motions' bounding box (so a straight line of
-/// motions behaves like a 1D blend along that line). Each motion's radius is its
-/// distance to the nearest distinct position; its raw weight is
-/// `max(0, 1 - d / radius)`. Those weights are normalized. Exact hits on a
-/// motion give 1 to that point. If every raw weight is zero, the nearest point
-/// wins.
+/// The query is NaN-safe and clamped into the motions' bounding box. Each motion's
+/// raw weight is the minimum, over the other distinct motions `j`, of
+/// `clamp(1 - t_j, 0, 1)`, where `t_j` is the projection of the query onto the
+/// segment `p_i -> p_j` as a fraction of its length. Motions that lie on one
+/// straight line therefore reproduce the 1D piecewise-linear weights, including
+/// uneven spacing, for queries inside the bounding box. A query outside the box
+/// is clamped onto it first, so on a non-axis-aligned line it does not extrapolate
+/// along that line. Coincident motions share their point's weight equally. Raw
+/// weights are normalized. If every raw weight is zero, the nearest point wins.
 pub fn weights_2d(positions: &[[f32; 2]], q: [f32; 2]) -> Vec<f32> {
     let n = positions.len();
     let mut out = zeros(n);
@@ -122,72 +123,46 @@ pub fn weights_2d(positions: &[[f32; 2]], q: [f32; 2]) -> Vec<f32> {
         }
     }
     let qc = [
-        if q[0].is_nan() {
-            0.0
-        } else {
-            q[0].clamp(min[0], max[0])
-        },
-        if q[1].is_nan() {
-            0.0
-        } else {
-            q[1].clamp(min[1], max[1])
-        },
+        sanitize_input(q[0], min[0], max[0]),
+        sanitize_input(q[1], min[1], max[1]),
     ];
 
-    let mut radius = zeros(n);
-    let mut any_distinct = false;
-    for i in 0..n {
-        let mut best = f32::INFINITY;
-        for j in 0..n {
-            let d2 = dist2(positions[i], positions[j]);
-            if d2 > EPS2 && d2 < best {
-                best = d2;
+    let mut raw = zeros(n);
+    for (i, &p) in positions.iter().enumerate() {
+        let mut band = 1.0_f32;
+        for (j, &pj) in positions.iter().enumerate() {
+            if j == i {
+                continue;
             }
+            let d = [pj[0] - p[0], pj[1] - p[1]];
+            let len2 = d[0] * d[0] + d[1] * d[1];
+            if len2 <= EPS2 {
+                continue;
+            }
+            let along = ((qc[0] - p[0]) * d[0] + (qc[1] - p[1]) * d[1]) / len2;
+            band = band.min((1.0 - along).clamp(0.0, 1.0));
         }
-        if best.is_finite() {
-            radius[i] = sqrt(best);
-            any_distinct = true;
-        }
-    }
-    if !any_distinct {
-        let w = 1.0 / n as f32;
-        for v in out.iter_mut() {
-            *v = w;
-        }
-        return out;
+        raw[i] = band;
     }
 
-    let mut same = zeros(n);
-    for i in 0..n {
-        same[i] = positions
-            .iter()
-            .filter(|p| dist2(**p, positions[i]) <= EPS2)
-            .count() as f32;
-    }
-
-    let mut nearest = f32::INFINITY;
-    let mut dist_q = zeros(n);
-    for i in 0..n {
-        let d2 = dist2(positions[i], qc);
-        dist_q[i] = d2;
-        if d2 < nearest {
-            nearest = d2;
-        }
-        out[i] = (1.0 - sqrt(d2) / radius[i]).max(0.0);
-    }
-
-    let total: f32 = out.iter().sum();
+    let total: f32 = raw.iter().sum();
     if !(total > 0.0 && total.is_finite()) {
-        for i in 0..n {
-            out[i] = if dist_q[i] <= nearest + EPS2 {
+        let nearest = positions
+            .iter()
+            .map(|&p| dist2(p, qc))
+            .fold(f32::INFINITY, |a, b| a.min(b));
+        for (i, &p) in positions.iter().enumerate() {
+            raw[i] = if dist2(p, qc) <= nearest + EPS2 {
                 1.0
             } else {
                 0.0
             };
         }
     }
-    for i in 0..n {
-        out[i] /= same[i];
+
+    for (i, &p) in positions.iter().enumerate() {
+        let shared = positions.iter().filter(|&&o| dist2(o, p) <= EPS2).count() as f32;
+        out[i] = raw[i] / shared;
     }
     let sum: f32 = out.iter().sum();
     for v in out.iter_mut() {
@@ -256,6 +231,13 @@ mod tests {
     }
 
     #[test]
+    fn one_d_nan_clamps_after_zeroing() {
+        assert_close(&weights_1d(&[1.0, 2.0], f32::NAN), &[1.0, 0.0]);
+        assert_close(&weights_1d(&[-3.0, -1.0], f32::NAN), &[0.0, 1.0]);
+        assert_close(&weights_1d(&[-1.0, 1.0], f32::NAN), &[0.5, 0.5]);
+    }
+
+    #[test]
     fn one_d_equal_thresholds_split_evenly() {
         let t = [0.0, 1.0, 1.0];
         assert_close(&weights_1d(&t, 1.0), &[0.0, 0.5, 0.5]);
@@ -295,6 +277,31 @@ mod tests {
         }
         assert_close(&weights_2d(&p, [0.5, 0.0]), &[0.0, 0.5, 0.5]);
         assert_close(&weights_2d(&p, [0.5, 0.8]), &[0.0, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn two_d_uneven_colinear_matches_one_d() {
+        let p = [[0.0, 0.0], [0.2, 0.0], [1.0, 0.0]];
+        let t = [0.0, 0.2, 1.0];
+        assert_close(&weights_2d(&p, [0.4, 0.0]), &[0.0, 0.75, 0.25]);
+        for x in [-0.5, 0.0, 0.1, 0.2, 0.4, 0.6, 0.95, 1.0, 1.5] {
+            assert_close(&weights_2d(&p, [x, 0.0]), &weights_1d(&t, x));
+        }
+    }
+
+    #[test]
+    fn two_d_uneven_diagonal_line_matches_one_d() {
+        let p = [[0.0, 0.0], [0.2, 0.2], [1.0, 1.0]];
+        let t = [0.0, 0.2, 1.0];
+        assert_close(&weights_2d(&p, [0.4, 0.4]), &[0.0, 0.75, 0.25]);
+        assert_close(&weights_2d(&p, [0.4, 0.4]), &weights_1d(&t, 0.4));
+    }
+
+    #[test]
+    fn two_d_nan_clamps_after_zeroing() {
+        let p = [[1.0, 0.0], [2.0, 0.0]];
+        assert_close(&weights_2d(&p, [f32::NAN, 0.0]), &[1.0, 0.0]);
+        assert_close(&weights_2d(&p, [f32::NAN, f32::NAN]), &[1.0, 0.0]);
     }
 
     #[test]
