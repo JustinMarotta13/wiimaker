@@ -804,7 +804,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             triggers,
             scene,
         } => {
-            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            let (gd, project, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             if bools.is_empty() && floats.is_empty() && triggers.is_empty() {
                 bail!("entity animator-set: pass --bool Name=true, --float Name=1, and/or --trigger Name");
             }
@@ -824,7 +824,31 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 set_entity_animator_bool(&mut sc, &name, spec.trim(), true)?;
             }
             save_scene(&path, &sc)?;
-            emit_ok(json, &format!("set animator params on {name}"))
+            if json {
+                #[derive(Serialize)]
+                struct SetOut {
+                    ok: bool,
+                    name: String,
+                    blend: Option<BlendOut>,
+                }
+                let world = hydrate_animator_world(&gd, &project, &sc)?;
+                let blend = world
+                    .find_by_name(&name)
+                    .and_then(|id| world.animator(id))
+                    .and_then(|a| a.current_blend())
+                    .map(blend_out);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&SetOut {
+                        ok: true,
+                        name: name.clone(),
+                        blend,
+                    })?
+                );
+                Ok(())
+            } else {
+                emit_ok(json, &format!("set animator params on {name}"))
+            }
         }
         EntityCmd::AnimatorStatus { game, name, scene } => {
             let (gd, project, _path, sc) = open_scene(root, &game, scene.as_deref())?;
@@ -836,16 +860,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 .animator
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animator"))?;
-            let assets = project.assets_path(&gd);
-            let anims = wiimaker_assets::AnimClipCatalog::load_dir(&assets)?;
-            let controllers = wiimaker_assets::AnimatorControllerCatalog::load_dir(&assets)?;
-            let world = wiimaker_scene::hydrate_with_all_catalogs(
-                &sc,
-                &wiimaker_scene::TextureMap::new(),
-                None,
-                Some(&anims),
-                Some(&controllers),
-            )?;
+            let world = hydrate_animator_world(&gd, &project, &sc)?;
             let id = world
                 .find_by_name(&name)
                 .ok_or_else(|| anyhow::anyhow!("entity '{name}' not in world"))?;
@@ -866,7 +881,9 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 state: String,
                 enabled: bool,
                 parameters: Vec<ParamOut>,
+                blend: Option<BlendOut>,
             }
+            let blend = rt.and_then(|a| a.current_blend()).map(blend_out);
             let parameters: Vec<ParamOut> = rt
                 .map(|a| {
                     a.parameters
@@ -895,14 +912,19 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                         state,
                         enabled: scene_a.enabled,
                         parameters,
+                        blend,
                     })?
                 );
             } else {
                 println!(
-                    "{name}: controller={} state={} params={}",
+                    "{name}: controller={} state={} params={}{}",
                     scene_a.controller,
                     rt.map(|a| a.state.as_str()).unwrap_or("?"),
-                    parameters.len()
+                    parameters.len(),
+                    blend
+                        .as_ref()
+                        .map(|b| format!(" blend={} active={}", b.kind, b.active))
+                        .unwrap_or_default()
                 );
             }
             Ok(())
@@ -1557,6 +1579,63 @@ fn instance_prefab_source(scene: &Scene, name: &str, explicit: Option<&str>) -> 
 
 fn resolve_prefab_path(game_dir: &Path, prefab: &str) -> Result<std::path::PathBuf> {
     resolve_prefab_asset(game_dir, prefab)
+}
+
+#[derive(Serialize)]
+struct BlendMotionOut {
+    clip: String,
+    threshold: Option<f32>,
+    position: Option<[f32; 2]>,
+    weight: f32,
+}
+
+#[derive(Serialize)]
+struct BlendOut {
+    #[serde(rename = "type")]
+    kind: String,
+    params: Vec<String>,
+    active: String,
+    motions: Vec<BlendMotionOut>,
+}
+
+fn blend_out(tree: &wiimaker_core::BlendTree) -> BlendOut {
+    let one_d = tree.dimension == wiimaker_core::BlendDimension::OneD;
+    BlendOut {
+        kind: if one_d { "1D" } else { "2D" }.into(),
+        params: tree.params.clone(),
+        active: tree
+            .active_motion()
+            .map(|m| m.clip.clone())
+            .unwrap_or_default(),
+        motions: tree
+            .motions
+            .iter()
+            .enumerate()
+            .map(|(i, m)| BlendMotionOut {
+                clip: m.clip.clone(),
+                threshold: one_d.then_some(m.threshold),
+                position: (!one_d).then_some(m.position),
+                weight: tree.weights.get(i).copied().unwrap_or(0.0),
+            })
+            .collect(),
+    }
+}
+
+fn hydrate_animator_world(
+    game_dir: &Path,
+    project: &wiimaker_scene::GameProject,
+    sc: &Scene,
+) -> Result<wiimaker_core::World> {
+    let assets = project.assets_path(game_dir);
+    let anims = wiimaker_assets::AnimClipCatalog::load_dir(&assets)?;
+    let controllers = wiimaker_assets::AnimatorControllerCatalog::load_dir(&assets)?;
+    wiimaker_scene::hydrate_with_all_catalogs(
+        sc,
+        &wiimaker_scene::TextureMap::new(),
+        None,
+        Some(&anims),
+        Some(&controllers),
+    )
 }
 
 fn split_kv(spec: &str, flag: &str) -> Result<(String, String)> {

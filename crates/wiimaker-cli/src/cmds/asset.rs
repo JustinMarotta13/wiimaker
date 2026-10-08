@@ -6,7 +6,8 @@ use serde::Serialize;
 use wiimaker_assets::{
     inspect_wav, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
     resolve_wav, set_sprite_pivot, slice_sheet, spawn_wav_player, write_anim_clip,
-    write_animator_controller, write_timeline, AnimatorControllerMeta, ControllerCondition,
+    write_animator_controller, write_state_blend_tree, write_state_clip, write_timeline,
+    AnimatorControllerMeta, BlendDimension, BlendMotion, BlendTreeMeta, ControllerCondition,
     ControllerParam, ControllerParamType, ControllerState, ControllerTransition, CurveEdit,
     CurveInterp, CurveProp, SpriteCatalog, TimelineClip, TimelineMeta, TimelineTrack,
     TimelineTrackKind,
@@ -280,6 +281,68 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             }
             Ok(())
         }
+        AssetCmd::BlendTree {
+            game,
+            controller,
+            state,
+            dimension,
+            params,
+            motions,
+            as_clip,
+        } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let project = load_project(&game_dir)?;
+            let assets = project.assets_path(&game_dir);
+            let (path, meta) = match as_clip {
+                Some(clip) => write_state_clip(&assets, &controller, &state, &clip)?,
+                None => {
+                    let tree = parse_blend_flags(&dimension, params.as_deref(), &motions)?;
+                    write_state_blend_tree(&assets, &controller, &state, tree)?
+                }
+            };
+            let saved = meta
+                .state(&state)
+                .ok_or_else(|| anyhow::anyhow!("state '{state}' missing after write"))?;
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    path: String,
+                    controller: String,
+                    state: String,
+                    clip: String,
+                    blend_tree: Option<wiimaker_assets::BlendTreeMeta>,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Out {
+                        path: path.display().to_string(),
+                        controller: controller.clone(),
+                        state: state.clone(),
+                        clip: saved.clip.clone(),
+                        blend_tree: saved.blend_tree.clone(),
+                    })?
+                );
+            } else if let Some(tree) = &saved.blend_tree {
+                println!(
+                    "wrote blend tree {} on {}.{} ({} param(s), {} motion(s)) → {}",
+                    tree.dimension.as_str(),
+                    controller,
+                    state,
+                    tree.params.len(),
+                    tree.motions.len(),
+                    path.display()
+                );
+            } else {
+                println!(
+                    "wrote state {}.{} as clip {} → {}",
+                    controller,
+                    state,
+                    saved.clip,
+                    path.display()
+                );
+            }
+            Ok(())
+        }
         AssetCmd::ListControllers { game } => {
             let game_dir = find_game_dir(root, &game)?;
             let project = load_project(&game_dir)?;
@@ -449,11 +512,7 @@ fn parse_controller_flags(
         let (sname, clip) = part
             .split_once(':')
             .ok_or_else(|| anyhow::anyhow!("--states entry '{part}' must be Name:clip"))?;
-        parsed_states.push(ControllerState {
-            name: sname.trim().to_string(),
-            clip: clip.trim().to_string(),
-            speed: 1.0,
-        });
+        parsed_states.push(ControllerState::plain(sname.trim(), clip.trim()));
     }
     if parsed_states.is_empty() {
         anyhow::bail!("asset controller: --states must list at least one Name:clip");
@@ -543,6 +602,67 @@ fn parse_controller_flags(
         parameters,
         states: parsed_states,
         transitions: parsed_transitions,
+    })
+}
+
+/// `--type 1D --params Speed --motion idle:0 --motion walk:1` or `--type 2D --params DirX,DirY --motion up:0,-1`.
+fn parse_blend_flags(
+    dimension: &str,
+    params: Option<&str>,
+    motions: &[String],
+) -> Result<BlendTreeMeta> {
+    let dimension = BlendDimension::parse(dimension)
+        .ok_or_else(|| anyhow::anyhow!("asset blend-tree: --type must be 1D or 2D"))?;
+    let params_spec = params
+        .ok_or_else(|| anyhow::anyhow!("asset blend-tree: pass --params (Speed or DirX,DirY)"))?;
+    let params: Vec<String> = params_spec
+        .split(',')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut parsed = Vec::new();
+    for spec in motions {
+        let (clip, value) = spec.split_once(':').ok_or_else(|| {
+            anyhow::anyhow!("--motion '{spec}' must be clip:threshold or clip:x,y")
+        })?;
+        let clip = clip.trim().to_string();
+        let value = value.trim();
+        let motion = match dimension {
+            BlendDimension::OneD => {
+                let t: f32 = value
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("--motion '{spec}' threshold is not a number"))?;
+                BlendMotion {
+                    clip,
+                    threshold: Some(t),
+                    position: None,
+                }
+            }
+            BlendDimension::TwoD => {
+                let (x, y) = value.split_once(',').ok_or_else(|| {
+                    anyhow::anyhow!("--motion '{spec}' 2D position must be clip:x,y")
+                })?;
+                let x: f32 = x
+                    .trim()
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("--motion '{spec}' x is not a number"))?;
+                let y: f32 = y
+                    .trim()
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("--motion '{spec}' y is not a number"))?;
+                BlendMotion {
+                    clip,
+                    threshold: None,
+                    position: Some([x, y]),
+                }
+            }
+        };
+        parsed.push(motion);
+    }
+    Ok(BlendTreeMeta {
+        dimension,
+        params,
+        motions: parsed,
     })
 }
 

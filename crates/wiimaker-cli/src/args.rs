@@ -774,6 +774,26 @@ pub enum AssetCmd {
     ListControllers {
         game: String,
     },
+    /// Set a controller state to a 1D/2D blend tree (or `--as-clip` back to a clip)
+    BlendTree {
+        game: String,
+        /// Controller stem (e.g. player)
+        controller: String,
+        /// State name (added as a blend state when missing)
+        state: String,
+        /// Blend dimension: 1D (threshold) or 2D (position)
+        #[arg(long = "type", default_value = "1D")]
+        dimension: String,
+        /// Float param(s): `Speed` for 1D, `DirX,DirY` for 2D
+        #[arg(long)]
+        params: Option<String>,
+        /// Motion `clip:threshold` (1D) or `clip:x,y` (2D); repeatable
+        #[arg(long = "motion")]
+        motions: Vec<String>,
+        /// Replace the blend tree with this plain clip (removes the tree)
+        #[arg(long = "as-clip")]
+        as_clip: Option<String>,
+    },
     /// Create / overwrite `assets/<name>.timeline.json`
     Timeline {
         game: String,
