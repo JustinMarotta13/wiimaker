@@ -66,6 +66,8 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 - Scene clear color lives on `Scene.clear_color` (`[u8; 4]`, default `DEFAULT_CLEAR_COLOR` `[12,18,32,255]`). Editor Environment picker + CLI `scene set-clear` both call `set_scene_clear`. WSCN bake writes the 4 bytes after magic.
 - Scene/Game/Project chrome prefs: `<game>/.wiimaker/prefs.toml` (`EditorPrefs` in `wiimaker-scene`). Not `game.toml`. Editor toolbar + `scene set-game-view` / `editor set-scene-view` / `editor set-project-view` share `load_editor_prefs` / `save_editor_prefs`. Scene zoom 1 = fill well; Game locked aspect uses `fitted_blit_rect` letterbox/pillarbox + Scale slider. Project `collapsed` is relative folder paths; Search filter is session-only.
 - Selection is `Vec<String>` (last = primary for Inspector); Cmd-click toggles.
+- Controller asset Inspector (`ui_controller.rs`, opened from `ui_inspector_file` on `*.controller.json`): blend edits build a whole `BlendTreeMeta` working copy, then write through `write_state_blend_tree` / `write_state_clip`, then `reload_assets()` + `rehydrate()`. Never write the JSON directly, so GUI and CLI stay identical. 2D is disabled with fewer than two Float params. Changing dimension converts thresholds ↔ positions in the same frame (`convert_dimension`).
+- Entity Animator foldout reads live weights from `Animator::current_blend()` (`Blend · Speed 50% → idle`); state labels use `controller_state_label`. The foldout is read-only for blend trees; authoring stays in the controller asset.
 
 ## Open follow-ups
 
