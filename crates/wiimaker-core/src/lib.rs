@@ -9,6 +9,7 @@
 pub mod animator;
 pub mod app;
 pub mod audio;
+pub mod blend;
 pub mod collider;
 pub mod color;
 pub mod draw;
@@ -27,7 +28,7 @@ pub mod world;
 
 pub use animator::{
     Animator, AnimatorCondition, AnimatorParam, AnimatorParamKind, AnimatorState,
-    AnimatorTransition,
+    AnimatorTransition, BlendDimension, BlendMotion, BlendTree,
 };
 pub use app::{App, FrameCtx};
 pub use audio::{queue_awake_audio, AudioSource, Oneshot};
