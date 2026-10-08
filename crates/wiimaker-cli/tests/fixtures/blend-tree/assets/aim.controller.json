@@ -1,5 +1,5 @@
 {
-  "default": "Locomotion",
+  "default": "Aim",
   "parameters": [
     {
       "name": "Speed",
@@ -14,21 +14,35 @@
   ],
   "states": [
     {
-      "name": "Locomotion",
+      "name": "Aim",
       "speed": 1.0,
       "blend_tree": {
-        "type": "1D",
+        "type": "2D",
         "params": [
-          "Speed"
+          "Speed",
+          "Heading"
         ],
         "motions": [
           {
             "clip": "idle",
-            "threshold": 0.0
+            "position": [
+              0.0,
+              0.0
+            ]
           },
           {
             "clip": "walk",
-            "threshold": 1.0
+            "position": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "clip": "up",
+            "position": [
+              0.0,
+              1.0
+            ]
           }
         ]
       }

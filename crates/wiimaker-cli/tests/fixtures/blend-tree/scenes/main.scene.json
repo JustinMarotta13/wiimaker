@@ -11,7 +11,7 @@
       "name": "Player",
       "transform": {
         "translation": [
-          320.0,
+          160.0,
           240.0,
           0.0
         ],
@@ -33,7 +33,40 @@
           "parameters": [
             {
               "name": "Speed",
-              "float": 0.5
+              "float": 0.0
+            }
+          ]
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "Gunner",
+      "transform": {
+        "translation": [
+          480.0,
+          240.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Animator": {
+          "controller": "aim",
+          "parameters": [
+            {
+              "name": "Speed",
+              "float": 1.0
             },
             {
               "name": "Heading",

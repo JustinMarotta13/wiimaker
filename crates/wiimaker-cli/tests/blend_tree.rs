@@ -167,6 +167,11 @@ fn fixture_hydrates_and_doctor_is_clean_for_blend() {
     assert!(text.contains("\"type\": \"1D\""), "{text}");
     assert!(text.contains("\"active\": \"idle\""), "{text}");
 
+    let gunner = run(&["entity", "animator-status", game, "--name", "Gunner", "--json"]);
+    let text = String::from_utf8_lossy(&gunner.stdout);
+    assert!(text.contains("\"type\": \"2D\""), "{text}");
+    assert!(text.contains("\"active\": \"walk\""), "{text}");
+
     let doctor = run(&["doctor", game]);
     let out = String::from_utf8_lossy(&doctor.stdout);
     assert!(!out.contains("blend state"), "{out}");
