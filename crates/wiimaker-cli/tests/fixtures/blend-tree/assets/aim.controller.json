@@ -1,0 +1,52 @@
+{
+  "default": "Aim",
+  "parameters": [
+    {
+      "name": "Speed",
+      "type": "Float",
+      "default": 0.0
+    },
+    {
+      "name": "Heading",
+      "type": "Float",
+      "default": 0.0
+    }
+  ],
+  "states": [
+    {
+      "name": "Aim",
+      "speed": 1.0,
+      "blend_tree": {
+        "type": "2D",
+        "params": [
+          "Speed",
+          "Heading"
+        ],
+        "motions": [
+          {
+            "clip": "idle",
+            "position": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "clip": "walk",
+            "position": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "clip": "up",
+            "position": [
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "transitions": []
+}

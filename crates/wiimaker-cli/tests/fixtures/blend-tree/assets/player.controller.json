@@ -1,0 +1,38 @@
+{
+  "default": "Locomotion",
+  "parameters": [
+    {
+      "name": "Speed",
+      "type": "Float",
+      "default": 0.0
+    },
+    {
+      "name": "Heading",
+      "type": "Float",
+      "default": 0.0
+    }
+  ],
+  "states": [
+    {
+      "name": "Locomotion",
+      "speed": 1.0,
+      "blend_tree": {
+        "type": "1D",
+        "params": [
+          "Speed"
+        ],
+        "motions": [
+          {
+            "clip": "idle",
+            "threshold": 0.0
+          },
+          {
+            "clip": "walk",
+            "threshold": 1.0
+          }
+        ]
+      }
+    }
+  ],
+  "transitions": []
+}

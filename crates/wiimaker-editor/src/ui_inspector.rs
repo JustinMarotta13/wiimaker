@@ -601,10 +601,11 @@ impl EditorApp {
                 if hdr.open {
                     theme::inspector_props().show(ui, |ui| {
                         let playing = self.play_mode != PlayMode::Edit;
-                        let (live_state, live_bools, live_floats): (
+                        let (live_state, live_bools, live_floats, live_blend): (
                             String,
                             Vec<(String, bool)>,
                             Vec<(String, f32)>,
+                            Option<String>,
                         ) = {
                             let world: &wiimaker_core::world::World = if playing {
                                 self.play_session
@@ -627,9 +628,19 @@ impl EditorApp {
                                     .iter()
                                     .map(|p| (p.name.clone(), p.float_value))
                                     .collect();
-                                (an.state.clone(), bools, floats)
+                                let blend = an.current_blend().and_then(|bt| {
+                                    let active = bt.active_motion()?;
+                                    let weight = bt.weights.get(bt.active).copied().unwrap_or(1.0);
+                                    Some(format!(
+                                        "Blend · {} {:.0}% → {}",
+                                        bt.params.join(", "),
+                                        weight * 100.0,
+                                        active.clip
+                                    ))
+                                });
+                                (an.state.clone(), bools, floats, blend)
                             } else {
-                                ("—".into(), Vec::new(), Vec::new())
+                                ("—".into(), Vec::new(), Vec::new(), None)
                             }
                         };
                         let names: Vec<String> = self.controller_catalog.names().to_vec();
@@ -665,12 +676,19 @@ impl EditorApp {
                                 .size(11.0)
                                 .color(theme::TEXT_MUTED),
                         );
+                        if let Some(line) = &live_blend {
+                            ui.label(RichText::new(line).size(11.0).color(theme::TEXT_MUTED));
+                        }
                         if let Some(meta) = self.controller_catalog.lookup(&a.controller) {
                             for st in &meta.states {
                                 ui.label(
-                                    RichText::new(format!("{}  ·  {}", st.name, st.clip))
-                                        .size(11.0)
-                                        .color(theme::TEXT_DIM),
+                                    RichText::new(format!(
+                                        "{}  ·  {}",
+                                        st.name,
+                                        crate::ui_controller::controller_state_label(st)
+                                    ))
+                                    .size(11.0)
+                                    .color(theme::TEXT_DIM),
                                 );
                             }
                             ui.add_space(2.0);
@@ -2397,6 +2415,9 @@ impl EditorApp {
         }
         if rel.to_string_lossy().ends_with(".timeline.json") {
             self.ui_timeline_asset_inspector(ui, &rel);
+        }
+        if rel.to_string_lossy().ends_with(".controller.json") {
+            self.ui_controller_asset_inspector(ui, &rel);
         }
 
         ui.add_space(8.0);

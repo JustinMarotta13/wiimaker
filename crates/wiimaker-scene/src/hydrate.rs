@@ -7,7 +7,7 @@ use anyhow::Result;
 use wiimaker_assets::{AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog, TimelineCatalog};
 use wiimaker_core::animator::{
     Animator, AnimatorCondition, AnimatorParam, AnimatorParamKind, AnimatorState,
-    AnimatorTransition,
+    AnimatorTransition, BlendDimension, BlendMotion, BlendTree,
 };
 use wiimaker_core::collider::{Collider, ColliderKind};
 use wiimaker_core::color::Rgba8;
@@ -717,6 +717,10 @@ fn apply_scene_animator(
                 cells: clip.map(|m| m.cells.clone()).unwrap_or_default(),
                 fps: clip.map(|m| m.fps).filter(|f| *f > 0.0).unwrap_or(10.0),
                 loop_: clip.map(|m| m.loop_).unwrap_or(true),
+                blend: s
+                    .blend_tree
+                    .as_ref()
+                    .map(|bt| runtime_blend_tree(bt, anims)),
             });
         }
         for t in &meta.transitions {
@@ -842,6 +846,32 @@ fn runtime_curve(keys: Option<&[wiimaker_assets::CurveKey]>) -> Option<wiimaker_
             })
             .collect(),
     ))
+}
+
+fn runtime_blend_tree(
+    bt: &wiimaker_assets::BlendTreeMeta,
+    anims: Option<&AnimClipCatalog>,
+) -> BlendTree {
+    let dimension = match bt.dimension {
+        wiimaker_assets::BlendDimension::OneD => BlendDimension::OneD,
+        wiimaker_assets::BlendDimension::TwoD => BlendDimension::TwoD,
+    };
+    let motions = bt
+        .motions
+        .iter()
+        .map(|m| {
+            let clip = anims.and_then(|c| c.lookup(&m.clip));
+            BlendMotion {
+                clip: m.clip.clone(),
+                cells: clip.map(|c| c.cells.clone()).unwrap_or_default(),
+                fps: clip.map(|c| c.fps).filter(|f| *f > 0.0).unwrap_or(10.0),
+                loop_: clip.map(|c| c.loop_).unwrap_or(true),
+                threshold: m.threshold.unwrap_or(0.0),
+                position: m.position.unwrap_or([0.0, 0.0]),
+            }
+        })
+        .collect();
+    BlendTree::new(dimension, bt.params.clone(), motions)
 }
 
 fn runtime_condition(
