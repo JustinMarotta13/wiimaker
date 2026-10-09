@@ -41,7 +41,12 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Later
 
-- (none)
+Follow-ups from #56 (Animator layers) non-blocking review notes (Code Reviewer review 5471627358 / 5471851457):
+
+- **N7 — animator CLI texture map** — `entity animator-status` / `animator-set` load scenes with an empty texture map, so `animator-status` fails ("texture not found in wpack") on every Sprite entity, and `animator-set --json` saves at `entity.rs:863` then errors at `:871` (exit 1 with the change already on disk). Fix: load the wpack textures for these commands, and hydrate/validate before saving so a failure never writes. Texture map dates to 652ba4e; save-then-hydrate to #55.
+- **N2 — Base layer weight is a no-op** — Base (layer 0) shows a weight in the Inspector / `controller-layer weight` but it never affects playback. Hide or disable it for Base (or reject `weight --name Base`) and say so in docs.
+- **N3 — editor layer authoring parity** — the `.controller.json` Inspector lacks the CLI's layer rename, set default, add state and add transition; the weight DragValue clamps 2.5 to 1.0 while the CLI keeps finite out-of-range values raw (pick one rule).
+- **N6 — layer test gaps** — fill the gaps listed in CR review 5471627358 (layer edge cases not yet covered by `animator::tests`, `tests/layers.rs`, `tests/animator_layers.rs`).
 
 ---
 
