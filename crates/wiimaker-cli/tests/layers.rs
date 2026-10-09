@@ -382,6 +382,55 @@ fn animator_set_layer_weight_rejects_non_finite_and_scene_stays_loadable() {
 }
 
 #[test]
+fn animator_set_unknown_layer_lists_valid_names() {
+    let dir = animator_game("unknown-layer");
+    let game = dir.to_str().unwrap();
+    let scene_path = dir.join("scenes/main.scene.json");
+    let before = fs::read_to_string(&scene_path).unwrap();
+    let out = run_fail(&[
+        "entity",
+        "animator-set",
+        game,
+        "--name",
+        "Player",
+        "--layer",
+        "Typo",
+        "--weight",
+        "0.5",
+        "--json",
+    ]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("layer 'Typo'"), "{err}");
+    assert!(err.contains("(valid: Base, UpperBody)"), "{err}");
+    assert_eq!(fs::read_to_string(&scene_path).unwrap(), before);
+
+    run(&[
+        "entity",
+        "animator-set",
+        game,
+        "--name",
+        "Player",
+        "--layer",
+        "base",
+        "--weight",
+        "0.5",
+        "--json",
+    ]);
+    run(&[
+        "entity",
+        "animator-set",
+        game,
+        "--name",
+        "Player",
+        "--layer",
+        "UpperBody",
+        "--weight",
+        "0",
+        "--json",
+    ]);
+}
+
+#[test]
 fn fixture_override_aim_status() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/layers");
     let dir = tmp_game("fixture");

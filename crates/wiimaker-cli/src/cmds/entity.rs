@@ -30,6 +30,24 @@ use wiimaker_scene::{
 use crate::args::EntityCmd;
 use crate::cmds::scene::open_scene;
 use crate::util::emit_ok;
+use wiimaker_assets::{AnimatorControllerMeta, BASE_LAYER_NAME};
+
+fn check_animator_layer(
+    meta: &AnimatorControllerMeta,
+    controller: &str,
+    layer: &str,
+) -> Result<()> {
+    if layer.eq_ignore_ascii_case(BASE_LAYER_NAME) || meta.layer(layer).is_some() {
+        return Ok(());
+    }
+    let valid: Vec<&str> = std::iter::once(BASE_LAYER_NAME)
+        .chain(meta.layers.iter().map(|l| l.name.as_str()))
+        .collect();
+    bail!(
+        "entity animator-set: layer '{layer}' is not on controller '{controller}' (valid: {})",
+        valid.join(", ")
+    );
+}
 
 struct SignalQuery {
     dt: f32,
@@ -815,6 +833,16 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 bail!("entity animator-set: --layer and --weight are set together");
             }
             if let (Some(layer), Some(weight)) = (layer.as_deref(), weight) {
+                let controller = sc
+                    .find_entity(&name)
+                    .and_then(|e| e.components.animator.as_ref())
+                    .map(|a| a.controller.clone())
+                    .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animator"))?;
+                let meta = AnimatorControllerMeta::load(&AnimatorControllerMeta::path(
+                    project.assets_path(&gd),
+                    &controller,
+                ))?;
+                check_animator_layer(&meta, &controller, layer)?;
                 set_entity_animator_layer_weight(&mut sc, &name, layer, weight)?;
             }
             for spec in bools {
