@@ -486,3 +486,109 @@ fn copy_dir(src: &Path, dst: &Path) {
         }
     }
 }
+
+#[test]
+fn doctor_warns_on_orphaned_scene_layer_weight_override_after_rename() {
+    let dir = tmp_game("orphan-override");
+    let game = dir.to_str().unwrap();
+    run(&["asset", "anim", game, "walk", "--cells", "w0,w1", "--json"]);
+    run(&["asset", "anim", game, "look", "--cells", "l0", "--json"]);
+    run(&[
+        "asset",
+        "controller",
+        game,
+        "player",
+        "--default",
+        "Walk",
+        "--states",
+        "Walk:walk",
+        "--json",
+    ]);
+    run(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "add",
+        "--name",
+        "Head",
+        "--weight",
+        "1",
+        "--json",
+    ]);
+    run(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "state",
+        "--name",
+        "Head",
+        "--state",
+        "Look",
+        "--clip",
+        "look",
+        "--json",
+    ]);
+    run(&[
+        "entity",
+        "add-component",
+        game,
+        "--name",
+        "Player",
+        "Animator",
+        "--controller",
+        "player",
+        "--json",
+    ]);
+    run(&[
+        "entity",
+        "animator-set",
+        game,
+        "--name",
+        "Player",
+        "--layer",
+        "Head",
+        "--weight",
+        "0.8",
+        "--json",
+    ]);
+    run(&[
+        "entity",
+        "animator-set",
+        game,
+        "--name",
+        "Player",
+        "--layer",
+        "base",
+        "--weight",
+        "1",
+        "--json",
+    ]);
+    let before = run(&["doctor", game]);
+    let text = String::from_utf8_lossy(&before.stdout);
+    assert!(!text.contains("does not match any layer"), "{text}");
+
+    run(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "rename",
+        "--name",
+        "Head",
+        "--to",
+        "Face2",
+        "--json",
+    ]);
+    let after = run(&["doctor", game]);
+    let text = String::from_utf8_lossy(&after.stdout);
+    assert!(
+        text.contains(
+            "scene 'main' entity 'Player': animator layer weight override 'Head' does not match any layer on controller 'player' (valid: Base, Face2)"
+        ),
+        "{text}"
+    );
+    // `base` (any case) is always valid.
+    assert!(!text.contains("override 'base'"), "{text}");
+}

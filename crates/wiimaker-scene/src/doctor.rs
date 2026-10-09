@@ -8,9 +8,9 @@ use serde::Serialize;
 use crate::project::GameProject;
 use crate::scene::{load_scene, Scene};
 use wiimaker_assets::{
-    inspect_wav, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
-    AnimClipMeta, AnimatorControllerMeta, BlendDimension, BlendTreeMeta, ControllerParam,
-    ControllerParamType, ControllerState, SpriteCatalog, TimelineMeta,
+    inspect_wav, is_base_layer_name, list_anim_clips, list_animator_controllers, list_timelines,
+    list_wav_clips, AnimClipMeta, AnimatorControllerMeta, BlendDimension, BlendTreeMeta,
+    ControllerParam, ControllerParamType, ControllerState, SpriteCatalog, TimelineMeta,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -279,6 +279,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
             &project.effective_sorting_layers(),
             &mut issues,
         );
+        check_animator_layer_overrides(scene, &assets, &controller_names, &mut issues);
     }
 
     check_build_scenes(game_dir, project, &mut issues);
@@ -593,6 +594,47 @@ fn check_blend_tree(
                     }
                 ));
             }
+        }
+    }
+}
+
+/// Scene Animator per-layer weight overrides must name `Base` (any case) or a layer
+/// the controller still has. A `controller-layer rename` / `remove` orphans them.
+fn check_animator_layer_overrides(
+    scene: &Scene,
+    assets: &Path,
+    controllers: &[String],
+    issues: &mut Vec<Issue>,
+) {
+    for ent in &scene.entities {
+        let Some(a) = &ent.components.animator else {
+            continue;
+        };
+        if a.layers.is_empty() || !controllers.iter().any(|n| n == &a.controller) {
+            continue;
+        }
+        let Ok(meta) =
+            AnimatorControllerMeta::load(&AnimatorControllerMeta::path(assets, &a.controller))
+        else {
+            continue;
+        };
+        for ov in &a.layers {
+            if is_base_layer_name(&ov.name) || meta.layer(&ov.name).is_some() {
+                continue;
+            }
+            let mut valid = vec![wiimaker_assets::BASE_LAYER_NAME.to_string()];
+            valid.extend(meta.layers.iter().map(|l| l.name.clone()));
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: format!(
+                    "scene '{}' entity '{}': animator layer weight override '{}' does not match any layer on controller '{}' (valid: {})",
+                    scene.name,
+                    ent.name,
+                    ov.name,
+                    a.controller,
+                    valid.join(", ")
+                ),
+            });
         }
     }
 }
