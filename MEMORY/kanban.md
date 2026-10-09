@@ -47,6 +47,9 @@ Follow-ups from #56 (Animator layers) non-blocking review notes (Code Reviewer r
 - **N2 — Base layer weight is a no-op** — Base (layer 0) shows a weight in the Inspector / `controller-layer weight` but it never affects playback. Hide or disable it for Base (or reject `weight --name Base`) and say so in docs.
 - **N3 — editor layer authoring parity** — the `.controller.json` Inspector lacks the CLI's layer rename, set default, add state and add transition; the weight DragValue clamps 2.5 to 1.0 while the CLI keeps finite out-of-range values raw (pick one rule).
 - **N6 — layer test gaps** — fill the gaps listed in CR review 5471627358 (layer edge cases not yet covered by `animator::tests`, `tests/layers.rs`, `tests/animator_layers.rs`).
+- **PT-A — `--layer base` case dup** — `entity animator-set --layer base` (lowercase) passes validation (`entity.rs:40` compares case-insensitively) but saves a second `base` weight override beside `Base`. Normalize any case-insensitive match to `BASE_LAYER_NAME` before storing.
+- **PT-B — controller-layer rename/remove vs scene overrides** — `asset controller-layer rename` / `remove` do not update scene per-entity layer weight overrides (rename silently orphans them; doctor does not flag the stale name). Remap/remove them across scenes + prefabs, mirroring `sorting-layer rename`, and have doctor warn on overrides naming unknown layers.
+- **Layer nits (Play Tester #56)** — scene doctor does not warn on out-of-range per-entity layer weights; `controller-layer` unknown-name errors do not list valid names (unlike `animator-set`); `"default": null` in a layer fails to parse (treat as no default); `--json` errors print plain text instead of a JSON error object.
 
 ---
 
