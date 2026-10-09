@@ -526,6 +526,12 @@ pub enum EntityCmd {
         /// Trigger parameter name (repeatable; stored as bool true)
         #[arg(long = "trigger")]
         triggers: Vec<String>,
+        /// Layer name for `--weight` (`Base` or an override layer)
+        #[arg(long)]
+        layer: Option<String>,
+        /// Layer weight 0..1 (runtime clamps). Requires `--layer`.
+        #[arg(long)]
+        weight: Option<f32>,
         #[arg(long)]
         scene: Option<String>,
     },
@@ -697,6 +703,75 @@ pub enum EntityCmd {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ControllerLayerCmd {
+    /// List the base layer and every override layer
+    List,
+    /// Add an empty override layer
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value_t = 1.0)]
+        weight: f32,
+    },
+    /// Remove an override layer
+    Remove {
+        #[arg(long)]
+        name: String,
+    },
+    /// Rename an override layer
+    Rename {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        to: String,
+    },
+    /// Set a layer weight (`--name Base` for the base layer). Stored raw; runtime clamps.
+    Weight {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        weight: f32,
+    },
+    /// Add or replace a clip state on a layer. Empty `--clip` is a placeholder on override layers.
+    State {
+        /// Layer name (`Base` for the top-level machine)
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        state: String,
+        #[arg(long)]
+        clip: Option<String>,
+        /// Remove the state instead of writing a clip
+        #[arg(long, default_value_t = false)]
+        remove: bool,
+    },
+    /// Set the layer's default state
+    #[command(name = "default")]
+    SetDefault {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        state: String,
+    },
+    /// Append a transition, or `--remove-index N` to delete one
+    Transition {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        /// Condition `Param=value` (repeatable)
+        #[arg(long = "condition")]
+        conditions: Vec<String>,
+        #[arg(long, default_value_t = false)]
+        has_exit_time: bool,
+        #[arg(long)]
+        remove_index: Option<usize>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum AssetCmd {
     List {
         game: String,
@@ -793,6 +868,17 @@ pub enum AssetCmd {
         /// Replace the blend tree with this plain clip (removes the tree)
         #[arg(long = "as-clip")]
         as_clip: Option<String>,
+        /// Override layer name. Omit for the base state machine.
+        #[arg(long)]
+        layer: Option<String>,
+    },
+    /// Add, remove, or edit an override layer on `assets/<controller>.controller.json`
+    ControllerLayer {
+        game: String,
+        /// Controller stem (e.g. player)
+        controller: String,
+        #[command(subcommand)]
+        cmd: ControllerLayerCmd,
     },
     /// Create / overwrite `assets/<name>.timeline.json`
     Timeline {

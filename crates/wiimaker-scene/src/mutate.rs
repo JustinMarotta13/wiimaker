@@ -704,9 +704,16 @@ pub fn add_component_animator(scene: &mut Scene, name: &str, controller: &str) -
         .as_ref()
         .map(|a| a.parameters.clone())
         .unwrap_or_default();
+    let layers = ent
+        .components
+        .animator
+        .as_ref()
+        .map(|a| a.layers.clone())
+        .unwrap_or_default();
     ent.components.animator = Some(crate::scene::SceneAnimator {
         controller: controller.to_string(),
         parameters,
+        layers,
         enabled,
     });
     Ok(())
@@ -826,6 +833,23 @@ pub fn set_entity_animator_float(
     let p = a.param_mut(param);
     p.float_value = Some(value);
     p.bool_value = None;
+    Ok(())
+}
+
+/// Override one layer weight on the scene Animator (`Base` or an override name).
+pub fn set_entity_animator_layer_weight(
+    scene: &mut Scene,
+    name: &str,
+    layer: &str,
+    weight: f32,
+) -> Result<()> {
+    let ent = find_mut(scene, name)?;
+    let a = ent
+        .components
+        .animator
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("entity '{name}' has no Animator"))?;
+    a.set_layer_weight(layer, weight);
     Ok(())
 }
 

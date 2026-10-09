@@ -97,6 +97,8 @@ fn locomotion_controller() -> AnimatorControllerMeta {
             ),
         ],
         transitions: vec![],
+        weight: 1.0,
+        layers: Vec::new(),
     }
 }
 
@@ -282,6 +284,8 @@ fn doctor_flags_broken_blend_trees() {
             ),
         ],
         transitions: vec![],
+        weight: 1.0,
+        layers: Vec::new(),
     };
     write_animator_controller(&assets, "player", controller).unwrap();
 

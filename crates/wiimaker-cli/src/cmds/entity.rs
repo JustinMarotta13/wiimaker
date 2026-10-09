@@ -19,11 +19,12 @@ use wiimaker_scene::{
     remove_component_sprite, remove_component_text, remove_component_tilemap, remove_entity,
     rename_entity, resolve_prefab, resolve_prefab_asset, revert_prefab_instance, save_prefab,
     save_scene, set_component_enabled, set_entity_anim, set_entity_animator_bool,
-    set_entity_animator_float, set_entity_audio_source, set_entity_controller, set_entity_follow,
-    set_entity_grid_mover, set_entity_parent, set_entity_playable_director, set_entity_rotation_z,
-    set_entity_scale, set_entity_sorting, set_entity_sprite_pivot, set_entity_text,
-    set_entity_transform, unpack_prefab_instance, variant_from_instance, ApplyBaseTarget,
-    MutateOpts, Scene, SceneColliderKind, SceneDir, SceneTextAlign,
+    set_entity_animator_float, set_entity_animator_layer_weight, set_entity_audio_source,
+    set_entity_controller, set_entity_follow, set_entity_grid_mover, set_entity_parent,
+    set_entity_playable_director, set_entity_rotation_z, set_entity_scale, set_entity_sorting,
+    set_entity_sprite_pivot, set_entity_text, set_entity_transform, unpack_prefab_instance,
+    variant_from_instance, ApplyBaseTarget, MutateOpts, Scene, SceneColliderKind, SceneDir,
+    SceneTextAlign,
 };
 
 use crate::args::EntityCmd;
@@ -802,11 +803,19 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             bools,
             floats,
             triggers,
+            layer,
+            weight,
             scene,
         } => {
             let (gd, project, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
-            if bools.is_empty() && floats.is_empty() && triggers.is_empty() {
-                bail!("entity animator-set: pass --bool Name=true, --float Name=1, and/or --trigger Name");
+            if bools.is_empty() && floats.is_empty() && triggers.is_empty() && weight.is_none() {
+                bail!("entity animator-set: pass --bool Name=true, --float Name=1, --trigger Name, and/or --layer Name --weight 0.5");
+            }
+            if weight.is_some() != layer.is_some() {
+                bail!("entity animator-set: --layer and --weight are set together");
+            }
+            if let (Some(layer), Some(weight)) = (layer.as_deref(), weight) {
+                set_entity_animator_layer_weight(&mut sc, &name, layer, weight)?;
             }
             for spec in bools {
                 let (pname, raw) = split_kv(&spec, "--bool")?;
@@ -874,6 +883,12 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 float_value: f32,
             }
             #[derive(Serialize)]
+            struct PlaybackOut {
+                layer: String,
+                state: String,
+                clip: String,
+            }
+            #[derive(Serialize)]
             struct Out {
                 ok: bool,
                 name: String,
@@ -882,8 +897,32 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 enabled: bool,
                 parameters: Vec<ParamOut>,
                 blend: Option<BlendOut>,
+                layers: Vec<LayerStatus>,
+                playback: PlaybackOut,
             }
             let blend = rt.and_then(|a| a.current_blend()).map(blend_out);
+            let layers = rt.map(layer_rows).unwrap_or_default();
+            let playback = rt
+                .map(|a| {
+                    let index = a.winning_layer();
+                    let clip = world
+                        .animation(id)
+                        .map(|anim| anim.clip.clone())
+                        .unwrap_or_default();
+                    PlaybackOut {
+                        layer: a
+                            .layer_name(index)
+                            .unwrap_or(wiimaker_core::BASE_LAYER_NAME)
+                            .to_string(),
+                        state: a.layer_state_name(index).unwrap_or("").to_string(),
+                        clip,
+                    }
+                })
+                .unwrap_or(PlaybackOut {
+                    layer: String::new(),
+                    state: String::new(),
+                    clip: String::new(),
+                });
             let parameters: Vec<ParamOut> = rt
                 .map(|a| {
                     a.parameters
@@ -913,14 +952,32 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                         enabled: scene_a.enabled,
                         parameters,
                         blend,
+                        layers,
+                        playback,
                     })?
                 );
             } else {
+                let layer_txt = rt
+                    .map(|a| {
+                        (0..a.layer_count())
+                            .filter_map(|i| {
+                                Some(format!(
+                                    "{}:{}@{:.2}",
+                                    a.layer_name(i)?,
+                                    a.layer_state_name(i).unwrap_or("?"),
+                                    a.layer_weight(i).unwrap_or(0.0)
+                                ))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
                 println!(
-                    "{name}: controller={} state={} params={}{}",
+                    "{name}: controller={} state={} params={} layers=[{}]{}",
                     scene_a.controller,
                     rt.map(|a| a.state.as_str()).unwrap_or("?"),
                     parameters.len(),
+                    layer_txt,
                     blend
                         .as_ref()
                         .map(|b| format!(" blend={} active={}", b.kind, b.active))
@@ -1596,6 +1653,28 @@ struct BlendOut {
     params: Vec<String>,
     active: String,
     motions: Vec<BlendMotionOut>,
+}
+
+fn layer_rows(a: &wiimaker_core::Animator) -> Vec<LayerStatus> {
+    (0..a.layer_count())
+        .filter_map(|i| {
+            Some(LayerStatus {
+                name: a.layer_name(i)?.to_string(),
+                weight: a.layer_weight(i).unwrap_or(0.0),
+                state: a.layer_state_name(i).unwrap_or("").to_string(),
+                blend: a.layer_blend(i).map(blend_out),
+            })
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
+struct LayerStatus {
+    name: String,
+    weight: f32,
+    state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blend: Option<BlendOut>,
 }
 
 fn blend_out(tree: &wiimaker_core::BlendTree) -> BlendOut {

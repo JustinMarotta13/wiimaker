@@ -60,6 +60,8 @@ fn player_controller() -> AnimatorControllerMeta {
                 has_exit_time: false,
             },
         ],
+        weight: 1.0,
+        layers: Vec::new(),
     }
 }
 

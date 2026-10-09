@@ -1,0 +1,20 @@
+{
+  "name": "main",
+  "clear_color": [12, 18, 32, 255],
+  "entities": [
+    {
+      "name": "Player",
+      "transform": {
+        "translation": [160.0, 240.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": {
+        "Animator": {
+          "controller": "player"
+        }
+      },
+      "tag": 0
+    }
+  ]
+}

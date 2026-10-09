@@ -27,8 +27,9 @@ pub mod wiimote_map;
 pub mod world;
 
 pub use animator::{
-    Animator, AnimatorCondition, AnimatorParam, AnimatorParamKind, AnimatorState,
-    AnimatorTransition, BlendDimension, BlendMotion, BlendTree,
+    clamp_layer_weight, Animator, AnimatorCondition, AnimatorLayer, AnimatorParam,
+    AnimatorParamKind, AnimatorState, AnimatorTransition, BlendDimension, BlendMotion, BlendTree,
+    BASE_LAYER_NAME,
 };
 pub use app::{App, FrameCtx};
 pub use audio::{queue_awake_audio, AudioSource, Oneshot};
