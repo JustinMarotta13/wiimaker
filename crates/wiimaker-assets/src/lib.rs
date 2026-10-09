@@ -23,8 +23,8 @@ mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
 pub use controller::{
-    add_controller_layer, add_layer_transition, is_any_state, is_base_layer_name,
-    list_animator_controllers, remove_controller_layer, remove_layer_state,
+    add_controller_layer, add_layer_transition, check_layer_weight, is_any_state,
+    is_base_layer_name, list_animator_controllers, remove_controller_layer, remove_layer_state,
     remove_layer_transition, rename_controller_layer, set_controller_layer_weight,
     set_layer_default, write_animator_controller, write_layer_state, write_layer_state_blend_tree,
     write_layer_state_clip, write_state_blend_tree, write_state_clip, AnimatorControllerCatalog,

@@ -837,12 +837,14 @@ pub fn set_entity_animator_float(
 }
 
 /// Override one layer weight on the scene Animator (`Base` or an override name).
+/// Rejects NaN and ±inf: they would serialize to `null` and break the scene on next load.
 pub fn set_entity_animator_layer_weight(
     scene: &mut Scene,
     name: &str,
     layer: &str,
     weight: f32,
 ) -> Result<()> {
+    wiimaker_assets::check_layer_weight(weight)?;
     let ent = find_mut(scene, name)?;
     let a = ent
         .components

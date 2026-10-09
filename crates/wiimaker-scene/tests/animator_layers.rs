@@ -102,6 +102,32 @@ fn override_aim_wins_and_zero_weight_falls_back() {
 }
 
 #[test]
+fn scene_layer_weight_rejects_non_finite_without_touching_scene() {
+    let dir = tmp_game("nonfinite-scene");
+    let assets = dir.join("assets");
+    write_anim_clip(&assets, "walk", vec!["w0".into()], 8.0, true).unwrap();
+    write_anim_clip(&assets, "aim", vec!["a0".into()], 8.0, true).unwrap();
+    write_animator_controller(&assets, "player", controller()).unwrap();
+    let mut scene = Scene::new("main");
+    add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
+    add_component_animator(&mut scene, "Player", "player").unwrap();
+    set_entity_animator_layer_weight(&mut scene, "Player", "UpperBody", 0.5).unwrap();
+    let path = dir.join("scenes/main.scene.json");
+    save_scene(&path, &scene).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
+
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(set_entity_animator_layer_weight(&mut scene, "Player", "UpperBody", bad).is_err());
+    }
+    save_scene(&path, &scene).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    assert!(!before.contains("null"));
+    let world = world_for(&dir);
+    let id = world.find_by_name("Player").unwrap();
+    assert_eq!(world.animator(id).unwrap().layer_weight(1), Some(0.5));
+}
+
+#[test]
 fn doctor_warns_on_layer_problems() {
     let dir = tmp_game("doctor");
     let assets = dir.join("assets");

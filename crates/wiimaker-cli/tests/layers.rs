@@ -169,6 +169,218 @@ fn cli_authors_override_layer_and_status_json() {
     assert!(text.contains("layer 'Empty' is empty"), "{text}");
 }
 
+fn run_fail(args: &[&str]) -> std::process::Output {
+    let out = wiimaker().args(args).output().expect("spawn wiimaker");
+    assert!(
+        !out.status.success(),
+        "wiimaker {args:?} should have failed:\nstdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    out
+}
+
+fn animator_game(tag: &str) -> PathBuf {
+    let dir = tmp_game(tag);
+    let game = dir.to_str().unwrap();
+    run(&["asset", "anim", game, "walk", "--cells", "w0,w1", "--json"]);
+    run(&["asset", "anim", game, "aim", "--cells", "a0", "--json"]);
+    run(&[
+        "asset",
+        "controller",
+        game,
+        "player",
+        "--default",
+        "Walk",
+        "--states",
+        "Walk:walk",
+        "--param",
+        "Aiming:Bool=false",
+        "--json",
+    ]);
+    run(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "add",
+        "--name",
+        "UpperBody",
+        "--weight",
+        "1",
+        "--json",
+    ]);
+    run(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "state",
+        "--name",
+        "UpperBody",
+        "--state",
+        "Aim",
+        "--clip",
+        "aim",
+        "--json",
+    ]);
+    run(&[
+        "entity",
+        "add-component",
+        game,
+        "--name",
+        "Player",
+        "Animator",
+        "--controller",
+        "player",
+        "--json",
+    ]);
+    dir
+}
+
+#[test]
+fn controller_layer_weight_rejects_non_finite_and_stays_loadable() {
+    let dir = animator_game("nonfinite-controller");
+    let game = dir.to_str().unwrap();
+    let ctrl = dir.join("assets/player.controller.json");
+    let before = fs::read_to_string(&ctrl).unwrap();
+    for bad in ["NaN", "inf", "-inf"] {
+        let weight = format!("--weight={bad}");
+        let out = run_fail(&[
+            "asset",
+            "controller-layer",
+            game,
+            "player",
+            "weight",
+            "--name",
+            "UpperBody",
+            &weight,
+            "--json",
+        ]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("must be a finite number"), "{bad}: {err}");
+        assert_eq!(
+            fs::read_to_string(&ctrl).unwrap(),
+            before,
+            "{bad} changed the controller file"
+        );
+    }
+    let add = run_fail(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "add",
+        "--name",
+        "Face",
+        "--weight=NaN",
+        "--json",
+    ]);
+    assert!(String::from_utf8_lossy(&add.stderr).contains("must be a finite number"));
+    let spaced = run_fail(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "weight",
+        "--name",
+        "UpperBody",
+        "--weight",
+        "-inf",
+        "--json",
+    ]);
+    assert!(String::from_utf8_lossy(&spaced.stderr).contains("must be a finite number"));
+    assert_eq!(fs::read_to_string(&ctrl).unwrap(), before);
+    assert!(!before.contains("null"));
+
+    run(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "list",
+        "--json",
+    ]);
+    let status = run(&[
+        "entity",
+        "animator-status",
+        game,
+        "--name",
+        "Player",
+        "--json",
+    ]);
+    assert!(String::from_utf8_lossy(&status.stdout).contains("\"clip\": \"aim\""));
+
+    run(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "weight",
+        "--name",
+        "UpperBody",
+        "--weight",
+        "-0.5",
+        "--json",
+    ]);
+    assert!(fs::read_to_string(&ctrl)
+        .unwrap()
+        .contains("\"weight\": -0.5"));
+}
+
+#[test]
+fn animator_set_layer_weight_rejects_non_finite_and_scene_stays_loadable() {
+    let dir = animator_game("nonfinite-scene");
+    let game = dir.to_str().unwrap();
+    let scene_path = dir.join("scenes/main.scene.json");
+    let before = fs::read_to_string(&scene_path).unwrap();
+    for bad in ["NaN", "inf", "-inf"] {
+        let weight = format!("--weight={bad}");
+        let out = run_fail(&[
+            "entity",
+            "animator-set",
+            game,
+            "--name",
+            "Player",
+            "--layer",
+            "UpperBody",
+            &weight,
+            "--json",
+        ]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("must be a finite number"), "{bad}: {err}");
+        assert_eq!(
+            fs::read_to_string(&scene_path).unwrap(),
+            before,
+            "{bad} changed the scene"
+        );
+    }
+    let spaced = run_fail(&[
+        "entity",
+        "animator-set",
+        game,
+        "--name",
+        "Player",
+        "--layer",
+        "UpperBody",
+        "--weight",
+        "-inf",
+        "--json",
+    ]);
+    assert!(String::from_utf8_lossy(&spaced.stderr).contains("must be a finite number"));
+    assert_eq!(fs::read_to_string(&scene_path).unwrap(), before);
+    assert!(!before.contains("null"));
+
+    let status = run(&[
+        "entity",
+        "animator-status",
+        game,
+        "--name",
+        "Player",
+        "--json",
+    ]);
+    assert!(String::from_utf8_lossy(&status.stdout).contains("\"clip\": \"aim\""));
+}
+
 #[test]
 fn fixture_override_aim_status() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/layers");

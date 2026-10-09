@@ -530,7 +530,7 @@ pub enum EntityCmd {
         #[arg(long)]
         layer: Option<String>,
         /// Layer weight 0..1 (runtime clamps). Requires `--layer`.
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         weight: Option<f32>,
         #[arg(long)]
         scene: Option<String>,
@@ -710,7 +710,7 @@ pub enum ControllerLayerCmd {
     Add {
         #[arg(long)]
         name: String,
-        #[arg(long, default_value_t = 1.0)]
+        #[arg(long, default_value_t = 1.0, allow_hyphen_values = true)]
         weight: f32,
     },
     /// Remove an override layer
@@ -725,11 +725,11 @@ pub enum ControllerLayerCmd {
         #[arg(long)]
         to: String,
     },
-    /// Set a layer weight (`--name Base` for the base layer). Stored raw; runtime clamps.
+    /// Set a layer weight (`--name Base` for the base layer). Must be finite; out-of-range values clamp at runtime.
     Weight {
         #[arg(long)]
         name: String,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         weight: f32,
     },
     /// Add or replace a clip state on a layer. Empty `--clip` is a placeholder on override layers.

@@ -306,6 +306,7 @@ impl AnimatorControllerMeta {
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        self.ensure_finite_weights()?;
         self.validate()?;
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -326,6 +327,26 @@ impl AnimatorControllerMeta {
 
     pub fn layer_mut(&mut self, name: &str) -> Option<&mut ControllerLayer> {
         self.layers.iter_mut().find(|l| l.name == name)
+    }
+
+    /// JSON cannot hold NaN or ±inf (serde writes `null`, which then fails to load as `f32`).
+    fn ensure_finite_weights(&self) -> Result<()> {
+        if !self.weight.is_finite() {
+            bail!(
+                "animator base weight must be a finite number, got {}",
+                self.weight
+            );
+        }
+        for layer in &self.layers {
+            if !layer.weight.is_finite() {
+                bail!(
+                    "animator layer '{}' weight must be a finite number, got {}",
+                    layer.name,
+                    layer.weight
+                );
+            }
+        }
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -639,12 +660,21 @@ pub fn remove_layer_transition(
     })
 }
 
+/// Rejects NaN and ±inf. Finite out-of-range weights are stored as authored and clamped at runtime.
+pub fn check_layer_weight(weight: f32) -> Result<()> {
+    if !weight.is_finite() {
+        bail!("animator layer weight must be a finite number, got {weight}");
+    }
+    Ok(())
+}
+
 pub fn add_controller_layer(
     assets_dir: &Path,
     controller: &str,
     name: &str,
     weight: f32,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    check_layer_weight(weight)?;
     let name = name.trim();
     if name.is_empty() {
         bail!("animator layer name must not be empty");
@@ -715,7 +745,7 @@ pub fn rename_controller_layer(
     })
 }
 
-/// Store `weight` as authored (runtime clamps NaN and out-of-range to 0..1).
+/// Store a finite `weight` as authored (runtime clamps out-of-range values to 0..1).
 /// `layer` `Base` writes the controller base weight.
 pub fn set_controller_layer_weight(
     assets_dir: &Path,
@@ -723,6 +753,7 @@ pub fn set_controller_layer_weight(
     layer: &str,
     weight: f32,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    check_layer_weight(weight)?;
     edit_controller(assets_dir, controller, |meta| {
         if is_base_layer_name(layer) {
             meta.weight = weight;
@@ -1132,6 +1163,38 @@ mod tests {
         assert!(meta.layer("Head").is_some());
         let (_, meta) = remove_controller_layer(&dir, "player", "Head").unwrap();
         assert!(meta.layer("Head").is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn non_finite_layer_weights_are_rejected_without_writing() {
+        let dir = tmp_dir("nonfinite");
+        let path = AnimatorControllerMeta::path(&dir, "player");
+        let mut authored = sample();
+        authored.layers.push(ControllerLayer {
+            name: "UpperBody".into(),
+            weight: 1.0,
+            default_state: "Idle".into(),
+            states: vec![ControllerState::plain("Idle", "idle")],
+            transitions: vec![],
+        });
+        write_animator_controller(&dir, "player", authored).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(check_layer_weight(bad).is_err());
+            assert!(add_controller_layer(&dir, "player", "Face", bad).is_err());
+            assert!(set_controller_layer_weight(&dir, "player", "UpperBody", bad).is_err());
+            assert!(set_controller_layer_weight(&dir, "player", "Base", bad).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        }
+        assert!(check_layer_weight(-0.5).is_ok());
+        assert!(check_layer_weight(2.5).is_ok());
+
+        let mut poisoned = AnimatorControllerMeta::load(&path).unwrap();
+        poisoned.layer_mut("UpperBody").unwrap().weight = f32::NAN;
+        assert!(poisoned.save(&path).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
         let _ = fs::remove_dir_all(&dir);
     }
 }
