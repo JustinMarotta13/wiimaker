@@ -459,6 +459,14 @@ fn check_controller_machine(
             message: format!("controller '{cname}': layer '{layer}' is empty"),
         });
     }
+    if override_layer && !states.is_empty() && default_state.is_empty() {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message: format!(
+                "controller '{cname}': layer '{layer}' has no default state, so it will not play until an Any transition enters a state"
+            ),
+        });
+    }
     if !default_state.is_empty() && states.iter().all(|s| s.name != default_state) {
         issues.push(Issue {
             severity: Severity::Warning,

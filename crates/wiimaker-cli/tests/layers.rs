@@ -431,6 +431,27 @@ fn animator_set_unknown_layer_lists_valid_names() {
 }
 
 #[test]
+fn doctor_warns_when_override_layer_has_no_default() {
+    let dir = animator_game("no-default");
+    let game = dir.to_str().unwrap();
+    let healthy = run(&["doctor", game]);
+    assert!(!String::from_utf8_lossy(&healthy.stdout).contains("has no default state"));
+
+    let ctrl = dir.join("assets/player.controller.json");
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&ctrl).unwrap()).unwrap();
+    doc["layers"][0].as_object_mut().unwrap().remove("default");
+    fs::write(&ctrl, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+
+    let broken = run(&["doctor", game]);
+    let text = String::from_utf8_lossy(&broken.stdout);
+    assert!(
+        text.contains("layer 'UpperBody' has no default state"),
+        "{text}"
+    );
+}
+
+#[test]
 fn fixture_override_aim_status() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/layers");
     let dir = tmp_game("fixture");
