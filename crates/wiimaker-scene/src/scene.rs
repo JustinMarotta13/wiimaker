@@ -810,8 +810,18 @@ pub struct SceneAnimator {
     /// Overrides of controller parameter defaults (authoring / CLI).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<SceneAnimatorParam>,
+    /// Per-layer weight overrides (`Base` or an override layer name).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<SceneAnimatorLayer>,
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled: bool,
+}
+
+/// Persisted layer-weight override on a scene Animator.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SceneAnimatorLayer {
+    pub name: String,
+    pub weight: f32,
 }
 
 /// Persisted parameter override on a scene Animator.
@@ -829,6 +839,7 @@ impl Default for SceneAnimator {
         Self {
             controller: String::new(),
             parameters: Vec::new(),
+            layers: Vec::new(),
             enabled: true,
         }
     }
@@ -889,6 +900,17 @@ impl SceneAnimator {
             float_value: None,
         });
         self.parameters.last_mut().unwrap()
+    }
+
+    pub fn set_layer_weight(&mut self, name: &str, weight: f32) {
+        if let Some(layer) = self.layers.iter_mut().find(|l| l.name == name) {
+            layer.weight = weight;
+            return;
+        }
+        self.layers.push(SceneAnimatorLayer {
+            name: name.to_string(),
+            weight,
+        });
     }
 }
 

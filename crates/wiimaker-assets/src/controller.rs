@@ -2,6 +2,12 @@
 //!
 //! A controller is a small state machine: named clip states, Bool/Float/Trigger
 //! parameters, and transitions. Clip cells stay in `*.anim.json`.
+//!
+//! Optional `layers` are extra state machines (Unity override layers). The
+//! top-level `default` / `states` / `transitions` are the base layer. Parameters
+//! stay controller-wide. Sprites cannot bone-blend, so layers are Override only:
+//! no avatar masks and no Additive blending. A layer with `weight > 0` whose
+//! current state has a clip or blend tree replaces the base clip.
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,6 +18,24 @@ use serde::{Deserialize, Serialize};
 
 fn default_speed() -> f32 {
     1.0
+}
+
+fn default_layer_weight() -> f32 {
+    1.0
+}
+
+/// True when a serialized weight is the default `1` (omit it so old files stay stable).
+fn is_default_weight(w: &f32) -> bool {
+    w.is_finite() && (*w - 1.0).abs() <= 1e-6
+}
+
+/// Layer 0 in the editor and CLI. Not stored in `layers` (that array is overrides only).
+pub const BASE_LAYER_NAME: &str = "Base";
+
+/// `Base` / empty selects the top-level state machine.
+pub fn is_base_layer_name(name: &str) -> bool {
+    let n = name.trim();
+    n.is_empty() || n.eq_ignore_ascii_case(BASE_LAYER_NAME)
 }
 
 /// Parameter kind on an animator controller.
@@ -227,7 +251,26 @@ pub struct ControllerTransition {
     pub has_exit_time: bool,
 }
 
+/// Override layer: its own state machine and a weight in 0..1 (clamped at runtime).
+///
+/// Omitted on old controllers. Index 0 of the runtime animator is always [`BASE_LAYER_NAME`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ControllerLayer {
+    pub name: String,
+    #[serde(default = "default_layer_weight")]
+    pub weight: f32,
+    #[serde(rename = "default", default, skip_serializing_if = "String::is_empty")]
+    pub default_state: String,
+    #[serde(default)]
+    pub states: Vec<ControllerState>,
+    #[serde(default)]
+    pub transitions: Vec<ControllerTransition>,
+}
+
 /// Authoring animator controller (`assets/<name>.controller.json`).
+///
+/// Files without `layers` load as a single base machine. `weight` is the base
+/// layer weight (default 1, omitted when it is 1).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AnimatorControllerMeta {
     #[serde(rename = "default")]
@@ -237,6 +280,15 @@ pub struct AnimatorControllerMeta {
     pub states: Vec<ControllerState>,
     #[serde(default)]
     pub transitions: Vec<ControllerTransition>,
+    /// Base layer weight. Override weights live on [`ControllerLayer`].
+    #[serde(
+        default = "default_layer_weight",
+        skip_serializing_if = "is_default_weight"
+    )]
+    pub weight: f32,
+    /// Override layers (runtime index 1+). Empty / omitted = base only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<ControllerLayer>,
 }
 
 impl AnimatorControllerMeta {
@@ -254,6 +306,7 @@ impl AnimatorControllerMeta {
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        self.ensure_finite_weights()?;
         self.validate()?;
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -268,27 +321,45 @@ impl AnimatorControllerMeta {
         self.states.iter().find(|s| s.name == name)
     }
 
+    pub fn layer(&self, name: &str) -> Option<&ControllerLayer> {
+        self.layers.iter().find(|l| l.name == name)
+    }
+
+    pub fn layer_mut(&mut self, name: &str) -> Option<&mut ControllerLayer> {
+        self.layers.iter_mut().find(|l| l.name == name)
+    }
+
+    /// JSON cannot hold NaN or ±inf (serde writes `null`, which then fails to load as `f32`).
+    fn ensure_finite_weights(&self) -> Result<()> {
+        if !self.weight.is_finite() {
+            bail!(
+                "animator base weight must be a finite number, got {}",
+                self.weight
+            );
+        }
+        for layer in &self.layers {
+            if !layer.weight.is_finite() {
+                bail!(
+                    "animator layer '{}' weight must be a finite number, got {}",
+                    layer.name,
+                    layer.weight
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.states.is_empty() {
             bail!("animator controller must list at least one state");
         }
-        let mut seen = HashMap::new();
-        for s in &self.states {
-            if s.name.is_empty() {
-                bail!("animator state name must not be empty");
-            }
-            match (&s.blend_tree, s.clip.is_empty()) {
-                (Some(_), false) => {
-                    bail!("animator state '{}' sets both clip and blend_tree", s.name)
-                }
-                (Some(bt), true) => bt.validate(&s.name)?,
-                (None, true) => bail!("animator state '{}' has empty clip", s.name),
-                (None, false) => {}
-            }
-            if seen.insert(s.name.as_str(), ()).is_some() {
-                bail!("duplicate animator state '{}'", s.name);
-            }
-        }
+        validate_machine(
+            "base",
+            &self.default_state,
+            &self.states,
+            &self.transitions,
+            false,
+        )?;
         if self.default_state.is_empty() {
             bail!("animator controller default state must not be empty");
         }
@@ -307,16 +378,72 @@ impl AnimatorControllerMeta {
                 bail!("duplicate animator parameter '{}'", p.name);
             }
         }
-        for t in &self.transitions {
-            if !is_any_state(&t.from) && self.state(&t.from).is_none() {
-                bail!("animator transition from unknown state '{}'", t.from);
+        for layer in &self.layers {
+            if layer.name.trim().is_empty() {
+                bail!("animator layer name must not be empty");
             }
-            if self.state(&t.to).is_none() {
-                bail!("animator transition to unknown state '{}'", t.to);
+            if is_base_layer_name(&layer.name) {
+                bail!(
+                    "animator layer name '{}' is reserved for the base layer",
+                    layer.name
+                );
             }
+            // Duplicate names and a default that is not a state are doctor warnings
+            // so a hand-edited file still loads. Empty layers are allowed.
+            validate_machine(
+                &format!("layer '{}'", layer.name),
+                &layer.default_state,
+                &layer.states,
+                &layer.transitions,
+                true,
+            )?;
         }
         Ok(())
     }
+}
+
+/// Shared state/transition checks. `allow_placeholder` lets an override state omit its clip.
+fn validate_machine(
+    label: &str,
+    default_state: &str,
+    states: &[ControllerState],
+    transitions: &[ControllerTransition],
+    allow_placeholder: bool,
+) -> Result<()> {
+    let mut seen = HashMap::new();
+    for s in states {
+        if s.name.is_empty() {
+            bail!("animator state name must not be empty ({label})");
+        }
+        match (&s.blend_tree, s.clip.is_empty()) {
+            (Some(_), false) => {
+                bail!("animator state '{}' sets both clip and blend_tree", s.name)
+            }
+            (Some(bt), true) => bt.validate(&s.name)?,
+            (None, true) if allow_placeholder => {}
+            (None, true) => bail!("animator state '{}' has empty clip", s.name),
+            (None, false) => {}
+        }
+        if seen.insert(s.name.as_str(), ()).is_some() {
+            bail!("duplicate animator state '{}'", s.name);
+        }
+    }
+    let known = |name: &str| states.iter().any(|s| s.name == name);
+    if !default_state.is_empty() && !states.is_empty() && !known(default_state) {
+        // Unknown defaults on override layers are a doctor warning, not a load error.
+        if !allow_placeholder {
+            bail!("animator default state '{default_state}' is not in states");
+        }
+    }
+    for t in transitions {
+        if !is_any_state(&t.from) && !known(&t.from) {
+            bail!("animator transition from unknown state '{}'", t.from);
+        }
+        if !known(&t.to) {
+            bail!("animator transition to unknown state '{}'", t.to);
+        }
+    }
+    Ok(())
 }
 
 /// `Any` / `*` matches every from-state at runtime.
@@ -340,7 +467,7 @@ pub fn write_animator_controller(
     Ok((path, meta))
 }
 
-/// Set `state` to a blend tree on an existing controller (adds the state when missing).
+/// Set `state` to a blend tree on the base layer (adds the state when missing).
 ///
 /// CLI `asset blend-tree` and the editor Inspector both call this, so their files match.
 pub fn write_state_blend_tree(
@@ -349,44 +476,342 @@ pub fn write_state_blend_tree(
     state: &str,
     tree: BlendTreeMeta,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
-    tree.validate(state)?;
-    let path = AnimatorControllerMeta::path(assets_dir, controller);
-    let mut meta = AnimatorControllerMeta::load(&path)?;
-    match meta.states.iter_mut().find(|s| s.name == state) {
-        Some(s) => {
-            s.clip.clear();
-            s.blend_tree = Some(tree);
-        }
-        None => meta.states.push(ControllerState {
-            name: state.to_string(),
-            clip: String::new(),
-            speed: default_speed(),
-            blend_tree: Some(tree),
-        }),
-    }
-    meta.save(&path)?;
-    Ok((path, meta))
+    write_layer_state_blend_tree(assets_dir, controller, None, state, tree)
 }
 
-/// Replace `state`'s blend tree with a plain clip. The state must already exist.
+/// Same as [`write_state_blend_tree`], scoped to an override layer (`None` / `Base` = base).
+pub fn write_layer_state_blend_tree(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    state: &str,
+    tree: BlendTreeMeta,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    tree.validate(state)?;
+    edit_controller(assets_dir, controller, |meta| {
+        let (states, default) = machine_mut(meta, layer)?;
+        match states.iter_mut().find(|s| s.name == state) {
+            Some(s) => {
+                s.clip.clear();
+                s.blend_tree = Some(tree);
+            }
+            None => {
+                states.push(ControllerState {
+                    name: state.to_string(),
+                    clip: String::new(),
+                    speed: default_speed(),
+                    blend_tree: Some(tree),
+                });
+                if default.is_empty() {
+                    *default = state.to_string();
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Replace `state`'s blend tree with a plain clip on the base layer. The state must already exist.
 pub fn write_state_clip(
     assets_dir: &Path,
     controller: &str,
     state: &str,
     clip: &str,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
-    if clip.trim().is_empty() {
+    write_layer_state_clip(assets_dir, controller, None, state, clip)
+}
+
+/// Same as [`write_state_clip`], scoped to a layer. An empty clip is a placeholder on override layers only.
+pub fn write_layer_state_clip(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    state: &str,
+    clip: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    let base = layer.map(is_base_layer_name).unwrap_or(true);
+    if clip.trim().is_empty() && base {
         bail!("state '{state}' clip must not be empty");
     }
+    edit_controller(assets_dir, controller, |meta| {
+        let (states, _) = machine_mut(meta, layer)?;
+        let Some(s) = states.iter_mut().find(|s| s.name == state) else {
+            bail!("animator controller '{controller}' has no state '{state}'");
+        };
+        s.clip = clip.trim().to_string();
+        s.blend_tree = None;
+        Ok(())
+    })
+}
+
+/// Add or replace a clip state. Empty `clip` is allowed on an override layer (placeholder).
+pub fn write_layer_state(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    state: &str,
+    clip: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    if state.trim().is_empty() {
+        bail!("animator state name must not be empty");
+    }
+    let base = layer.map(is_base_layer_name).unwrap_or(true);
+    if clip.trim().is_empty() && base {
+        bail!("state '{state}' clip must not be empty");
+    }
+    edit_controller(assets_dir, controller, |meta| {
+        let (states, default) = machine_mut(meta, layer)?;
+        match states.iter_mut().find(|s| s.name == state) {
+            Some(s) => {
+                s.clip = clip.trim().to_string();
+                s.blend_tree = None;
+            }
+            None => {
+                states.push(ControllerState::plain(state.trim(), clip.trim()));
+                if default.is_empty() {
+                    *default = state.trim().to_string();
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
+pub fn remove_layer_state(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    state: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    edit_controller(assets_dir, controller, |meta| {
+        let base = layer.map(is_base_layer_name).unwrap_or(true);
+        let (states, default, transitions) = machine_mut_full(meta, layer)?;
+        let before = states.len();
+        states.retain(|s| s.name != state);
+        if states.len() == before {
+            bail!("animator controller '{controller}' has no state '{state}'");
+        }
+        if base && states.is_empty() {
+            bail!("animator controller must list at least one state");
+        }
+        transitions.retain(|t| is_any_state(&t.from) || (t.from != state && t.to != state));
+        if default == state {
+            *default = states.first().map(|s| s.name.clone()).unwrap_or_default();
+        }
+        Ok(())
+    })
+}
+
+pub fn set_layer_default(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    state: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    edit_controller(assets_dir, controller, |meta| {
+        let base = layer.map(is_base_layer_name).unwrap_or(true);
+        let (states, default) = machine_mut(meta, layer)?;
+        if states.iter().all(|s| s.name != state) {
+            if base {
+                bail!("animator default state '{state}' is not in states");
+            }
+        }
+        *default = state.to_string();
+        Ok(())
+    })
+}
+
+pub fn add_layer_transition(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    transition: ControllerTransition,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    edit_controller(assets_dir, controller, |meta| {
+        let (states, _, transitions) = machine_mut_full(meta, layer)?;
+        let known = |name: &str| states.iter().any(|s| s.name == name);
+        if !is_any_state(&transition.from) && !known(&transition.from) {
+            bail!(
+                "animator transition from unknown state '{}'",
+                transition.from
+            );
+        }
+        if !known(&transition.to) {
+            bail!("animator transition to unknown state '{}'", transition.to);
+        }
+        transitions.push(transition);
+        Ok(())
+    })
+}
+
+pub fn remove_layer_transition(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    index: usize,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    edit_controller(assets_dir, controller, |meta| {
+        let (_, _, transitions) = machine_mut_full(meta, layer)?;
+        if index >= transitions.len() {
+            bail!("animator transition index {index} is out of range");
+        }
+        transitions.remove(index);
+        Ok(())
+    })
+}
+
+/// Rejects NaN and ±inf. Finite out-of-range weights are stored as authored and clamped at runtime.
+pub fn check_layer_weight(weight: f32) -> Result<()> {
+    if !weight.is_finite() {
+        bail!("animator layer weight must be a finite number, got {weight}");
+    }
+    Ok(())
+}
+
+pub fn add_controller_layer(
+    assets_dir: &Path,
+    controller: &str,
+    name: &str,
+    weight: f32,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    check_layer_weight(weight)?;
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("animator layer name must not be empty");
+    }
+    if is_base_layer_name(name) {
+        bail!("animator layer name '{name}' is reserved for the base layer");
+    }
+    edit_controller(assets_dir, controller, |meta| {
+        if meta
+            .layers
+            .iter()
+            .any(|l| l.name.eq_ignore_ascii_case(name))
+        {
+            bail!("animator controller '{controller}' already has layer '{name}'");
+        }
+        meta.layers.push(ControllerLayer {
+            name: name.to_string(),
+            weight,
+            default_state: String::new(),
+            states: Vec::new(),
+            transitions: Vec::new(),
+        });
+        Ok(())
+    })
+}
+
+pub fn remove_controller_layer(
+    assets_dir: &Path,
+    controller: &str,
+    name: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    edit_controller(assets_dir, controller, |meta| {
+        let before = meta.layers.len();
+        meta.layers.retain(|l| l.name != name);
+        if meta.layers.len() == before {
+            bail!("animator controller '{controller}' has no layer '{name}'");
+        }
+        Ok(())
+    })
+}
+
+pub fn rename_controller_layer(
+    assets_dir: &Path,
+    controller: &str,
+    from: &str,
+    to: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    let to = to.trim();
+    if to.is_empty() {
+        bail!("animator layer name must not be empty");
+    }
+    if is_base_layer_name(to) {
+        bail!("animator layer name '{to}' is reserved for the base layer");
+    }
+    edit_controller(assets_dir, controller, |meta| {
+        if meta
+            .layers
+            .iter()
+            .any(|l| l.name.eq_ignore_ascii_case(to) && l.name != from)
+        {
+            bail!("animator controller '{controller}' already has layer '{to}'");
+        }
+        let Some(layer) = meta.layers.iter_mut().find(|l| l.name == from) else {
+            bail!("animator controller '{controller}' has no layer '{from}'");
+        };
+        layer.name = to.to_string();
+        Ok(())
+    })
+}
+
+/// Store a finite `weight` as authored (runtime clamps out-of-range values to 0..1).
+/// `layer` `Base` writes the controller base weight.
+pub fn set_controller_layer_weight(
+    assets_dir: &Path,
+    controller: &str,
+    layer: &str,
+    weight: f32,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    check_layer_weight(weight)?;
+    edit_controller(assets_dir, controller, |meta| {
+        if is_base_layer_name(layer) {
+            meta.weight = weight;
+            return Ok(());
+        }
+        let Some(found) = meta.layers.iter_mut().find(|l| l.name == layer) else {
+            bail!("animator controller '{controller}' has no layer '{layer}'");
+        };
+        found.weight = weight;
+        Ok(())
+    })
+}
+
+fn edit_controller(
+    assets_dir: &Path,
+    controller: &str,
+    edit: impl FnOnce(&mut AnimatorControllerMeta) -> Result<()>,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
     let path = AnimatorControllerMeta::path(assets_dir, controller);
     let mut meta = AnimatorControllerMeta::load(&path)?;
-    let Some(s) = meta.states.iter_mut().find(|s| s.name == state) else {
-        bail!("animator controller '{controller}' has no state '{state}'");
-    };
-    s.clip = clip.to_string();
-    s.blend_tree = None;
+    edit(&mut meta)?;
     meta.save(&path)?;
     Ok((path, meta))
+}
+
+fn machine_mut<'a>(
+    meta: &'a mut AnimatorControllerMeta,
+    layer: Option<&str>,
+) -> Result<(&'a mut Vec<ControllerState>, &'a mut String)> {
+    let (states, default, _) = machine_mut_full(meta, layer)?;
+    Ok((states, default))
+}
+
+fn machine_mut_full<'a>(
+    meta: &'a mut AnimatorControllerMeta,
+    layer: Option<&str>,
+) -> Result<(
+    &'a mut Vec<ControllerState>,
+    &'a mut String,
+    &'a mut Vec<ControllerTransition>,
+)> {
+    match layer.map(str::trim).filter(|n| !is_base_layer_name(n)) {
+        None => Ok((
+            &mut meta.states,
+            &mut meta.default_state,
+            &mut meta.transitions,
+        )),
+        Some(name) => {
+            let Some(found) = meta.layers.iter_mut().find(|l| l.name == name) else {
+                bail!("animator controller has no layer '{name}'");
+            };
+            Ok((
+                &mut found.states,
+                &mut found.default_state,
+                &mut found.transitions,
+            ))
+        }
+    }
 }
 
 /// Stem names of every `*.controller.json` under `assets_dir`.
@@ -480,6 +905,8 @@ mod tests {
                     has_exit_time: false,
                 },
             ],
+            weight: 1.0,
+            layers: Vec::new(),
         }
     }
 
@@ -559,6 +986,8 @@ mod tests {
                 blend_tree: Some(tree),
             }],
             transitions: Vec::new(),
+            weight: 1.0,
+            layers: Vec::new(),
         }
     }
 
@@ -689,6 +1118,83 @@ mod tests {
             t
         })
         .is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn layers_roundtrip_and_old_files_omit_them() {
+        let legacy = "{\n  \"default\": \"Idle\",\n  \"parameters\": [],\n  \"states\": [\n    {\n      \"name\": \"Idle\",\n      \"clip\": \"idle\",\n      \"speed\": 1.0\n    }\n  ],\n  \"transitions\": []\n}\n";
+        let dir = tmp_dir("layers");
+        let path = dir.join("p.controller.json");
+        fs::write(&path, legacy).unwrap();
+        let meta = AnimatorControllerMeta::load(&path).unwrap();
+        assert!(meta.layers.is_empty());
+        assert!((meta.weight - 1.0).abs() < 1e-6);
+        meta.save(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+
+        let mut authored = sample();
+        authored.layers.push(ControllerLayer {
+            name: "UpperBody".into(),
+            weight: 2.5,
+            default_state: "Aim".into(),
+            states: vec![
+                ControllerState::plain("Aim", "aim"),
+                ControllerState::plain("Empty", ""),
+            ],
+            transitions: vec![],
+        });
+        assert!(authored.validate().is_ok());
+        let (path, _) = write_animator_controller(&dir, "player", authored).unwrap();
+        let loaded = AnimatorControllerMeta::load(&path).unwrap();
+        assert_eq!(loaded.layers.len(), 1);
+        assert_eq!(loaded.layers[0].weight, 2.5);
+        assert!(loaded.layers[0].states[1].clip.is_empty());
+
+        let (_, meta) = add_controller_layer(&dir, "player", "Face", 0.0).unwrap();
+        assert_eq!(meta.layers.len(), 2);
+        assert!(add_controller_layer(&dir, "player", "Base", 1.0).is_err());
+        assert!(add_controller_layer(&dir, "player", "face", 1.0).is_err());
+        let (_, meta) = set_controller_layer_weight(&dir, "player", "UpperBody", 0.25).unwrap();
+        assert_eq!(meta.layer("UpperBody").unwrap().weight, 0.25);
+        let (_, meta) = write_layer_state(&dir, "player", Some("Face"), "Blink", "blink").unwrap();
+        assert_eq!(meta.layer("Face").unwrap().default_state, "Blink");
+        let (_, meta) = rename_controller_layer(&dir, "player", "Face", "Head").unwrap();
+        assert!(meta.layer("Head").is_some());
+        let (_, meta) = remove_controller_layer(&dir, "player", "Head").unwrap();
+        assert!(meta.layer("Head").is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn non_finite_layer_weights_are_rejected_without_writing() {
+        let dir = tmp_dir("nonfinite");
+        let path = AnimatorControllerMeta::path(&dir, "player");
+        let mut authored = sample();
+        authored.layers.push(ControllerLayer {
+            name: "UpperBody".into(),
+            weight: 1.0,
+            default_state: "Idle".into(),
+            states: vec![ControllerState::plain("Idle", "idle")],
+            transitions: vec![],
+        });
+        write_animator_controller(&dir, "player", authored).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(check_layer_weight(bad).is_err());
+            assert!(add_controller_layer(&dir, "player", "Face", bad).is_err());
+            assert!(set_controller_layer_weight(&dir, "player", "UpperBody", bad).is_err());
+            assert!(set_controller_layer_weight(&dir, "player", "Base", bad).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        }
+        assert!(check_layer_weight(-0.5).is_ok());
+        assert!(check_layer_weight(2.5).is_ok());
+
+        let mut poisoned = AnimatorControllerMeta::load(&path).unwrap();
+        poisoned.layer_mut("UpperBody").unwrap().weight = f32::NAN;
+        assert!(poisoned.save(&path).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -8,9 +8,9 @@ use serde::Serialize;
 use crate::project::GameProject;
 use crate::scene::{load_scene, Scene};
 use wiimaker_assets::{
-    inspect_wav, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
-    AnimClipMeta, AnimatorControllerMeta, BlendDimension, BlendTreeMeta, ControllerParam,
-    ControllerParamType, ControllerState, SpriteCatalog, TimelineMeta,
+    inspect_wav, is_base_layer_name, list_anim_clips, list_animator_controllers, list_timelines,
+    list_wav_clips, AnimClipMeta, AnimatorControllerMeta, BlendDimension, BlendTreeMeta,
+    ControllerParam, ControllerParamType, ControllerState, SpriteCatalog, TimelineMeta,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -217,18 +217,47 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
         let path = AnimatorControllerMeta::path(&assets, cname);
         match AnimatorControllerMeta::load(&path) {
             Ok(meta) => {
-                for s in &meta.states {
-                    if let Some(bt) = &s.blend_tree {
-                        check_blend_tree(cname, s, bt, &meta.parameters, &anim_names, &mut issues);
-                    } else if !anim_names.iter().any(|n| n == &s.clip) {
+                check_controller_machine(
+                    cname,
+                    "Base",
+                    meta.weight,
+                    &meta.default_state,
+                    &meta.states,
+                    &meta.transitions,
+                    &meta.parameters,
+                    &anim_names,
+                    false,
+                    &mut issues,
+                );
+                let mut seen = std::collections::HashSet::new();
+                for layer in &meta.layers {
+                    let key = layer.name.to_ascii_lowercase();
+                    if layer.name.trim().is_empty() {
+                        issues.push(Issue {
+                            severity: Severity::Warning,
+                            message: format!("controller '{cname}': layer name is empty"),
+                        });
+                    } else if key == "base" || !seen.insert(key) {
                         issues.push(Issue {
                             severity: Severity::Warning,
                             message: format!(
-                                "controller '{cname}': state '{}' clip '{}' missing (expected assets/{}.anim.json)",
-                                s.name, s.clip, s.clip
+                                "controller '{cname}': duplicate layer name '{}'",
+                                layer.name
                             ),
                         });
                     }
+                    check_controller_machine(
+                        cname,
+                        &layer.name,
+                        layer.weight,
+                        &layer.default_state,
+                        &layer.states,
+                        &layer.transitions,
+                        &meta.parameters,
+                        &anim_names,
+                        true,
+                        &mut issues,
+                    );
                 }
             }
             Err(e) => issues.push(Issue {
@@ -250,6 +279,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
             &project.effective_sorting_layers(),
             &mut issues,
         );
+        check_animator_layer_overrides(scene, &assets, &controller_names, &mut issues);
     }
 
     check_build_scenes(game_dir, project, &mut issues);
@@ -399,8 +429,101 @@ fn warn_unknown_sorting_layer(
     }
 }
 
+fn check_controller_machine(
+    cname: &str,
+    layer: &str,
+    weight: f32,
+    default_state: &str,
+    states: &[ControllerState],
+    transitions: &[wiimaker_assets::ControllerTransition],
+    params: &[ControllerParam],
+    anim_names: &[String],
+    override_layer: bool,
+    issues: &mut Vec<Issue>,
+) {
+    let where_ = if override_layer {
+        format!("layer '{layer}'")
+    } else {
+        "base layer".into()
+    };
+    if !weight.is_finite() || !(0.0..=1.0).contains(&weight) {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message: format!(
+                "controller '{cname}': {where_} weight {weight} is outside 0..1 (runtime clamps)"
+            ),
+        });
+    }
+    if override_layer && states.is_empty() {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message: format!("controller '{cname}': layer '{layer}' is empty"),
+        });
+    }
+    if override_layer && !states.is_empty() && default_state.is_empty() {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message: format!(
+                "controller '{cname}': layer '{layer}' has no default state, so it will not play until an Any transition enters a state"
+            ),
+        });
+    }
+    if !default_state.is_empty() && states.iter().all(|s| s.name != default_state) {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message: format!(
+                "controller '{cname}': {where_} default '{default_state}' is not a state"
+            ),
+        });
+    }
+    for s in states {
+        if let Some(bt) = &s.blend_tree {
+            check_blend_tree(cname, layer, s, bt, params, anim_names, issues);
+        } else if s.clip.is_empty() {
+            if !override_layer {
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!("controller '{cname}': state '{}' has an empty clip", s.name),
+                });
+            }
+        } else if !anim_names.iter().any(|n| n == &s.clip) {
+            let scope = if override_layer {
+                format!("layer '{layer}' ")
+            } else {
+                String::new()
+            };
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: format!(
+                    "controller '{cname}': {scope}state '{}' clip '{}' missing (expected assets/{}.anim.json)",
+                    s.name, s.clip, s.clip
+                ),
+            });
+        }
+    }
+    for t in transitions {
+        for c in &t.conditions {
+            if !params.iter().any(|p| p.name == c.param) {
+                let scope = if override_layer {
+                    format!("layer '{layer}' ")
+                } else {
+                    String::new()
+                };
+                issues.push(Issue {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "controller '{cname}': {scope}transition param '{}' is not declared",
+                        c.param
+                    ),
+                });
+            }
+        }
+    }
+}
+
 fn check_blend_tree(
     cname: &str,
+    layer: &str,
     state: &ControllerState,
     tree: &BlendTreeMeta,
     params: &[ControllerParam],
@@ -413,7 +536,11 @@ fn check_blend_tree(
             message,
         })
     };
-    let st = &state.name;
+    let st = if layer.eq_ignore_ascii_case("base") {
+        state.name.clone()
+    } else {
+        format!("{} / {}", layer, state.name)
+    };
     if tree.motions.is_empty() {
         warn(format!(
             "controller '{cname}': blend state '{st}' has no motions"
@@ -467,6 +594,47 @@ fn check_blend_tree(
                     }
                 ));
             }
+        }
+    }
+}
+
+/// Scene Animator per-layer weight overrides must name `Base` (any case) or a layer
+/// the controller still has. A `controller-layer rename` / `remove` orphans them.
+fn check_animator_layer_overrides(
+    scene: &Scene,
+    assets: &Path,
+    controllers: &[String],
+    issues: &mut Vec<Issue>,
+) {
+    for ent in &scene.entities {
+        let Some(a) = &ent.components.animator else {
+            continue;
+        };
+        if a.layers.is_empty() || !controllers.iter().any(|n| n == &a.controller) {
+            continue;
+        }
+        let Ok(meta) =
+            AnimatorControllerMeta::load(&AnimatorControllerMeta::path(assets, &a.controller))
+        else {
+            continue;
+        };
+        for ov in &a.layers {
+            if is_base_layer_name(&ov.name) || meta.layer(&ov.name).is_some() {
+                continue;
+            }
+            let mut valid = vec![wiimaker_assets::BASE_LAYER_NAME.to_string()];
+            valid.extend(meta.layers.iter().map(|l| l.name.clone()));
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: format!(
+                    "scene '{}' entity '{}': animator layer weight override '{}' does not match any layer on controller '{}' (valid: {})",
+                    scene.name,
+                    ent.name,
+                    ov.name,
+                    a.controller,
+                    valid.join(", ")
+                ),
+            });
         }
     }
 }

@@ -41,10 +41,11 @@ pub use mutate::{
     remove_component_follow, remove_component_grid_mover, remove_component_playable_director,
     remove_component_sprite, remove_component_text, remove_entity, rename_entity,
     revert_prefab_instance, set_component_enabled, set_entity_anim, set_entity_animator_bool,
-    set_entity_animator_float, set_entity_audio_source, set_entity_controller, set_entity_follow,
-    set_entity_grid_mover, set_entity_parent, set_entity_playable_director, set_entity_rotation_z,
-    set_entity_scale, set_entity_sprite_pivot, set_entity_text, set_entity_transform,
-    set_entity_world_xy, set_scene_clear, unique_entity_name, unpack_prefab_instance, MutateOpts,
+    set_entity_animator_float, set_entity_animator_layer_weight, set_entity_audio_source,
+    set_entity_controller, set_entity_follow, set_entity_grid_mover, set_entity_parent,
+    set_entity_playable_director, set_entity_rotation_z, set_entity_scale, set_entity_sprite_pivot,
+    set_entity_text, set_entity_transform, set_entity_world_xy, set_scene_clear,
+    unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{
     pick_entity_at, pick_entity_at_with_catalog, pick_entity_at_with_catalog_and_layers,

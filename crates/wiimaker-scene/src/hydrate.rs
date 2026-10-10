@@ -708,35 +708,30 @@ fn apply_scene_animator(
             }
             rt.parameters.push(rp);
         }
-        for s in &meta.states {
-            let clip = anims.and_then(|c| c.lookup(&s.clip));
-            rt.states.push(AnimatorState {
-                name: s.name.clone(),
-                clip: s.clip.clone(),
-                speed: if s.speed > 0.0 { s.speed } else { 1.0 },
-                cells: clip.map(|m| m.cells.clone()).unwrap_or_default(),
-                fps: clip.map(|m| m.fps).filter(|f| *f > 0.0).unwrap_or(10.0),
-                loop_: clip.map(|m| m.loop_).unwrap_or(true),
-                blend: s
-                    .blend_tree
-                    .as_ref()
-                    .map(|bt| runtime_blend_tree(bt, anims)),
-            });
-        }
-        for t in &meta.transitions {
-            rt.transitions.push(AnimatorTransition {
-                from: t.from.clone(),
-                from_any: wiimaker_assets::is_any_state(&t.from),
-                to: t.to.clone(),
-                conditions: t
-                    .conditions
-                    .iter()
-                    .map(|c| runtime_condition(c, &rt.parameters))
-                    .collect(),
-                has_exit_time: t.has_exit_time,
-            });
-        }
+        push_runtime_states(&mut rt.states, &meta.states, anims);
+        push_runtime_transitions(&mut rt.transitions, &meta.transitions, &rt.parameters);
         rt.state = meta.default_state.clone();
+        rt.base_weight = meta.weight;
+        for layer in &meta.layers {
+            let mut rt_layer = wiimaker_core::AnimatorLayer {
+                name: layer.name.clone(),
+                weight: layer.weight,
+                state: layer.default_state.clone(),
+                state_time: 0.0,
+                states: Vec::new(),
+                transitions: Vec::new(),
+            };
+            push_runtime_states(&mut rt_layer.states, &layer.states, anims);
+            push_runtime_transitions(
+                &mut rt_layer.transitions,
+                &layer.transitions,
+                &rt.parameters,
+            );
+            rt.layers.push(rt_layer);
+        }
+        for ov in &scene_a.layers {
+            rt.set_layer_weight(&ov.name, ov.weight);
+        }
     }
     world.set_animator(id, Some(rt));
     let state = world
@@ -846,6 +841,48 @@ fn runtime_curve(keys: Option<&[wiimaker_assets::CurveKey]>) -> Option<wiimaker_
             })
             .collect(),
     ))
+}
+
+fn push_runtime_states(
+    out: &mut Vec<AnimatorState>,
+    states: &[wiimaker_assets::ControllerState],
+    anims: Option<&AnimClipCatalog>,
+) {
+    for s in states {
+        let clip = anims.and_then(|c| c.lookup(&s.clip));
+        out.push(AnimatorState {
+            name: s.name.clone(),
+            clip: s.clip.clone(),
+            speed: if s.speed > 0.0 { s.speed } else { 1.0 },
+            cells: clip.map(|m| m.cells.clone()).unwrap_or_default(),
+            fps: clip.map(|m| m.fps).filter(|f| *f > 0.0).unwrap_or(10.0),
+            loop_: clip.map(|m| m.loop_).unwrap_or(true),
+            blend: s
+                .blend_tree
+                .as_ref()
+                .map(|bt| runtime_blend_tree(bt, anims)),
+        });
+    }
+}
+
+fn push_runtime_transitions(
+    out: &mut Vec<AnimatorTransition>,
+    transitions: &[wiimaker_assets::ControllerTransition],
+    params: &[AnimatorParam],
+) {
+    for t in transitions {
+        out.push(AnimatorTransition {
+            from: t.from.clone(),
+            from_any: wiimaker_assets::is_any_state(&t.from),
+            to: t.to.clone(),
+            conditions: t
+                .conditions
+                .iter()
+                .map(|c| runtime_condition(c, params))
+                .collect(),
+            has_exit_time: t.has_exit_time,
+        });
+    }
 }
 
 fn runtime_blend_tree(

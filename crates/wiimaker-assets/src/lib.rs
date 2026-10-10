@@ -23,10 +23,14 @@ mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
 pub use controller::{
-    is_any_state, list_animator_controllers, write_animator_controller, write_state_blend_tree,
-    write_state_clip, AnimatorControllerCatalog, AnimatorControllerMeta, BlendDimension,
-    BlendMotion, BlendTreeMeta, ControllerCondition, ControllerParam, ControllerParamType,
-    ControllerState, ControllerTransition,
+    add_controller_layer, add_layer_transition, check_layer_weight, is_any_state,
+    is_base_layer_name, list_animator_controllers, remove_controller_layer, remove_layer_state,
+    remove_layer_transition, rename_controller_layer, set_controller_layer_weight,
+    set_layer_default, write_animator_controller, write_layer_state, write_layer_state_blend_tree,
+    write_layer_state_clip, write_state_blend_tree, write_state_clip, AnimatorControllerCatalog,
+    AnimatorControllerMeta, BlendDimension, BlendMotion, BlendTreeMeta, ControllerCondition,
+    ControllerLayer, ControllerParam, ControllerParamType, ControllerState, ControllerTransition,
+    BASE_LAYER_NAME,
 };
 pub use font::{
     atlas_image, atlas_rgba8, font8x8_c_header, glyph_bits, glyph_uv, map_char,

@@ -1,0 +1,7 @@
+name = "layers"
+title = "Animator Layers Fixture"
+default_scene = "scenes/main.scene.json"
+assets_dir = "assets"
+wpack = "assets.wpack"
+wscn = "scene.wscn"
+scenes = []

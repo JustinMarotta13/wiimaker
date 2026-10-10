@@ -200,7 +200,38 @@ pub struct AnimatorTransition {
     pub has_exit_time: bool,
 }
 
+/// One override layer. The base machine stays on [`Animator`]'s own fields (index 0).
+///
+/// Sprites cannot cross-fade or bone-blend, so a layer is Override only: when its
+/// clamped weight is > 0 and its current state has a clip or blend tree, it can
+/// replace the base clip. Higher indices win.
+#[derive(Clone, Debug)]
+pub struct AnimatorLayer {
+    pub name: String,
+    pub weight: f32,
+    pub state: String,
+    pub state_time: f32,
+    pub states: Vec<AnimatorState>,
+    pub transitions: Vec<AnimatorTransition>,
+}
+
+/// Display name of layer 0. Not stored as an [`AnimatorLayer`].
+pub const BASE_LAYER_NAME: &str = "Base";
+
+/// NaN → 0. Values outside 0..1 clamp.
+pub fn clamp_layer_weight(weight: f32) -> f32 {
+    if !weight.is_finite() {
+        0.0
+    } else {
+        weight.clamp(0.0, 1.0)
+    }
+}
+
 /// Runtime animator: owns state machine, feeds sibling [`Animation`].
+///
+/// `state` / `states` / `transitions` are the base layer. `layers` are override
+/// machines (index 1+). Parameters are shared. Triggers are consumed once per
+/// tick after every layer has been evaluated.
 #[derive(Clone, Debug)]
 pub struct Animator {
     pub controller: String,
@@ -209,6 +240,11 @@ pub struct Animator {
     pub parameters: Vec<AnimatorParam>,
     pub states: Vec<AnimatorState>,
     pub transitions: Vec<AnimatorTransition>,
+    /// Base layer weight. The base clip still plays when no override contributes.
+    pub base_weight: f32,
+    pub layers: Vec<AnimatorLayer>,
+    /// Layer index that last wrote the sibling Animation.
+    playback_layer: Option<usize>,
 }
 
 impl Animator {
@@ -220,7 +256,87 @@ impl Animator {
             parameters: Vec::new(),
             states: Vec::new(),
             transitions: Vec::new(),
+            base_weight: 1.0,
+            layers: Vec::new(),
+            playback_layer: None,
         }
+    }
+
+    pub fn layer_count(&self) -> usize {
+        1 + self.layers.len()
+    }
+
+    pub fn playback_layer(&self) -> Option<usize> {
+        self.playback_layer
+    }
+
+    pub fn layer_name(&self, index: usize) -> Option<&str> {
+        if index == 0 {
+            Some(BASE_LAYER_NAME)
+        } else {
+            self.layers.get(index - 1).map(|l| l.name.as_str())
+        }
+    }
+
+    pub fn layer_weight_raw(&self, index: usize) -> Option<f32> {
+        if index == 0 {
+            Some(self.base_weight)
+        } else {
+            self.layers.get(index - 1).map(|l| l.weight)
+        }
+    }
+
+    /// Clamped weight (NaN and out-of-range become 0..1).
+    pub fn layer_weight(&self, index: usize) -> Option<f32> {
+        self.layer_weight_raw(index).map(clamp_layer_weight)
+    }
+
+    pub fn layer_state_name(&self, index: usize) -> Option<&str> {
+        if index == 0 {
+            Some(self.state.as_str())
+        } else {
+            self.layers.get(index - 1).map(|l| l.state.as_str())
+        }
+    }
+
+    pub fn layer_blend(&self, index: usize) -> Option<&BlendTree> {
+        let (name, states) = if index == 0 {
+            (self.state.as_str(), self.states.as_slice())
+        } else {
+            let layer = self.layers.get(index - 1)?;
+            (layer.state.as_str(), layer.states.as_slice())
+        };
+        states
+            .iter()
+            .find(|s| s.name == name)
+            .and_then(|s| s.blend.as_ref())
+    }
+
+    /// Set a layer weight by name (`Base` or an override name). Stores the raw value.
+    pub fn set_layer_weight(&mut self, name: &str, weight: f32) -> bool {
+        if name.eq_ignore_ascii_case(BASE_LAYER_NAME) {
+            self.base_weight = weight;
+            return true;
+        }
+        if let Some(layer) = self.layers.iter_mut().find(|l| l.name == name) {
+            layer.weight = weight;
+            return true;
+        }
+        false
+    }
+
+    /// Highest override index that contributes, else 0 (the base layer).
+    pub fn winning_layer(&self) -> usize {
+        for i in (0..self.layers.len()).rev() {
+            if layer_contributes(
+                self.layers[i].weight,
+                &self.layers[i].state,
+                &self.layers[i].states,
+            ) {
+                return i + 1;
+            }
+        }
+        0
     }
 
     pub fn find_state(&self, name: &str) -> Option<&AnimatorState> {
@@ -286,65 +402,27 @@ impl Animator {
         false
     }
 
-    /// Blend input: Float value, Bool/Trigger as 0/1. Missing params read as 0.
-    fn param_value(&self, name: &str) -> f32 {
-        match self.param(name) {
-            Some(p) => match p.kind {
-                AnimatorParamKind::Float => p.float_value,
-                AnimatorParamKind::Bool | AnimatorParamKind::Trigger => {
-                    if p.bool_value {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-            },
-            None => 0.0,
+    fn evaluate_all_blends(&mut self) {
+        let params = self.parameters.clone();
+        evaluate_machine(&params, &self.state, &mut self.states);
+        for layer in &mut self.layers {
+            evaluate_machine(&params, &layer.state, &mut layer.states);
         }
     }
 
-    /// Re-read live params into the current state's blend tree. False when the state has no tree.
-    fn evaluate_blend(&mut self) -> bool {
-        let Some(idx) = self.states.iter().position(|s| s.name == self.state) else {
-            return false;
-        };
-        let inputs = match self.states[idx].blend.as_ref() {
-            None => return false,
-            Some(b) => {
-                let mut v = [0.0_f32; 2];
-                for (i, name) in b.params.iter().take(2).enumerate() {
-                    v[i] = self.param_value(name);
-                }
-                v
-            }
-        };
-        if let Some(b) = self.states[idx].blend.as_mut() {
-            b.evaluate(inputs);
-        }
-        true
-    }
-
-    /// Clip the current state should drive on `Animation` (dominant blend motion when blended).
+    /// Clip the current base state should drive on `Animation` (dominant blend motion when blended).
     fn playback(&self) -> Option<Playback> {
         let s = self.current_state()?;
-        let speed = s.speed.max(0.001);
-        match &s.blend {
-            Some(b) => {
-                let m = b.active_motion()?;
-                Some(Playback {
-                    clip: m.clip.clone(),
-                    cells: m.cells.clone(),
-                    fps: (m.fps * speed).max(0.001),
-                    loop_: m.loop_,
-                })
-            }
-            None => Some(Playback {
-                clip: s.clip.clone(),
-                cells: s.cells.clone(),
-                fps: s.playback_fps(),
-                loop_: s.loop_,
-            }),
+        state_playback(s)
+    }
+
+    fn layer_playback(&self, index: usize) -> Option<Playback> {
+        if index == 0 {
+            return self.playback();
         }
+        let layer = self.layers.get(index - 1)?;
+        let s = layer.states.iter().find(|s| s.name == layer.state)?;
+        state_playback(s)
     }
 
     /// Blend tree on the current state, with weights from the last evaluation.
@@ -352,73 +430,215 @@ impl Animator {
         self.current_state().and_then(|s| s.blend.as_ref())
     }
 
-    fn condition_met(&self, c: &AnimatorCondition) -> bool {
-        match c {
-            AnimatorCondition::BoolEq { param, value } => {
-                self.param(param).is_some_and(|p| match p.kind {
-                    AnimatorParamKind::Float => (p.float_value != 0.0) == *value,
-                    AnimatorParamKind::Bool | AnimatorParamKind::Trigger => p.bool_value == *value,
-                })
-            }
-            AnimatorCondition::FloatEq { param, value } => self
-                .param(param)
-                .is_some_and(|p| (p.float_value - *value).abs() < 1e-4),
-            AnimatorCondition::FloatGreater { param, value } => {
-                self.param(param).is_some_and(|p| p.float_value > *value)
-            }
-            AnimatorCondition::FloatLess { param, value } => {
-                self.param(param).is_some_and(|p| p.float_value < *value)
-            }
-            AnimatorCondition::Trigger { param } => self
-                .param(param)
-                .is_some_and(|p| p.kind == AnimatorParamKind::Trigger && p.bool_value),
-        }
-    }
-
-    fn conditions_met(&self, conditions: &[AnimatorCondition]) -> bool {
-        conditions.iter().all(|c| self.condition_met(c))
-    }
-
-    fn consume_triggers(&mut self, conditions: &[AnimatorCondition]) {
-        for c in conditions {
-            if let AnimatorCondition::Trigger { param } = c {
-                if let Some(p) = self.param_mut(param) {
-                    p.bool_value = false;
-                }
-            }
-            if let AnimatorCondition::BoolEq { param, value } = c {
-                if *value {
-                    if let Some(p) = self.param_mut(param) {
-                        if p.kind == AnimatorParamKind::Trigger {
-                            p.bool_value = false;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// First matching transition, or `None` to stay.
+    /// First matching transition on the base layer, or `None` to stay.
     pub fn pick_transition(&self) -> Option<&AnimatorTransition> {
-        let current = self.state.as_str();
-        let duration = self.current_state().map(|s| s.duration()).unwrap_or(0.0);
-        for t in &self.transitions {
-            let from_ok = t.from_any || t.from == current;
-            if !from_ok {
-                continue;
+        let idx = pick_index(
+            &self.parameters,
+            &self.state,
+            self.state_time,
+            &self.states,
+            &self.transitions,
+        )?;
+        self.transitions.get(idx)
+    }
+
+    fn pick_owned(&self, index: usize) -> Option<(String, Vec<AnimatorCondition>)> {
+        if index == 0 {
+            return self
+                .pick_transition()
+                .map(|t| (t.to.clone(), t.conditions.clone()));
+        }
+        let layer = self.layers.get(index - 1)?;
+        let idx = pick_index(
+            &self.parameters,
+            &layer.state,
+            layer.state_time,
+            &layer.states,
+            &layer.transitions,
+        )?;
+        let t = layer.transitions.get(idx)?;
+        Some((t.to.clone(), t.conditions.clone()))
+    }
+
+    fn advance_times(&mut self, dt: f32) {
+        let speed = self
+            .current_state()
+            .map(|s| s.speed.max(0.001))
+            .unwrap_or(1.0);
+        self.state_time += dt * speed;
+        for layer in &mut self.layers {
+            let speed = layer
+                .states
+                .iter()
+                .find(|s| s.name == layer.state)
+                .map(|s| s.speed.max(0.001))
+                .unwrap_or(1.0);
+            layer.state_time += dt * speed;
+        }
+    }
+}
+
+fn state_playback(s: &AnimatorState) -> Option<Playback> {
+    if !state_has_motion(s) {
+        return None;
+    }
+    let speed = s.speed.max(0.001);
+    match &s.blend {
+        Some(b) => {
+            let m = b.active_motion()?;
+            if m.clip.is_empty() && m.cells.is_empty() {
+                return None;
             }
-            if t.to == current && t.from_any {
-                continue;
+            Some(Playback {
+                clip: m.clip.clone(),
+                cells: m.cells.clone(),
+                fps: (m.fps * speed).max(0.001),
+                loop_: m.loop_,
+            })
+        }
+        None => Some(Playback {
+            clip: s.clip.clone(),
+            cells: s.cells.clone(),
+            fps: s.playback_fps(),
+            loop_: s.loop_,
+        }),
+    }
+}
+
+fn state_has_motion(s: &AnimatorState) -> bool {
+    match &s.blend {
+        Some(b) => b
+            .motions
+            .iter()
+            .any(|m| !m.clip.is_empty() || !m.cells.is_empty()),
+        None => !s.clip.is_empty() || !s.cells.is_empty(),
+    }
+}
+
+fn layer_contributes(weight: f32, state: &str, states: &[AnimatorState]) -> bool {
+    if clamp_layer_weight(weight) <= 0.0 {
+        return false;
+    }
+    states
+        .iter()
+        .find(|s| s.name == state)
+        .is_some_and(state_has_motion)
+}
+
+fn param_as_float(params: &[AnimatorParam], name: &str) -> f32 {
+    match params.iter().find(|p| p.name == name) {
+        Some(p) => match p.kind {
+            AnimatorParamKind::Float => p.float_value,
+            AnimatorParamKind::Bool | AnimatorParamKind::Trigger => {
+                if p.bool_value {
+                    1.0
+                } else {
+                    0.0
+                }
             }
-            if t.has_exit_time && duration > 0.0 && self.state_time < duration {
-                continue;
+        },
+        None => 0.0,
+    }
+}
+
+fn evaluate_machine(params: &[AnimatorParam], state: &str, states: &mut [AnimatorState]) -> bool {
+    let Some(idx) = states.iter().position(|s| s.name == state) else {
+        return false;
+    };
+    let inputs = match states[idx].blend.as_ref() {
+        None => return false,
+        Some(b) => {
+            let mut v = [0.0_f32; 2];
+            for (i, name) in b.params.iter().take(2).enumerate() {
+                v[i] = param_as_float(params, name);
             }
-            if self.conditions_met(&t.conditions) {
-                return Some(t);
+            v
+        }
+    };
+    if let Some(b) = states[idx].blend.as_mut() {
+        b.evaluate(inputs);
+    }
+    true
+}
+
+fn condition_met(params: &[AnimatorParam], c: &AnimatorCondition) -> bool {
+    match c {
+        AnimatorCondition::BoolEq { param, value } => params
+            .iter()
+            .find(|p| p.name == *param)
+            .is_some_and(|p| match p.kind {
+                AnimatorParamKind::Float => (p.float_value != 0.0) == *value,
+                AnimatorParamKind::Bool | AnimatorParamKind::Trigger => p.bool_value == *value,
+            }),
+        AnimatorCondition::FloatEq { param, value } => params
+            .iter()
+            .find(|p| p.name == *param)
+            .is_some_and(|p| (p.float_value - *value).abs() < 1e-4),
+        AnimatorCondition::FloatGreater { param, value } => params
+            .iter()
+            .find(|p| p.name == *param)
+            .is_some_and(|p| p.float_value > *value),
+        AnimatorCondition::FloatLess { param, value } => params
+            .iter()
+            .find(|p| p.name == *param)
+            .is_some_and(|p| p.float_value < *value),
+        AnimatorCondition::Trigger { param } => params
+            .iter()
+            .find(|p| p.name == *param)
+            .is_some_and(|p| p.kind == AnimatorParamKind::Trigger && p.bool_value),
+    }
+}
+
+fn pick_index(
+    params: &[AnimatorParam],
+    current: &str,
+    state_time: f32,
+    states: &[AnimatorState],
+    transitions: &[AnimatorTransition],
+) -> Option<usize> {
+    let duration = states
+        .iter()
+        .find(|s| s.name == current)
+        .map(|s| s.duration())
+        .unwrap_or(0.0);
+    for (i, t) in transitions.iter().enumerate() {
+        let from_ok = t.from_any || t.from == current;
+        if !from_ok {
+            continue;
+        }
+        if t.to == current && t.from_any {
+            continue;
+        }
+        if t.has_exit_time && duration > 0.0 && state_time < duration {
+            continue;
+        }
+        if t.conditions.iter().all(|c| condition_met(params, c)) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn trigger_param_names(params: &[AnimatorParam], conditions: &[AnimatorCondition]) -> Vec<String> {
+    let mut names = Vec::new();
+    for c in conditions {
+        let hit = match c {
+            AnimatorCondition::Trigger { param } => Some(param.as_str()),
+            AnimatorCondition::BoolEq { param, value: true } => {
+                let is_trigger = params
+                    .iter()
+                    .any(|p| p.name == *param && p.kind == AnimatorParamKind::Trigger);
+                is_trigger.then_some(param.as_str())
+            }
+            _ => None,
+        };
+        if let Some(name) = hit {
+            if !names.iter().any(|n| n == name) {
+                names.push(String::from(name));
             }
         }
-        None
     }
+    names
 }
 
 impl World {
@@ -455,18 +675,52 @@ impl World {
             .unwrap_or(false)
     }
 
-    /// Apply a state's clip onto the sibling Animation (create if missing).
-    /// Blend states evaluate live params and play the dominant motion from its first frame.
+    pub fn set_animator_layer_weight(&mut self, id: EntityId, name: &str, weight: f32) -> bool {
+        let ok = self
+            .animator_mut(id)
+            .map(|a| a.set_layer_weight(name, weight))
+            .unwrap_or(false);
+        if ok {
+            self.drive_animator(id, None);
+        }
+        ok
+    }
+
+    /// Apply a base-layer state, then drive Animation from the winning layer.
+    /// Blend states evaluate live params. A state change on the winner starts at frame 0.
     pub fn apply_animator_state(&mut self, id: EntityId, state_name: &str) {
+        let Some(a) = self.animator_mut(id) else {
+            return;
+        };
+        if a.find_state(state_name).is_none() {
+            return;
+        }
+        a.state = state_name.into();
+        a.state_time = 0.0;
+        self.drive_animator(id, Some(0));
+    }
+
+    /// Re-evaluate every layer and write the winning clip.
+    ///
+    /// `reset_layer` forces frame 0 when that layer is the winner (a transition).
+    /// A blend-motion change on the same winner keeps normalized phase.
+    /// Switching which layer wins also starts at frame 0.
+    fn drive_animator(&mut self, id: EntityId, reset_layer: Option<usize>) {
         let Some(playback) = self.animator_mut(id).and_then(|a| {
-            a.find_state(state_name)?;
-            a.state = state_name.into();
-            a.state_time = 0.0;
-            a.evaluate_blend();
-            a.playback()
+            a.evaluate_all_blends();
+            let win = a.winning_layer();
+            let playback = a.layer_playback(win)?;
+            let reset = a.playback_layer != Some(win) || reset_layer == Some(win);
+            a.playback_layer = Some(win);
+            Some((playback, reset))
         }) else {
             return;
         };
+        let (playback, reset) = playback;
+        self.write_playback(id, playback, reset);
+    }
+
+    fn write_playback(&mut self, id: EntityId, playback: Playback, reset: bool) {
         let Playback {
             clip,
             cells,
@@ -475,11 +729,43 @@ impl World {
         } = playback;
         match self.animation_mut(id) {
             Some(anim) => {
+                if reset {
+                    anim.clip = clip;
+                    anim.cells = cells;
+                    anim.fps = fps;
+                    anim.loop_ = loop_;
+                    anim.time = 0.0;
+                    anim.frame = 0;
+                    return;
+                }
+                if anim.clip == clip {
+                    anim.cells = cells;
+                    anim.fps = fps;
+                    anim.loop_ = loop_;
+                    return;
+                }
+                let old_dur = if anim.cells.is_empty() || anim.fps <= 0.0 {
+                    0.0
+                } else {
+                    anim.cells.len() as f32 / anim.fps
+                };
+                let phase = if old_dur <= 0.0 {
+                    0.0
+                } else if anim.loop_ {
+                    (anim.time / old_dur) % 1.0
+                } else {
+                    (anim.time / old_dur).clamp(0.0, 1.0)
+                };
+                let new_dur = if cells.is_empty() || fps <= 0.0 {
+                    0.0
+                } else {
+                    cells.len() as f32 / fps
+                };
                 anim.clip = clip;
                 anim.cells = cells;
                 anim.fps = fps;
                 anim.loop_ = loop_;
-                anim.time = 0.0;
+                anim.time = phase * new_dur;
                 anim.frame = 0;
             }
             None => {
@@ -488,68 +774,66 @@ impl World {
         }
     }
 
-    /// Re-evaluate the blend tree; when the dominant motion changes, switch the clip and keep phase.
-    fn sync_blend_motion(&mut self, id: EntityId) {
-        let Some(playback) = self.animator_mut(id).and_then(|a| {
-            if a.evaluate_blend() {
-                a.playback()
-            } else {
-                None
-            }
-        }) else {
-            return;
-        };
-        let Some(anim) = self.animation_mut(id) else {
-            return;
-        };
-        if anim.clip == playback.clip {
-            return;
-        }
-        let old_dur = if anim.cells.is_empty() || anim.fps <= 0.0 {
-            0.0
-        } else {
-            anim.cells.len() as f32 / anim.fps
-        };
-        let phase = if old_dur <= 0.0 {
-            0.0
-        } else if anim.loop_ {
-            (anim.time / old_dur) % 1.0
-        } else {
-            (anim.time / old_dur).clamp(0.0, 1.0)
-        };
-        let new_dur = if playback.cells.is_empty() || playback.fps <= 0.0 {
-            0.0
-        } else {
-            playback.cells.len() as f32 / playback.fps
-        };
-        anim.clip = playback.clip;
-        anim.cells = playback.cells;
-        anim.fps = playback.fps;
-        anim.loop_ = playback.loop_;
-        anim.time = phase * new_dur;
-        anim.frame = 0;
-    }
-
-    /// Evaluate transitions then advance state time. Call before clip frame advance.
+    /// Advance every layer, then take transitions against one parameter snapshot.
+    ///
+    /// Triggers referenced by any taken transition are cleared once after all
+    /// layers have chosen, so two layers can both see the same trigger in a tick.
+    /// A trigger nobody took stays set. Call before clip frame advance.
     pub fn tick_animators(&mut self, dt: f32) {
         let ids: Vec<_> = self.iter_entities().collect();
         for id in ids {
             if let Some(a) = self.animator_mut(id) {
-                let speed = a.current_state().map(|s| s.speed.max(0.001)).unwrap_or(1.0);
-                a.state_time += dt * speed;
+                a.advance_times(dt);
             }
-            let Some(next) = self.animator(id).and_then(|a| {
-                a.pick_transition()
-                    .map(|t| (t.to.clone(), t.conditions.clone()))
-            }) else {
-                self.sync_blend_motion(id);
+            let Some(a) = self.animator(id) else {
                 continue;
             };
-            let (to, conditions) = next;
-            if let Some(a) = self.animator_mut(id) {
-                a.consume_triggers(&conditions);
+            let n = a.layer_count();
+            let mut taken: Vec<(usize, String, Vec<AnimatorCondition>)> = Vec::new();
+            for index in 0..n {
+                if let Some((to, conditions)) = a.pick_owned(index) {
+                    taken.push((index, to, conditions));
+                }
             }
-            self.apply_animator_state(id, &to);
+            let mut consume: Vec<String> = Vec::new();
+            if let Some(a) = self.animator(id) {
+                for (_, _, conditions) in &taken {
+                    for name in trigger_param_names(&a.parameters, conditions) {
+                        if !consume.iter().any(|n| n == &name) {
+                            consume.push(name);
+                        }
+                    }
+                }
+            }
+            if let Some(a) = self.animator_mut(id) {
+                for name in &consume {
+                    if let Some(p) = a.param_mut(name) {
+                        if p.kind == AnimatorParamKind::Trigger {
+                            p.bool_value = false;
+                        }
+                    }
+                }
+                for (index, to, _) in &taken {
+                    if *index == 0 {
+                        if a.find_state(to).is_some() {
+                            a.state = to.clone();
+                            a.state_time = 0.0;
+                        }
+                    } else if let Some(layer) = a.layers.get_mut(index - 1) {
+                        if layer.states.iter().any(|s| s.name == *to) {
+                            layer.state = to.clone();
+                            layer.state_time = 0.0;
+                        }
+                    }
+                }
+            }
+            let reset = taken.iter().map(|(index, _, _)| *index).collect::<Vec<_>>();
+            // Drive once. If several layers transitioned, reset when the winner is one of them.
+            let winner_reset = self
+                .animator(id)
+                .map(|a| a.winning_layer())
+                .filter(|win| reset.contains(win));
+            self.drive_animator(id, winner_reset);
         }
     }
 }
@@ -855,5 +1139,149 @@ mod tests {
         assert_eq!(world.animator(id).unwrap().state, "Idle");
         world.tick_animators(0.16);
         assert_eq!(world.animator(id).unwrap().state, "Walk");
+    }
+
+    fn clip_state(name: &str, clip: &str) -> AnimatorState {
+        AnimatorState {
+            name: name.into(),
+            clip: clip.into(),
+            speed: 1.0,
+            cells: vec![format!("{clip}_0")],
+            fps: 8.0,
+            loop_: true,
+            blend: None,
+        }
+    }
+
+    fn walk_aim() -> Animator {
+        let mut a = Animator::new("player");
+        a.state = "Walk".into();
+        a.states.push(clip_state("Walk", "walk"));
+        a.states.push(clip_state("Idle", "idle"));
+        a.parameters.push(AnimatorParam::trigger_param("Fire"));
+        a.parameters.push(AnimatorParam::bool_param("Moving", true));
+        a.transitions.push(AnimatorTransition {
+            from: "Walk".into(),
+            from_any: false,
+            to: "Idle".into(),
+            conditions: vec![AnimatorCondition::Trigger {
+                param: "Fire".into(),
+            }],
+            has_exit_time: false,
+        });
+        a.layers.push(AnimatorLayer {
+            name: "UpperBody".into(),
+            weight: 1.0,
+            state: "Aim".into(),
+            state_time: 0.0,
+            states: vec![clip_state("Aim", "aim"), clip_state("Shoot", "shoot")],
+            transitions: vec![AnimatorTransition {
+                from: "Aim".into(),
+                from_any: false,
+                to: "Shoot".into(),
+                conditions: vec![AnimatorCondition::Trigger {
+                    param: "Fire".into(),
+                }],
+                has_exit_time: false,
+            }],
+        });
+        a.layers.push(AnimatorLayer {
+            name: "Face".into(),
+            weight: 0.0,
+            state: "Blink".into(),
+            state_time: 0.0,
+            states: vec![clip_state("Blink", "blink")],
+            transitions: Vec::new(),
+        });
+        a
+    }
+
+    #[test]
+    fn override_layer_wins_until_weight_is_zero() {
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(walk_aim()));
+        world.apply_animator_state(id, "Walk");
+        assert_eq!(world.animation(id).unwrap().clip, "aim");
+        assert_eq!(world.animator(id).unwrap().state, "Walk");
+        assert_eq!(world.animator(id).unwrap().winning_layer(), 1);
+        assert_eq!(world.animator(id).unwrap().layer_state_name(1), Some("Aim"));
+
+        assert!(world.set_animator_layer_weight(id, "UpperBody", 0.0));
+        assert_eq!(world.animation(id).unwrap().clip, "walk");
+        assert_eq!(world.animator(id).unwrap().winning_layer(), 0);
+
+        assert!(world.set_animator_layer_weight(id, "UpperBody", 2.0));
+        assert_eq!(world.animator(id).unwrap().layer_weight(1), Some(1.0));
+        assert_eq!(world.animation(id).unwrap().clip, "aim");
+
+        world.set_animator_layer_weight(id, "UpperBody", f32::NAN);
+        assert_eq!(world.animator(id).unwrap().layer_weight(1), Some(0.0));
+        assert_eq!(world.animation(id).unwrap().clip, "walk");
+    }
+
+    #[test]
+    fn higher_index_override_beats_lower_when_both_contribute() {
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(walk_aim()));
+        world.apply_animator_state(id, "Walk");
+        world.set_animator_layer_weight(id, "Face", 1.0);
+        assert_eq!(world.animation(id).unwrap().clip, "blink");
+        assert_eq!(world.animator(id).unwrap().winning_layer(), 2);
+        world.set_animator_layer_weight(id, "Face", 0.0);
+        assert_eq!(world.animation(id).unwrap().clip, "aim");
+    }
+
+    #[test]
+    fn empty_placeholder_does_not_override() {
+        let mut a = walk_aim();
+        a.layers[0].states[0].clip.clear();
+        a.layers[0].states[0].cells.clear();
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(a));
+        world.apply_animator_state(id, "Walk");
+        assert_eq!(world.animation(id).unwrap().clip, "walk");
+    }
+
+    #[test]
+    fn shared_trigger_fires_every_layer_then_consumes_once() {
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(walk_aim()));
+        world.apply_animator_state(id, "Walk");
+        assert!(world.set_animator_trigger(id, "Fire"));
+        world.tick_animators(0.0);
+        let a = world.animator(id).unwrap();
+        assert_eq!(a.state, "Idle");
+        assert_eq!(a.layer_state_name(1), Some("Shoot"));
+        assert_eq!(a.bool_value("Fire"), Some(false));
+        assert_eq!(world.animation(id).unwrap().clip, "shoot");
+
+        world.set_animator_trigger(id, "Fire");
+        world.tick_animators(0.0);
+        assert_eq!(world.animator(id).unwrap().bool_value("Fire"), Some(true));
+        assert_eq!(world.animator(id).unwrap().state, "Idle");
+    }
+
+    #[test]
+    fn weight_zero_layer_still_ticks_its_state_machine() {
+        let mut a = walk_aim();
+        a.layers[0].weight = 0.0;
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(a));
+        world.apply_animator_state(id, "Walk");
+        assert_eq!(world.animation(id).unwrap().clip, "walk");
+        world.set_animator_trigger(id, "Fire");
+        world.tick_animators(0.0);
+        assert_eq!(
+            world.animator(id).unwrap().layer_state_name(1),
+            Some("Shoot")
+        );
+        assert_eq!(world.animation(id).unwrap().clip, "idle");
+        world.set_animator_layer_weight(id, "UpperBody", 1.0);
+        assert_eq!(world.animation(id).unwrap().clip, "shoot");
     }
 }

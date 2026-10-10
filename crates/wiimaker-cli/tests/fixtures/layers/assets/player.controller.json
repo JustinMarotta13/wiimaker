@@ -1,0 +1,33 @@
+{
+  "default": "Walk",
+  "parameters": [
+    {
+      "name": "Aiming",
+      "type": "Bool",
+      "default": false
+    }
+  ],
+  "states": [
+    {
+      "name": "Walk",
+      "clip": "walk",
+      "speed": 1.0
+    }
+  ],
+  "transitions": [],
+  "layers": [
+    {
+      "name": "UpperBody",
+      "weight": 1.0,
+      "default": "Aim",
+      "states": [
+        {
+          "name": "Aim",
+          "clip": "aim",
+          "speed": 1.0
+        }
+      ],
+      "transitions": []
+    }
+  ]
+}

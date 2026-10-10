@@ -6,16 +6,35 @@
 use anyhow::Result;
 use eframe::egui::{self, RichText};
 use wiimaker_assets::{
-    write_state_blend_tree, write_state_clip, BlendDimension, BlendMotion, BlendTreeMeta,
-    ControllerParamType, ControllerState,
+    add_controller_layer, remove_controller_layer, set_controller_layer_weight,
+    write_layer_state_blend_tree, write_layer_state_clip, BlendDimension, BlendMotion,
+    BlendTreeMeta, ControllerParamType, ControllerState, BASE_LAYER_NAME,
 };
 
 use crate::app::EditorApp;
 use crate::theme;
 
 enum ControllerEdit {
-    Tree { state: String, tree: BlendTreeMeta },
-    Clip { state: String, clip: String },
+    Tree {
+        layer: Option<String>,
+        state: String,
+        tree: BlendTreeMeta,
+    },
+    Clip {
+        layer: Option<String>,
+        state: String,
+        clip: String,
+    },
+    AddLayer {
+        name: String,
+    },
+    RemoveLayer {
+        name: String,
+    },
+    Weight {
+        name: String,
+        weight: f32,
+    },
 }
 
 pub(crate) fn blend_state_label(tree: &BlendTreeMeta) -> String {
@@ -54,6 +73,107 @@ impl EditorApp {
             .collect();
         let assets = self.project.assets_path(&self.game_dir);
         let mut edit: Option<ControllerEdit> = None;
+        let layer_id = egui::Id::new(("controller_layer", &stem));
+        let mut selected = ui
+            .data_mut(|d| d.get_temp::<String>(layer_id))
+            .filter(|name| name == BASE_LAYER_NAME || meta.layers.iter().any(|l| l.name == *name))
+            .unwrap_or_else(|| BASE_LAYER_NAME.to_string());
+
+        ui.add_space(8.0);
+        theme::card_frame().show(ui, |ui| {
+            ui.label(
+                RichText::new("Layers")
+                    .strong()
+                    .size(13.0)
+                    .color(theme::TEXT),
+            );
+            theme::muted(
+                ui,
+                "Override only — sprites play one clip. A layer with weight > 0 replaces the base.",
+            );
+            let mut rows: Vec<(String, f32, bool)> =
+                vec![(BASE_LAYER_NAME.into(), meta.weight, true)];
+            for layer in &meta.layers {
+                rows.push((layer.name.clone(), layer.weight, false));
+            }
+            for (name, weight, _base) in rows {
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(selected == name, &name).clicked() {
+                        selected = name.clone();
+                    }
+                    let mut w = weight.clamp(0.0, 1.0);
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut w)
+                                .speed(0.01)
+                                .range(0.0..=1.0)
+                                .max_decimals(2)
+                                .prefix("w "),
+                        )
+                        .changed()
+                    {
+                        edit = Some(ControllerEdit::Weight {
+                            name: name.clone(),
+                            weight: w,
+                        });
+                    }
+                });
+            }
+            let draft_layer = egui::Id::new(("controller_new_layer", &stem));
+            let mut draft = ui.data_mut(|d| d.get_temp::<String>(draft_layer).unwrap_or_default());
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut draft)
+                        .desired_width(120.0)
+                        .hint_text("UpperBody"),
+                );
+                let trimmed = draft.trim().to_string();
+                let taken = trimmed.eq_ignore_ascii_case(BASE_LAYER_NAME)
+                    || meta
+                        .layers
+                        .iter()
+                        .any(|l| l.name.eq_ignore_ascii_case(&trimmed));
+                let add = ui.add_enabled(
+                    !trimmed.is_empty() && !taken,
+                    egui::Button::new("Add Layer"),
+                );
+                if add.clicked() {
+                    edit = Some(ControllerEdit::AddLayer { name: trimmed });
+                    draft.clear();
+                }
+                let can_remove = selected != BASE_LAYER_NAME;
+                if ui
+                    .add_enabled(can_remove, egui::Button::new("Remove"))
+                    .clicked()
+                {
+                    edit = Some(ControllerEdit::RemoveLayer {
+                        name: selected.clone(),
+                    });
+                }
+            });
+            ui.data_mut(|d| d.insert_temp(draft_layer, draft));
+        });
+        ui.data_mut(|d| d.insert_temp(layer_id, selected.clone()));
+
+        let layer_arg = if selected == BASE_LAYER_NAME {
+            None
+        } else {
+            Some(selected.clone())
+        };
+        let states: Vec<ControllerState> = if let Some(name) = &layer_arg {
+            meta.layer(name)
+                .map(|l| l.states.clone())
+                .unwrap_or_default()
+        } else {
+            meta.states.clone()
+        };
+        let (default_state, transitions) = if let Some(name) = &layer_arg {
+            meta.layer(name)
+                .map(|l| (l.default_state.clone(), l.transitions.clone()))
+                .unwrap_or_default()
+        } else {
+            (meta.default_state.clone(), meta.transitions.clone())
+        };
 
         ui.add_space(8.0);
         theme::card_frame().show(ui, |ui| {
@@ -64,11 +184,11 @@ impl EditorApp {
                     .color(theme::TEXT),
             );
             ui.label(
-                RichText::new(format!("Default · {}", meta.default_state))
+                RichText::new(format!("{selected}  ·  Default · {default_state}"))
                     .size(11.0)
                     .color(theme::TEXT_MUTED),
             );
-            for state in &meta.states {
+            for state in &states {
                 ui.add_space(6.0);
                 match &state.blend_tree {
                     None => {
@@ -93,6 +213,7 @@ impl EditorApp {
                         };
                         if convert.clicked() {
                             edit = Some(ControllerEdit::Tree {
+                                layer: layer_arg.clone(),
                                 state: state.name.clone(),
                                 tree: BlendTreeMeta {
                                     dimension: BlendDimension::OneD,
@@ -107,12 +228,27 @@ impl EditorApp {
                         }
                     }
                     Some(tree) => {
-                        if let Some(next) =
-                            blend_tree_card(ui, &state.name, tree, &floats, &clips)
-                        {
+                        if let Some(next) = blend_tree_card(
+                            ui,
+                            layer_arg.as_deref(),
+                            &state.name,
+                            tree,
+                            &floats,
+                            &clips,
+                        ) {
                             edit = Some(next);
                         }
                     }
+                }
+            }
+            if !transitions.is_empty() {
+                ui.add_space(6.0);
+                for t in &transitions {
+                    ui.label(
+                        RichText::new(format!("{} -> {}", t.from, t.to))
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
                 }
             }
             ui.add_space(8.0);
@@ -130,11 +266,12 @@ impl EditorApp {
                         .hint_text("Locomotion"),
                 );
                 let trimmed = draft.trim().to_string();
-                let taken = meta.states.iter().any(|s| s.name == trimmed);
+                let taken = states.iter().any(|s| s.name == trimmed);
                 let can_add = !trimmed.is_empty() && !taken && !floats.is_empty();
                 let add = ui.add_enabled(can_add, egui::Button::new("Add"));
                 if add.clicked() {
                     edit = Some(ControllerEdit::Tree {
+                        layer: layer_arg.clone(),
                         state: trimmed,
                         tree: BlendTreeMeta {
                             dimension: BlendDimension::OneD,
@@ -154,13 +291,29 @@ impl EditorApp {
 
         let result: Option<(String, Result<()>)> = match edit {
             None => None,
-            Some(ControllerEdit::Tree { state, tree }) => Some((
+            Some(ControllerEdit::Tree { layer, state, tree }) => Some((
                 state.clone(),
-                write_state_blend_tree(&assets, &stem, &state, tree).map(|_| ()),
+                write_layer_state_blend_tree(&assets, &stem, layer.as_deref(), &state, tree)
+                    .map(|_| ()),
             )),
-            Some(ControllerEdit::Clip { state, clip }) => Some((
+            Some(ControllerEdit::Clip { layer, state, clip }) => Some((
                 state.clone(),
-                write_state_clip(&assets, &stem, &state, &clip).map(|_| ()),
+                write_layer_state_clip(&assets, &stem, layer.as_deref(), &state, &clip).map(|_| ()),
+            )),
+            Some(ControllerEdit::AddLayer { name }) => Some((
+                name.clone(),
+                add_controller_layer(&assets, &stem, &name, 1.0).map(|_| ()),
+            )),
+            Some(ControllerEdit::RemoveLayer { name }) => {
+                ui.data_mut(|d| d.insert_temp(layer_id, BASE_LAYER_NAME.to_string()));
+                Some((
+                    name.clone(),
+                    remove_controller_layer(&assets, &stem, &name).map(|_| ()),
+                ))
+            }
+            Some(ControllerEdit::Weight { name, weight }) => Some((
+                name.clone(),
+                set_controller_layer_weight(&assets, &stem, &name, weight).map(|_| ()),
             )),
         };
         if let Some((state, res)) = result {
@@ -180,6 +333,7 @@ impl EditorApp {
 
 fn blend_tree_card(
     ui: &mut egui::Ui,
+    layer: Option<&str>,
     state: &str,
     tree: &BlendTreeMeta,
     floats: &[String],
@@ -198,7 +352,7 @@ fn blend_tree_card(
     let mut dim = work.dimension;
     ui.horizontal(|ui| {
         ui.label(RichText::new("Type").size(11.0).color(theme::TEXT_MUTED));
-        egui::ComboBox::from_id_salt(("blend_dim", state))
+        egui::ComboBox::from_id_salt(("blend_dim", layer, state))
             .selected_text(dim.as_str())
             .width(64.0)
             .show_ui(ui, |ui| {
@@ -233,7 +387,7 @@ fn blend_tree_card(
             } else {
                 current.clone()
             };
-            egui::ComboBox::from_id_salt(("blend_param", state, i))
+            egui::ComboBox::from_id_salt(("blend_param", layer, state, i))
                 .selected_text(shown)
                 .width(100.0)
                 .show_ui(ui, |ui| {
@@ -258,7 +412,7 @@ fn blend_tree_card(
             } else {
                 m.clip.as_str()
             };
-            egui::ComboBox::from_id_salt(("blend_clip", state, i))
+            egui::ComboBox::from_id_salt(("blend_clip", layer, state, i))
                 .selected_text(shown)
                 .width(90.0)
                 .show_ui(ui, |ui| {
@@ -352,13 +506,16 @@ fn blend_tree_card(
         }
     });
 
+    let layer = layer.map(|s| s.to_string());
     if let Some(clip) = clip_to {
         return Some(ControllerEdit::Clip {
+            layer,
             state: state.to_string(),
             clip,
         });
     }
     changed.then(|| ControllerEdit::Tree {
+        layer,
         state: state.to_string(),
         tree: work,
     })

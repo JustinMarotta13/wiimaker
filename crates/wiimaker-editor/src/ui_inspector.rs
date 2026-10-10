@@ -7,7 +7,8 @@ use wiimaker_scene::{
     remove_component_camera, remove_component_collider, remove_component_disc,
     remove_component_grid_mover, remove_component_sprite, remove_component_text,
     remove_component_tilemap, save_project, set_component_enabled, set_scene_clear, tilemap_resize,
-    SceneColliderKind, SceneDir, SceneTextAlign, DEFAULT_CLEAR_COLOR, DEFAULT_SORTING_LAYER,
+    SceneColliderKind, SceneDir,
+    SceneTextAlign, DEFAULT_CLEAR_COLOR, DEFAULT_SORTING_LAYER,
 };
 
 use crate::app::{EditorApp, PlayMode};
@@ -98,6 +99,7 @@ impl EditorApp {
         let mut toggle_audio_source: Option<bool> = None;
         let mut toggle_text: Option<bool> = None;
         let mut live_anim_bool: Option<(String, bool)> = None;
+        let mut live_layer_weight: Option<(String, f32)> = None;
         let mut live_anim_float: Option<(String, f32)> = None;
         let mut preview_audio = false;
         let mut pending_tm_resize: Option<(u32, u32)> = None;
@@ -601,11 +603,11 @@ impl EditorApp {
                 if hdr.open {
                     theme::inspector_props().show(ui, |ui| {
                         let playing = self.play_mode != PlayMode::Edit;
-                        let (live_state, live_bools, live_floats, live_blend): (
+                        let (live_state, live_bools, live_floats, live_layers): (
                             String,
                             Vec<(String, bool)>,
                             Vec<(String, f32)>,
-                            Option<String>,
+                            Vec<(String, f32, String, Option<String>)>,
                         ) = {
                             let world: &wiimaker_core::world::World = if playing {
                                 self.play_session
@@ -628,19 +630,35 @@ impl EditorApp {
                                     .iter()
                                     .map(|p| (p.name.clone(), p.float_value))
                                     .collect();
-                                let blend = an.current_blend().and_then(|bt| {
-                                    let active = bt.active_motion()?;
-                                    let weight = bt.weights.get(bt.active).copied().unwrap_or(1.0);
-                                    Some(format!(
-                                        "Blend · {} {:.0}% → {}",
-                                        bt.params.join(", "),
-                                        weight * 100.0,
-                                        active.clip
-                                    ))
-                                });
-                                (an.state.clone(), bools, floats, blend)
+                                let layers = (0..an.layer_count())
+                                    .filter_map(|i| {
+                                        let name = an.layer_name(i)?.to_string();
+                                        let weight = an.layer_weight(i).unwrap_or(0.0);
+                                        let state =
+                                            an.layer_state_name(i).unwrap_or("—").to_string();
+                                        let blend = an.layer_blend(i).and_then(|bt| {
+                                            let active = bt.active_motion()?;
+                                            let w =
+                                                bt.weights.get(bt.active).copied().unwrap_or(1.0);
+                                            Some(format!(
+                                                "Blend · {} {:.0}% → {}",
+                                                bt.params.join(", "),
+                                                w * 100.0,
+                                                active.clip
+                                            ))
+                                        });
+                                        Some((name, weight, state, blend))
+                                    })
+                                    .collect();
+                                let win = an.winning_layer();
+                                let playback = format!(
+                                    "{} · {}",
+                                    an.layer_name(win).unwrap_or("Base"),
+                                    an.layer_state_name(win).unwrap_or("—")
+                                );
+                                (playback, bools, floats, layers)
                             } else {
-                                ("—".into(), Vec::new(), Vec::new(), None)
+                                ("—".into(), Vec::new(), Vec::new(), Vec::new())
                             }
                         };
                         let names: Vec<String> = self.controller_catalog.names().to_vec();
@@ -672,12 +690,43 @@ impl EditorApp {
                             dirty = true;
                         }
                         ui.label(
-                            RichText::new(format!("State · {live_state}"))
+                            RichText::new(format!("Playback · {live_state}"))
                                 .size(11.0)
                                 .color(theme::TEXT_MUTED),
                         );
-                        if let Some(line) = &live_blend {
-                            ui.label(RichText::new(line).size(11.0).color(theme::TEXT_MUTED));
+                        for (lname, lweight, lstate, lblend) in &live_layers {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("{lname} · {lstate}"))
+                                        .size(11.0)
+                                        .color(theme::TEXT),
+                                );
+                                let mut w = *lweight;
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut w)
+                                            .speed(0.01)
+                                            .range(0.0..=1.0)
+                                            .max_decimals(2)
+                                            .prefix("w "),
+                                    )
+                                    .changed()
+                                {
+                                    if playing {
+                                        live_layer_weight = Some((lname.clone(), w));
+                                    } else {
+                                        a.set_layer_weight(lname, w);
+                                        dirty = true;
+                                    }
+                                }
+                            });
+                            if let Some(line) = lblend {
+                                ui.label(
+                                    RichText::new(format!("  {line}"))
+                                        .size(11.0)
+                                        .color(theme::TEXT_MUTED),
+                                );
+                            }
                         }
                         if let Some(meta) = self.controller_catalog.lookup(&a.controller) {
                             for st in &meta.states {
@@ -1954,6 +2003,22 @@ impl EditorApp {
                 self.mark_dirty();
             } else {
                 let _ = self.undo.undo(&mut self.scene);
+            }
+        }
+        if let Some((lname, weight)) = live_layer_weight {
+            if self.play_mode != PlayMode::Edit {
+                let apply = |w: &mut wiimaker_core::World, sel: &str, lname: &str, weight: f32| {
+                    if let Some(id) = w.find_by_name(sel) {
+                        w.set_animator_layer_weight(id, lname, weight);
+                    }
+                };
+                if self.play_session.as_ref().is_some_and(|s| s.is_plugin()) {
+                    if let Some(w) = self.play_session.as_mut().and_then(|s| s.world_mut()) {
+                        apply(w, &sel, &lname, weight);
+                    }
+                } else {
+                    apply(&mut self.world, &sel, &lname, weight);
+                }
             }
         }
         if let Some((pname, val)) = live_anim_bool {

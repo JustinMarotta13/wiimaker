@@ -4,17 +4,19 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use wiimaker_assets::{
-    inspect_wav, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
-    resolve_wav, set_sprite_pivot, slice_sheet, spawn_wav_player, write_anim_clip,
-    write_animator_controller, write_state_blend_tree, write_state_clip, write_timeline,
-    AnimatorControllerMeta, BlendDimension, BlendMotion, BlendTreeMeta, ControllerCondition,
-    ControllerParam, ControllerParamType, ControllerState, ControllerTransition, CurveEdit,
-    CurveInterp, CurveProp, SpriteCatalog, TimelineClip, TimelineMeta, TimelineTrack,
-    TimelineTrackKind,
+    add_controller_layer, add_layer_transition, inspect_wav, list_anim_clips,
+    list_animator_controllers, list_timelines, list_wav_clips, remove_controller_layer,
+    remove_layer_state, remove_layer_transition, rename_controller_layer, resolve_wav,
+    set_controller_layer_weight, set_layer_default, set_sprite_pivot, slice_sheet,
+    spawn_wav_player, write_anim_clip, write_animator_controller, write_layer_state,
+    write_layer_state_blend_tree, write_layer_state_clip, write_timeline, AnimatorControllerMeta,
+    BlendDimension, BlendMotion, BlendTreeMeta, ControllerCondition, ControllerParam,
+    ControllerParamType, ControllerState, ControllerTransition, CurveEdit, CurveInterp, CurveProp,
+    SpriteCatalog, TimelineClip, TimelineMeta, TimelineTrack, TimelineTrackKind,
 };
 use wiimaker_scene::{find_game_dir, load_project};
 
-use crate::args::{AssetCmd, TimelineCurveCmd};
+use crate::args::{AssetCmd, ControllerLayerCmd, TimelineCurveCmd};
 
 pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
     match cmd {
@@ -289,19 +291,22 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             params,
             motions,
             as_clip,
+            layer,
         } => {
             let game_dir = find_game_dir(root, &game)?;
             let project = load_project(&game_dir)?;
             let assets = project.assets_path(&game_dir);
+            let layer_ref = layer.as_deref();
             let (path, meta) = match as_clip {
-                Some(clip) => write_state_clip(&assets, &controller, &state, &clip)?,
+                Some(clip) => {
+                    write_layer_state_clip(&assets, &controller, layer_ref, &state, &clip)?
+                }
                 None => {
                     let tree = parse_blend_flags(&dimension, params.as_deref(), &motions)?;
-                    write_state_blend_tree(&assets, &controller, &state, tree)?
+                    write_layer_state_blend_tree(&assets, &controller, layer_ref, &state, tree)?
                 }
             };
-            let saved = meta
-                .state(&state)
+            let saved = layer_state(&meta, layer_ref, &state)
                 .ok_or_else(|| anyhow::anyhow!("state '{state}' missing after write"))?;
             if json {
                 #[derive(Serialize)]
@@ -343,6 +348,11 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
             }
             Ok(())
         }
+        AssetCmd::ControllerLayer {
+            game,
+            controller,
+            cmd,
+        } => controller_layer_cmd(root, &game, &controller, cmd, json),
         AssetCmd::ListControllers { game } => {
             let game_dir = find_game_dir(root, &game)?;
             let project = load_project(&game_dir)?;
@@ -494,6 +504,267 @@ pub fn asset_cmd(root: &Path, cmd: AssetCmd, json: bool) -> Result<()> {
     }
 }
 
+fn layer_state<'a>(
+    meta: &'a AnimatorControllerMeta,
+    layer: Option<&str>,
+    state: &str,
+) -> Option<&'a ControllerState> {
+    match layer
+        .map(str::trim)
+        .filter(|n| !wiimaker_assets::is_base_layer_name(n))
+    {
+        None => meta.state(state),
+        Some(name) => meta
+            .layer(name)
+            .and_then(|l| l.states.iter().find(|s| s.name == state)),
+    }
+}
+
+fn controller_layer_cmd(
+    root: &Path,
+    game: &str,
+    controller: &str,
+    cmd: ControllerLayerCmd,
+    json: bool,
+) -> Result<()> {
+    let game_dir = find_game_dir(root, game)?;
+    let project = load_project(&game_dir)?;
+    let assets = project.assets_path(&game_dir);
+    match cmd {
+        ControllerLayerCmd::List => {
+            let path = AnimatorControllerMeta::path(&assets, controller);
+            let meta = AnimatorControllerMeta::load(&path)?;
+            if json {
+                #[derive(Serialize)]
+                struct Row {
+                    name: String,
+                    weight: f32,
+                    #[serde(rename = "default")]
+                    default_state: String,
+                    states: usize,
+                    transitions: usize,
+                }
+                #[derive(Serialize)]
+                struct Out {
+                    controller: String,
+                    layers: Vec<Row>,
+                }
+                let mut layers = vec![Row {
+                    name: wiimaker_assets::BASE_LAYER_NAME.into(),
+                    weight: meta.weight,
+                    default_state: meta.default_state.clone(),
+                    states: meta.states.len(),
+                    transitions: meta.transitions.len(),
+                }];
+                for layer in &meta.layers {
+                    layers.push(Row {
+                        name: layer.name.clone(),
+                        weight: layer.weight,
+                        default_state: layer.default_state.clone(),
+                        states: layer.states.len(),
+                        transitions: layer.transitions.len(),
+                    });
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Out {
+                        controller: controller.to_string(),
+                        layers,
+                    })?
+                );
+            } else {
+                println!(
+                    "Base weight={} default={} states={} transitions={}",
+                    meta.weight,
+                    meta.default_state,
+                    meta.states.len(),
+                    meta.transitions.len()
+                );
+                for layer in &meta.layers {
+                    println!(
+                        "{} weight={} default={} states={} transitions={}",
+                        layer.name,
+                        layer.weight,
+                        layer.default_state,
+                        layer.states.len(),
+                        layer.transitions.len()
+                    );
+                }
+            }
+            Ok(())
+        }
+        ControllerLayerCmd::Add { name, weight } => {
+            let (path, meta) = add_controller_layer(&assets, controller, &name, weight)?;
+            emit_layer(
+                json,
+                &path,
+                controller,
+                &meta,
+                &format!("added layer {name}"),
+            )
+        }
+        ControllerLayerCmd::Remove { name } => {
+            let (path, meta) = remove_controller_layer(&assets, controller, &name)?;
+            emit_layer(
+                json,
+                &path,
+                controller,
+                &meta,
+                &format!("removed layer {name}"),
+            )
+        }
+        ControllerLayerCmd::Rename { name, to } => {
+            let (path, meta) = rename_controller_layer(&assets, controller, &name, &to)?;
+            emit_layer(
+                json,
+                &path,
+                controller,
+                &meta,
+                &format!("renamed layer {name} → {to}"),
+            )
+        }
+        ControllerLayerCmd::Weight { name, weight } => {
+            let (path, meta) = set_controller_layer_weight(&assets, controller, &name, weight)?;
+            emit_layer(
+                json,
+                &path,
+                controller,
+                &meta,
+                &format!("set {name} weight {weight}"),
+            )
+        }
+        ControllerLayerCmd::State {
+            name,
+            state,
+            clip,
+            remove,
+        } => {
+            let layer = Some(name.as_str());
+            let (path, meta) = if remove {
+                remove_layer_state(&assets, controller, layer, &state)?
+            } else {
+                let clip = clip.ok_or_else(|| {
+                    anyhow::anyhow!("asset controller-layer state: pass --clip or --remove")
+                })?;
+                write_layer_state(&assets, controller, layer, &state, &clip)?
+            };
+            emit_layer(
+                json,
+                &path,
+                controller,
+                &meta,
+                &format!("updated state {state} on {name}"),
+            )
+        }
+        ControllerLayerCmd::SetDefault { name, state } => {
+            let (path, meta) = set_layer_default(&assets, controller, Some(&name), &state)?;
+            emit_layer(
+                json,
+                &path,
+                controller,
+                &meta,
+                &format!("default {name} → {state}"),
+            )
+        }
+        ControllerLayerCmd::Transition {
+            name,
+            from,
+            to,
+            conditions,
+            has_exit_time,
+            remove_index,
+        } => {
+            let (path, meta) = if let Some(index) = remove_index {
+                remove_layer_transition(&assets, controller, Some(&name), index)?
+            } else {
+                let from = from.ok_or_else(|| {
+                    anyhow::anyhow!("asset controller-layer transition: pass --from and --to")
+                })?;
+                let to = to.ok_or_else(|| {
+                    anyhow::anyhow!("asset controller-layer transition: pass --from and --to")
+                })?;
+                add_layer_transition(
+                    &assets,
+                    controller,
+                    Some(&name),
+                    ControllerTransition {
+                        from,
+                        to,
+                        conditions: parse_conditions(&conditions)?,
+                        has_exit_time,
+                    },
+                )?
+            };
+            emit_layer(
+                json,
+                &path,
+                controller,
+                &meta,
+                &format!("updated transitions on {name}"),
+            )
+        }
+    }
+}
+
+fn emit_layer(
+    json: bool,
+    path: &Path,
+    controller: &str,
+    meta: &AnimatorControllerMeta,
+    message: &str,
+) -> Result<()> {
+    if json {
+        #[derive(Serialize)]
+        struct Out {
+            path: String,
+            controller: String,
+            layers: usize,
+            message: String,
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&Out {
+                path: path.display().to_string(),
+                controller: controller.to_string(),
+                layers: meta.layers.len(),
+                message: message.to_string(),
+            })?
+        );
+    } else {
+        println!("{message} → {}", path.display());
+    }
+    Ok(())
+}
+
+fn parse_conditions(specs: &[String]) -> Result<Vec<ControllerCondition>> {
+    let mut conditions = Vec::new();
+    for spec in specs {
+        let spec = spec.trim();
+        if spec.is_empty() {
+            continue;
+        }
+        let (param, val) = spec
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--condition '{spec}' must be Param=value"))?;
+        let val = val.trim();
+        let mut cc = ControllerCondition {
+            param: param.trim().to_string(),
+            ..Default::default()
+        };
+        if val.eq_ignore_ascii_case("true") {
+            cc.equals = Some(serde_json::json!(true));
+        } else if val.eq_ignore_ascii_case("false") {
+            cc.equals = Some(serde_json::json!(false));
+        } else if let Ok(n) = val.parse::<f64>() {
+            cc.equals = Some(serde_json::json!(n));
+        } else {
+            anyhow::bail!("--condition '{spec}' value must be bool or number");
+        }
+        conditions.push(cc);
+    }
+    Ok(conditions)
+}
+
 fn parse_controller_flags(
     default_state: Option<String>,
     states: Option<String>,
@@ -602,6 +873,8 @@ fn parse_controller_flags(
         parameters,
         states: parsed_states,
         transitions: parsed_transitions,
+        weight: 1.0,
+        layers: Vec::new(),
     })
 }
 
