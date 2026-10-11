@@ -17,10 +17,17 @@
 //! - **KIND_AUDIO=5** — audio-only entities (no enabled Sprite/Disc/Tilemap/Text).
 //!   Payload: `u16` wpack clip index ([`WSCN_AUDIO_NO_CLIP`] if missing), `f32`
 //!   volume 0..1, `u8` play_on_awake.
-//! - **Trailing table** (after the entity list, only when ≥1 enabled AudioSource):
+//! - **Trailing table** (after the entity list, only when ≥1 enabled AudioSource
+//!   **or** Animator / PlayableDirector tables follow):
 //!   `u16` n, then n × (`u16` entity index, same clip/volume/awake payload).
 //!   Covers Sprite/Disc/Tilemap/Text + AudioSource. C applies the table after
 //!   kinds (idempotent if KIND_AUDIO is also listed). Old bakes omit the tail.
+//!   When Animator / PlayableDirector need a tail and the scene has no audio,
+//!   write `n = 0` so old loaders stop after the empty audio table.
+//!
+//! After the audio table (WSCN0003, same magic), optional Animator / director
+//! tables pack resolved controllers, timelines, and sprite-cell UVs so PowerPC
+//! never parses JSON asset names. See [`crate::wscn_anim`].
 
 use std::fs::File;
 use std::io::Write;
@@ -28,9 +35,16 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use byteorder::{LittleEndian, WriteBytesExt};
-use wiimaker_assets::{AnimClipCatalog, SpriteCatalog, WPack};
+use wiimaker_assets::{
+    AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog, TimelineCatalog, WPack,
+};
 
 use crate::scene::Scene;
+use crate::wscn_anim::{
+    needs_animator_director_tables, write_animator_director_tables, BakeCatalogs,
+};
+
+pub use crate::wscn_anim::WSCN_NO_REF;
 
 /// Format version with UV rect + pivot on sprites.
 pub const WSCN_MAGIC: &[u8; 8] = b"WSCN0003";
@@ -83,6 +97,18 @@ pub fn bake_scene_wscn_with_catalogs(
     pack: &WPack,
     catalog: Option<&SpriteCatalog>,
     anims: Option<&AnimClipCatalog>,
+) -> Result<Vec<u8>> {
+    bake_scene_wscn_with_all_catalogs(scene, pack, catalog, anims, None, None)
+}
+
+/// Full bake: sprite/anim catalogs plus animator controllers and timelines.
+pub fn bake_scene_wscn_with_all_catalogs(
+    scene: &Scene,
+    pack: &WPack,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+    controllers: Option<&AnimatorControllerCatalog>,
+    timelines: Option<&TimelineCatalog>,
 ) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     buf.write_all(WSCN_MAGIC)?;
@@ -166,13 +192,24 @@ pub fn bake_scene_wscn_with_catalogs(
                     buf.write_u8(KIND_AUDIO)?;
                     write_audio_payload(&mut buf, a, pack)?;
                 } else {
-                    // Animation / GridMover / Camera-only / disabled audio.
+                    // Animation / Animator / PlayableDirector / GridMover /
+                    // Camera-only / disabled audio — trailing tables attach later.
                     buf.write_u8(KIND_NONE)?;
                 }
             }
         }
     }
-    write_audio_table(&mut buf, scene, pack)?;
+    write_scene_tail(
+        &mut buf,
+        scene,
+        &BakeCatalogs {
+            pack,
+            sprites: catalog,
+            anims,
+            controllers,
+            timelines,
+        },
+    )?;
     Ok(buf)
 }
 
@@ -219,6 +256,26 @@ pub fn write_scene_wscn_with_catalogs(
     Ok(())
 }
 
+pub fn write_scene_wscn_with_all_catalogs(
+    path: impl AsRef<Path>,
+    scene: &Scene,
+    pack: &WPack,
+    catalog: Option<&SpriteCatalog>,
+    anims: Option<&AnimClipCatalog>,
+    controllers: Option<&AnimatorControllerCatalog>,
+    timelines: Option<&TimelineCatalog>,
+) -> Result<()> {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes =
+        bake_scene_wscn_with_all_catalogs(scene, pack, catalog, anims, controllers, timelines)?;
+    let mut f = File::create(path).with_context(|| format!("create {}", path.display()))?;
+    f.write_all(&bytes)?;
+    Ok(())
+}
+
 /// KIND_TEXT payload (little-endian, after the kind byte):
 /// - `u16` UTF-8 byte length + that many bytes (ASCII is enough; truncated to
 ///   [`WSCN_TEXT_MAX_BYTES`])
@@ -252,9 +309,12 @@ fn resolve_audio_clip(clip: &str, pack: &WPack) -> u16 {
         .unwrap_or(WSCN_AUDIO_NO_CLIP)
 }
 
-/// Additive scene tail: every enabled AudioSource (including KIND_AUDIO entities).
-/// Omitted entirely when the scene has none so existing length-exact tests stay valid.
-fn write_audio_table(buf: &mut Vec<u8>, scene: &Scene, pack: &WPack) -> Result<()> {
+/// Additive scene tail: AudioSource table, then optional Animator / director tables.
+///
+/// The audio table is omitted entirely when the scene has neither AudioSource nor
+/// Animator/PlayableDirector so existing length-exact tests stay valid. If later
+/// tables are present and there is no audio, write `u16` 0 first.
+fn write_scene_tail(buf: &mut Vec<u8>, scene: &Scene, cats: &BakeCatalogs<'_>) -> Result<()> {
     let entries: Vec<(usize, &crate::scene::SceneAudioSource)> = scene
         .entities
         .iter()
@@ -267,7 +327,8 @@ fn write_audio_table(buf: &mut Vec<u8>, scene: &Scene, pack: &WPack) -> Result<(
                 .map(|a| (i, a))
         })
         .collect();
-    if entries.is_empty() {
+    let later = needs_animator_director_tables(scene);
+    if entries.is_empty() && !later {
         return Ok(());
     }
     if entries.len() > u16::MAX as usize {
@@ -279,7 +340,10 @@ fn write_audio_table(buf: &mut Vec<u8>, scene: &Scene, pack: &WPack) -> Result<(
             bail!("entity index overflow in audio table");
         }
         buf.write_u16::<LittleEndian>(i as u16)?;
-        write_audio_payload(buf, a, pack)?;
+        write_audio_payload(buf, a, cats.pack)?;
+    }
+    if later {
+        write_animator_director_tables(buf, scene, cats)?;
     }
     Ok(())
 }
@@ -1286,5 +1350,66 @@ mod tests {
         let i = skip_to_kind(&bytes);
         assert_eq!(bytes[i], KIND_NONE);
         assert_eq!(i + 1, bytes.len());
+    }
+
+    #[test]
+    fn bake_animator_appends_after_empty_audio_table() {
+        use crate::mutate::add_component_animator;
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Hero",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_animator(&mut scene, "Hero", "player").unwrap();
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let mut i = skip_to_kind(&bytes);
+        assert_eq!(bytes[i], KIND_NONE);
+        i += 1;
+        // Empty audio table so old loaders do not treat the animator tail as clips.
+        assert_eq!(read_u16(&bytes, &mut i), 0);
+        let cell_n = read_u16(&bytes, &mut i);
+        assert_eq!(cell_n, 0);
+        let ctrl_n = read_u16(&bytes, &mut i);
+        assert_eq!(ctrl_n, 1);
+        let nlen = read_u16(&bytes, &mut i) as usize;
+        assert_eq!(&bytes[i..i + nlen], b"player");
+        i += nlen;
+        assert!(i < bytes.len());
+        assert!(bytes.len() > i);
+    }
+
+    #[test]
+    fn bake_director_and_animator_do_not_bump_magic() {
+        use crate::mutate::{add_component_animator, add_component_playable_director};
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "Cut",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_component_animator(&mut scene, "Cut", "player").unwrap();
+        add_component_playable_director(&mut scene, "Cut", "intro", true, false).unwrap();
+        let bytes = bake_scene_wscn(&scene, &WPack::new()).unwrap();
+        assert_eq!(&bytes[0..8], b"WSCN0003");
+        let mut i = skip_to_kind(&bytes);
+        i += 1; // KIND_NONE
+        assert_eq!(read_u16(&bytes, &mut i), 0); // audio
+        let _cells = read_u16(&bytes, &mut i);
+        let ctrl_n = read_u16(&bytes, &mut i);
+        assert_eq!(ctrl_n, 1);
     }
 }

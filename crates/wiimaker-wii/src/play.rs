@@ -9,7 +9,10 @@ use wiimaker_core::{wiimote_map, Button, Input};
 use crate::draw::flush_draw_list;
 use crate::ffi::{self, WiimakerInput};
 use crate::input_map::wiimaker_input_to_core;
-use crate::wscn::{parse_audio_clip_id, parse_wscn, LoadedScene, ParseError};
+use crate::wscn::{
+    apply_baked_clip_frames, parse_audio_clip_id, parse_wscn, BakedSpriteCell, LoadedScene,
+    ParseError,
+};
 
 /// Runtime game state owned by the staticlib.
 pub struct GameState {
@@ -25,6 +28,7 @@ pub struct GameState {
     pub pulse: f32,
     pub hue: f32,
     pub a_was_down: bool,
+    pub cells: Vec<BakedSpriteCell>,
 }
 
 impl Default for GameState {
@@ -42,6 +46,7 @@ impl Default for GameState {
             pulse: 0.0,
             hue: 0.0,
             a_was_down: false,
+            cells: Vec::new(),
         }
     }
 }
@@ -74,6 +79,7 @@ impl GameState {
             pulse: 0.0,
             hue: 0.0,
             a_was_down: false,
+            cells: scene.cells,
         }
     }
 
@@ -184,7 +190,16 @@ impl GameState {
             }
         }
 
+        self.world.tick_animators(dt);
+        self.world.tick_timelines(dt);
         let _ = self.world.tick_tilemaps(dt);
+        apply_baked_clip_frames(&mut self.world, &self.cells, dt);
+        for shot in self.world.drain_oneshots() {
+            if let Some(id) = parse_audio_clip_id(&shot.clip) {
+                let _ = ffi::audio_queue(id, shot.volume);
+            }
+        }
+        ffi::audio_flush();
 
         self.draw.clear_buffer();
         render_world(&self.world, &mut self.draw, self.clear);
