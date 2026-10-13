@@ -846,7 +846,7 @@ impl Default for SceneAnimator {
 }
 
 /// Unity PlayableDirector. `timeline` is `assets/<stem>.timeline.json`.
-/// Host/editor only (not baked into WSCN).
+/// Packed into the WSCN0003 Animator / director tail at bake.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScenePlayableDirector {
     pub timeline: String,

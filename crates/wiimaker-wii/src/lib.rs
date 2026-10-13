@@ -25,8 +25,8 @@ pub use ffi::WiimakerInput;
 pub use input_map::{wiimaker_input_snapshot, wiimaker_input_to_core};
 pub use play::GameState;
 pub use wscn::{
-    parse_wscn, LoadedScene, ParseError, AUDIO_NO_CLIP, KIND_AUDIO, KIND_DISC, KIND_SPRITE,
-    KIND_TEXT, KIND_TILEMAP,
+    apply_baked_clip_frames, parse_wscn, BakedSpriteCell, LoadedScene, ParseError, AUDIO_NO_CLIP,
+    KIND_AUDIO, KIND_DISC, KIND_SPRITE, KIND_TEXT, KIND_TILEMAP, NO_REF,
 };
 
 #[cfg(not(feature = "std"))]
@@ -175,15 +175,15 @@ mod tests {
                         assert!((dest.y - 188.0).abs() < 1e-3);
                     }
                 }
-                DrawCmd::DrawDisc {
-                    center, radius, ..
-                } => {
+                DrawCmd::DrawDisc { center, radius, .. } => {
                     saw_disc = true;
                     assert!((center.x - 50.0).abs() < 1e-3);
                     assert!((center.y - 60.0).abs() < 1e-3);
                     assert!((radius - 12.0).abs() < 1e-3);
                 }
-                DrawCmd::DrawText { pos, text, size, .. } => {
+                DrawCmd::DrawText {
+                    pos, text, size, ..
+                } => {
                     saw_text = true;
                     assert_eq!(text, "Hi");
                     assert!((pos.x - 8.0).abs() < 1e-3);
