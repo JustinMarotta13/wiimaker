@@ -23,7 +23,7 @@ Authoring loop is already Unity-shaped. Do not re-litigate these:
 
 Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + optional Follow, Tilemap, Collider, Animation, Animator, PlayableDirector, GridMover, AudioSource, Text, `tag: u32`), `DrawList` IR, GCN-layout `Input` (WASD/arrows → stick + D-pad; Wii GCN + Wiimote 1/2/Minus + Classic + Nunchuk stick, D-pad synthesizes `main` when analog idle; **IR aim** `ir_x`/`ir_y`/`ir_valid` in 640×480; **motion** `accel_*`/`motion_valid` + shake/swing edges), 60 Hz `Clock`, `render_world` (in `wiimaker-core`, re-exported from `wiimaker-scene`) sorts by Sorting Layer then order-in-layer `z` (tile cells as sprites/colored quads; HUD `DrawText` as bitmap glyphs), parented local TRS compose (scale component-wise × parent×local rotation × scaled-then-rotated offset), sprite UV/pivot, `.wpack` cook (PNG + PCM16 audio TOC), WSCN0003 bake (UV + pivot + length-prefixed Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table + **Animator / PlayableDirector trailing tables**), GX C stub_game **or** Rust `wiimaker-wii` staticlib (WSCN→World → `render_world` → DrawList → GX + ASND oneshots), `wiimaker build` / `dolphin` / `play-wii`. Queries: `tile_solid` / `world_to_cell` / `tile_solid_world` · `overlaps` / `move_and_collide` · `triggers_entered` · `animate_world` + `Animation` / `*.anim.json` · `Animator` / `*.controller.json` (Bool/Float/Trigger SM → clip cells, optional blend tree, **override layers** with weights) · palette `anim` tiles + 4-neighbor `auto_tile` (NESW bitmask) · active Camera offsets dests (centered 640×480) + `World::follow_cameras` · `GridMover` + `cardinal` / `World::step_grid_movers` (horizontal wins on diagonals; reverse immediate; snap to cell centers) · `World::play_oneshot` / play-on-awake (host + Wii ASND). Project Sorting Layers in `game.toml` (`Background` / `Default` / `Foreground` when omitted).
 
-**Not present:** nothing queued on the Now/Next bake path — follow-ups live under Later (#56 review notes, starting with N7).
+**Not present:** nothing queued on the Now/Next bake path — follow-ups live under Later (#56 review notes, starting with N2).
 
 ---
 
@@ -35,7 +35,7 @@ Runtime already: `World` (named entities, Transform, Sprite, Disc, Camera + opti
 
 ## Next
 
-**N7 — animator CLI texture map** — `entity animator-status` / `animator-set` load scenes with an empty texture map, so `animator-status` fails ("texture not found in wpack") on every Sprite entity, and `animator-set --json` saves at `entity.rs:863` then errors at `:871` (exit 1 with the change already on disk). Fix: load the wpack textures for these commands, and hydrate/validate before saving so a failure never writes. Texture map dates to 652ba4e; save-then-hydrate to #55.
+(none — N7 animator CLI texture map shipped 2026-10-13.)
 
 ---
 
@@ -55,6 +55,8 @@ Follow-ups from #56 (Animator layers) non-blocking review notes (Code Reviewer r
 ## Done
 
 Shipped. Keep here so we do not rebuild them.
+
+- **N7 — animator CLI texture map** (2026-10-13) — `entity animator-status` and `animator-set --json` hydrate with texture names from the project's `.wpack` (empty map only when the pack file is missing). `animator-set --json` hydrates before `save_scene`, so a texture miss exits 1 with the scene unchanged. Non-`--json` `animator-set` still writes the param / layer-weight mutation without that gate. Doctor unchanged.
 
 - **WSCN bake of Animator / PlayableDirector** (2026-10-11) — same `WSCN0003` magic. After the AudioSource table (write `u16` 0 when later tables exist and there is no audio), pack: sprite-cell LUT (name → wpack tex + UV/pivot/size), controller blobs (params, states, blend trees, transitions, override layers), timeline blobs (Activation/Animation/Audio/Transform/Signal/Control/Float + curves; audio stems → wpack index strings), then Animator `{entity, controller idx, param/layer overrides}` and PlayableDirector `{entity, timeline idx, play_on_awake, loop}`. Sprite/Disc/Tilemap/Text still win draw kinds (`KIND_NONE` for animator-only). `wiimaker-wii` parse hydrates core `Animator` / `PlayableDirector` / sibling `Animation`; `play.rs` ticks `tick_animators` / `tick_timelines` / tilemaps, applies baked cells, drains oneshots → ASND. Old bakes without the tail still load. Host editor/CLI authoring unchanged; `bake-wii` passes controller + timeline catalogs. Tests: scene byte layout + Wii bake/parse/tick.
 
@@ -200,5 +202,5 @@ Shortcuts: Cmd/Ctrl+S, Z/Y, D, C, V, I (instantiate)
 
 ## Recommended next morning
 
-**N7 — animator CLI texture map** (empty wpack map on `animator-status` / `animator-set`). WSCN bake of Animator / PlayableDirector shipped 2026-10-11. Animator layers shipped 2026-10-09. Blend trees shipped 2026-10-08. Timeline curves shipped 2026-10-07. Signal / Control tracks shipped 2026-10-06. Apply to Base / Open Base shipped 2026-10-05. Timeline / PlayableDirector shipped 2026-10-04. Animator shipped 2026-10-03. Prefab variants shipped 2026-10-02. Nested prefabs shipped 2026-10-01. Motion gestures shipped 2026-09-30. IR pointer / sensor-bar aiming shipped 2026-09-29.
+**N2 — Base layer weight no-op** (Inspector and `controller-layer weight` still expose Base weight that playback ignores). Highest-value remaining Later Unity/CLI twin after N7. PT-A (`--layer base` case dup) is the smaller CLI-only follow-up if N2 waits. WSCN bake of Animator / PlayableDirector shipped 2026-10-11. Animator layers shipped 2026-10-09. Blend trees shipped 2026-10-08. Timeline curves shipped 2026-10-07. Signal / Control tracks shipped 2026-10-06. Apply to Base / Open Base shipped 2026-10-05. Timeline / PlayableDirector shipped 2026-10-04. Animator shipped 2026-10-03. Prefab variants shipped 2026-10-02. Nested prefabs shipped 2026-10-01. Motion gestures shipped 2026-09-30. IR pointer / sensor-bar aiming shipped 2026-09-29.
 

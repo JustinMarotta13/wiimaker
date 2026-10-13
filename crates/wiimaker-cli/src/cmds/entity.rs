@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use wiimaker_scene::{
     add_component_animation, add_component_animator, add_component_audio_source,
@@ -860,7 +860,6 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             for spec in triggers {
                 set_entity_animator_bool(&mut sc, &name, spec.trim(), true)?;
             }
-            save_scene(&path, &sc)?;
             if json {
                 #[derive(Serialize)]
                 struct SetOut {
@@ -868,7 +867,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                     name: String,
                     blend: Option<BlendOut>,
                 }
+                // Hydrate before save so a missing wpack texture cannot exit 1
+                // after the scene file already contains the mutation.
                 let world = hydrate_animator_world(&gd, &project, &sc)?;
+                save_scene(&path, &sc)?;
                 let blend = world
                     .find_by_name(&name)
                     .and_then(|id| world.animator(id))
@@ -884,6 +886,7 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
                 );
                 Ok(())
             } else {
+                save_scene(&path, &sc)?;
                 emit_ok(json, &format!("set animator params on {name}"))
             }
         }
@@ -1728,6 +1731,23 @@ fn blend_out(tree: &wiimaker_core::BlendTree) -> BlendOut {
     }
 }
 
+/// Texture ids from the cooked `.wpack`, in pack order (same as the host atlas).
+/// A missing pack is an empty map so uncooked projects keep today's error.
+fn project_texture_map(
+    game_dir: &Path,
+    project: &wiimaker_scene::GameProject,
+) -> Result<wiimaker_scene::TextureMap> {
+    let path = project.wpack_path(game_dir);
+    if !path.is_file() {
+        return Ok(wiimaker_scene::TextureMap::new());
+    }
+    let pack = wiimaker_assets::WPack::read_from(&path)
+        .with_context(|| format!("read wpack {}", path.display()))?;
+    Ok(wiimaker_scene::TextureMap::from_names(
+        pack.textures.iter().map(|tex| tex.name.as_str()),
+    ))
+}
+
 fn hydrate_animator_world(
     game_dir: &Path,
     project: &wiimaker_scene::GameProject,
@@ -1736,9 +1756,10 @@ fn hydrate_animator_world(
     let assets = project.assets_path(game_dir);
     let anims = wiimaker_assets::AnimClipCatalog::load_dir(&assets)?;
     let controllers = wiimaker_assets::AnimatorControllerCatalog::load_dir(&assets)?;
+    let textures = project_texture_map(game_dir, project)?;
     wiimaker_scene::hydrate_with_all_catalogs(
         sc,
-        &wiimaker_scene::TextureMap::new(),
+        &textures,
         None,
         Some(&anims),
         Some(&controllers),
