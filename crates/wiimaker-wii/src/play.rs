@@ -1,5 +1,13 @@
 //! Scene player state — WSCN → World + hello-orb-ish Player / OrbShadow tick.
 
+#[cfg(feature = "std")]
+use std::vec::Vec;
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::draw::DrawList;
 use wiimaker_core::render::render_world;

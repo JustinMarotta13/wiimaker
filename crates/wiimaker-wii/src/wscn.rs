@@ -88,6 +88,7 @@ pub enum ParseError {
     BadMagic,
     Truncated,
     Alloc,
+    BadValue,
 }
 
 impl core::fmt::Display for ParseError {
@@ -97,7 +98,22 @@ impl core::fmt::Display for ParseError {
             ParseError::BadMagic => write!(f, "bad wscn magic"),
             ParseError::Truncated => write!(f, "wscn truncated"),
             ParseError::Alloc => write!(f, "alloc failed"),
+            ParseError::BadValue => write!(f, "wscn bad value"),
         }
+    }
+}
+
+/// Cap `Vec::with_capacity` for u16 tail counts (corrupt `0xFFFF` must not reserve megabytes).
+fn tail_reserve(c: &Cursor<'_>, n: usize) -> usize {
+    n.min(64).min(c.remaining())
+}
+
+fn read_finite(c: &mut Cursor<'_>) -> Result<f32, ParseError> {
+    let v = c.f32()?;
+    if v.is_finite() {
+        Ok(v)
+    } else {
+        Err(ParseError::BadValue)
     }
 }
 
@@ -429,7 +445,7 @@ fn read_str(c: &mut Cursor<'_>) -> Result<String, ParseError> {
 
 fn load_cell_list(c: &mut Cursor<'_>) -> Result<Vec<String>, ParseError> {
     let n = c.u16()? as usize;
-    let mut cells = Vec::with_capacity(n);
+    let mut cells = Vec::with_capacity(tail_reserve(c, n));
     for _ in 0..n {
         cells.push(read_str(c)?);
     }
@@ -441,10 +457,10 @@ fn load_curve(c: &mut Cursor<'_>) -> Result<Option<Curve>, ParseError> {
     if n == 0 {
         return Ok(None);
     }
-    let mut keys = Vec::with_capacity(n);
+    let mut keys = Vec::with_capacity(tail_reserve(c, n));
     for _ in 0..n {
-        let t = c.f32()?;
-        let v = c.f32()?;
+        let t = read_finite(c)?;
+        let v = read_finite(c)?;
         let interp = match c.u8()? {
             1 => CurveInterp::Constant,
             2 => CurveInterp::Ease,
@@ -461,20 +477,20 @@ fn load_blend_tree(c: &mut Cursor<'_>) -> Result<BlendTree, ParseError> {
         _ => BlendDimension::OneD,
     };
     let pn = c.u16()? as usize;
-    let mut params = Vec::with_capacity(pn);
+    let mut params = Vec::with_capacity(tail_reserve(c, pn));
     for _ in 0..pn {
         params.push(read_str(c)?);
     }
     let mn = c.u16()? as usize;
-    let mut motions = Vec::with_capacity(mn);
+    let mut motions = Vec::with_capacity(tail_reserve(c, mn));
     for _ in 0..mn {
         let clip = read_str(c)?;
         let cells = load_cell_list(c)?;
-        let fps = c.f32()?;
+        let fps = read_finite(c)?;
         let loop_ = c.u8()? != 0;
-        let threshold = c.f32()?;
-        let px = c.f32()?;
-        let py = c.f32()?;
+        let threshold = read_finite(c)?;
+        let px = read_finite(c)?;
+        let py = read_finite(c)?;
         motions.push(BlendMotion {
             clip,
             cells,
@@ -490,9 +506,9 @@ fn load_blend_tree(c: &mut Cursor<'_>) -> Result<BlendTree, ParseError> {
 fn load_state(c: &mut Cursor<'_>) -> Result<AnimatorState, ParseError> {
     let name = read_str(c)?;
     let clip = read_str(c)?;
-    let speed = c.f32()?;
+    let speed = read_finite(c)?;
     let cells = load_cell_list(c)?;
-    let fps = c.f32()?;
+    let fps = read_finite(c)?;
     let loop_ = c.u8()? != 0;
     let blend = if c.u8()? != 0 {
         Some(load_blend_tree(c)?)
@@ -516,15 +532,15 @@ fn load_condition(c: &mut Cursor<'_>) -> Result<AnimatorCondition, ParseError> {
     Ok(match kind {
         1 => AnimatorCondition::FloatEq {
             param,
-            value: c.f32()?,
+            value: read_finite(c)?,
         },
         2 => AnimatorCondition::FloatGreater {
             param,
-            value: c.f32()?,
+            value: read_finite(c)?,
         },
         3 => AnimatorCondition::FloatLess {
             param,
-            value: c.f32()?,
+            value: read_finite(c)?,
         },
         4 => AnimatorCondition::Trigger { param },
         _ => AnimatorCondition::BoolEq {
@@ -540,7 +556,7 @@ fn load_transition(c: &mut Cursor<'_>) -> Result<AnimatorTransition, ParseError>
     let to = read_str(c)?;
     let has_exit_time = c.u8()? != 0;
     let n = c.u16()? as usize;
-    let mut conditions = Vec::with_capacity(n);
+    let mut conditions = Vec::with_capacity(tail_reserve(c, n));
     for _ in 0..n {
         conditions.push(load_condition(c)?);
     }
@@ -557,12 +573,12 @@ fn load_machine(
     c: &mut Cursor<'_>,
 ) -> Result<(Vec<AnimatorState>, Vec<AnimatorTransition>), ParseError> {
     let sn = c.u16()? as usize;
-    let mut states = Vec::with_capacity(sn);
+    let mut states = Vec::with_capacity(tail_reserve(c, sn));
     for _ in 0..sn {
         states.push(load_state(c)?);
     }
     let tn = c.u16()? as usize;
-    let mut transitions = Vec::with_capacity(tn);
+    let mut transitions = Vec::with_capacity(tail_reserve(c, tn));
     for _ in 0..tn {
         transitions.push(load_transition(c)?);
     }
@@ -588,9 +604,9 @@ struct BakedController {
 fn load_controller(c: &mut Cursor<'_>) -> Result<BakedController, ParseError> {
     let name = read_str(c)?;
     let default_state = read_str(c)?;
-    let base_weight = c.f32()?;
+    let base_weight = read_finite(c)?;
     let pn = c.u16()? as usize;
-    let mut parameters = Vec::with_capacity(pn);
+    let mut parameters = Vec::with_capacity(tail_reserve(c, pn));
     for _ in 0..pn {
         let pname = read_str(c)?;
         let kind = match c.u8()? {
@@ -599,15 +615,15 @@ fn load_controller(c: &mut Cursor<'_>) -> Result<BakedController, ParseError> {
             _ => AnimatorParamKind::Bool,
         };
         let default_bool = c.u8()? != 0;
-        let default_float = c.f32()?;
+        let default_float = read_finite(c)?;
         parameters.push((pname, kind, default_bool, default_float));
     }
     let (states, transitions) = load_machine(c)?;
     let ln = c.u16()? as usize;
-    let mut layers = Vec::with_capacity(ln);
+    let mut layers = Vec::with_capacity(tail_reserve(c, ln));
     for _ in 0..ln {
         let lname = read_str(c)?;
-        let weight = c.f32()?;
+        let weight = read_finite(c)?;
         let def = read_str(c)?;
         let (lst, ltr) = load_machine(c)?;
         layers.push((lname, weight, def, lst, ltr));
@@ -625,7 +641,7 @@ fn load_controller(c: &mut Cursor<'_>) -> Result<BakedController, ParseError> {
 
 fn load_timeline(c: &mut Cursor<'_>) -> Result<PlayableDirector, ParseError> {
     let name = read_str(c)?;
-    let duration = c.f32()?;
+    let duration = read_finite(c)?;
     let mut d = PlayableDirector::new(name, duration, false, false);
     let tn = c.u16()? as usize;
     for _ in 0..tn {
@@ -642,19 +658,19 @@ fn load_timeline(c: &mut Cursor<'_>) -> Result<PlayableDirector, ParseError> {
         let binding = read_str(c)?;
         let property = read_str(c)?;
         let cn = c.u16()? as usize;
-        let mut clips = Vec::with_capacity(cn);
+        let mut clips = Vec::with_capacity(tail_reserve(c, cn));
         for _ in 0..cn {
-            let start = c.f32()?;
-            let end = c.f32()?;
+            let start = read_finite(c)?;
+            let end = read_finite(c)?;
             let active = c.u8()? != 0;
             let clip = read_str(c)?;
             let cells = load_cell_list(c)?;
-            let fps = c.f32()?;
+            let fps = read_finite(c)?;
             let loop_clip = c.u8()? != 0;
             let audio = read_str(c)?;
-            let volume = c.f32()?;
-            let from = [c.f32()?, c.f32()?];
-            let to = [c.f32()?, c.f32()?];
+            let volume = read_finite(c)?;
+            let from = [read_finite(c)?, read_finite(c)?];
+            let to = [read_finite(c)?, read_finite(c)?];
             let signal = read_str(c)?;
             let payload = read_str(c)?;
             let curve_x = load_curve(c)?;
@@ -718,19 +734,18 @@ fn load_animator_director_tail(
     }
 
     let cn = c.u16()? as usize;
-    let mut controllers = Vec::with_capacity(cn);
+    let mut controllers = Vec::with_capacity(tail_reserve(c, cn));
     for _ in 0..cn {
         controllers.push(load_controller(c)?);
     }
 
     let tn = c.u16()? as usize;
-    let mut timelines = Vec::with_capacity(tn);
+    let mut timelines = Vec::with_capacity(tail_reserve(c, tn));
     for _ in 0..tn {
         timelines.push(load_timeline(c)?);
     }
 
     let an = c.u16()? as usize;
-    let mut animator_ids: Vec<EntityId> = Vec::new();
     for _ in 0..an {
         let ei = c.u16()? as usize;
         let ci = c.u16()?;
@@ -777,7 +792,7 @@ fn load_animator_director_tail(
             let has_bool = c.u8()? != 0;
             let bval = c.u8()? != 0;
             let has_float = c.u8()? != 0;
-            let fval = c.f32()?;
+            let fval = read_finite(c)?;
             if let Some(p) = rt.parameters.iter_mut().find(|p| p.name == pname) {
                 if has_bool {
                     p.bool_value = bval;
@@ -793,7 +808,7 @@ fn load_animator_director_tail(
         let lon = c.u16()? as usize;
         for _ in 0..lon {
             let lname = read_str(c)?;
-            let weight = c.f32()?;
+            let weight = read_finite(c)?;
             let _ = rt.set_layer_weight(&lname, weight);
         }
         if ei < ids.len() {
@@ -803,10 +818,8 @@ fn load_animator_director_tail(
             if !state.is_empty() {
                 world.apply_animator_state(id, &state);
             }
-            animator_ids.push(id);
         }
     }
-    let _ = animator_ids;
 
     let dn = c.u16()? as usize;
     for _ in 0..dn {
