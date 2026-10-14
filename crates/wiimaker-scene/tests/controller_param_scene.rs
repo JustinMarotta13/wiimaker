@@ -8,9 +8,9 @@ use wiimaker_assets::{
     ControllerParamType, ControllerState, ControllerTransition,
 };
 use wiimaker_scene::{
-    add_component_animator, add_entity, load_scene, remove_controller_param_for_game,
-    rename_controller_param_for_game, save_project, save_scene, set_entity_animator_bool,
-    set_entity_animator_float, GameProject, MutateOpts,
+    add_component_animator, add_entity, load_prefab, load_scene, remove_controller_param_for_game,
+    rename_controller_param_for_game, save_prefab, save_project, save_scene, set_entity_animator_bool,
+    set_entity_animator_float, EntityData, GameProject, MutateOpts, Prefab, SceneAnimator,
 };
 
 fn tmp_game(label: &str) -> PathBuf {
@@ -20,7 +20,7 @@ fn tmp_game(label: &str) -> PathBuf {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(dir.join("assets")).unwrap();
+    fs::create_dir_all(dir.join("assets").join("prefabs")).unwrap();
     fs::create_dir_all(dir.join("scenes")).unwrap();
     dir
 }
@@ -89,4 +89,52 @@ fn rename_and_remove_remap_scene_param_overrides() {
         .parameters
         .iter()
         .any(|p| p.name == "Speed" && p.float_value == Some(2.5)));
+}
+
+#[test]
+fn rename_remaps_nested_prefab_child_animator_override() {
+    let dir = tmp_game("prefab-child");
+    let project = GameProject::new("ctrl-prefab");
+    save_project(&dir, &project).unwrap();
+    write_animator_controller(&dir.join("assets"), "player", player_controller()).unwrap();
+
+    let mut child = EntityData {
+        name: "Arm".into(),
+        parent: Some("Body".into()),
+        transform: Default::default(),
+        components: Default::default(),
+        tag: 0,
+        prefab: None,
+    };
+    child.components.animator = Some(SceneAnimator::new("player"));
+    child.components.animator.as_mut().unwrap().parameters.push(
+        wiimaker_scene::SceneAnimatorParam {
+            name: "Moving".into(),
+            bool_value: Some(true),
+            float_value: None,
+        },
+    );
+
+    let prefab = Prefab {
+        entity: EntityData {
+            name: "Body".into(),
+            parent: None,
+            transform: Default::default(),
+            components: Default::default(),
+            tag: 0,
+            prefab: None,
+        },
+        children: vec![child],
+        base: None,
+        overrides: Vec::new(),
+    };
+    let prefab_path = dir.join("assets/prefabs/body.prefab.json");
+    save_prefab(&prefab_path, &prefab).unwrap();
+
+    rename_controller_param_for_game(&dir, "player", "Moving", "Running", None).unwrap();
+    let loaded = load_prefab(&prefab_path).unwrap();
+    let arm = loaded.children.iter().find(|e| e.name == "Arm").unwrap();
+    let anim = arm.components.animator.as_ref().unwrap();
+    assert!(anim.parameters.iter().any(|p| p.name == "Running" && p.bool_value == Some(true)));
+    assert!(!anim.parameters.iter().any(|p| p.name == "Moving"));
 }

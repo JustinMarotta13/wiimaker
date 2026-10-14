@@ -83,8 +83,8 @@ pub fn rename_sorting_layer(
     }
     project.sorting_layers[idx] = to.clone();
     save_project(game_dir, &project)?;
-    remap_authoring_files(game_dir, skip_scene, |scene| {
-        remap_scene_sorting_layer(scene, &from, &to)
+    remap_authoring_files(game_dir, skip_scene, |ent| {
+        remap_entity_sorting_layer(ent, display_sorting_layer(&from), &to)
     })?;
     Ok(project.sorting_layers)
 }
@@ -124,8 +124,8 @@ pub fn remove_sorting_layer(
     }
     project.sorting_layers.remove(idx);
     save_project(game_dir, &project)?;
-    remap_authoring_files(game_dir, skip_scene, |scene| {
-        remap_scene_sorting_layer(scene, &key, DEFAULT_SORTING_LAYER)
+    remap_authoring_files(game_dir, skip_scene, |ent| {
+        remap_entity_sorting_layer(ent, &key, DEFAULT_SORTING_LAYER)
     })?;
     Ok(project.sorting_layers)
 }

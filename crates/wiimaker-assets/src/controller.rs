@@ -915,6 +915,43 @@ pub fn add_controller_param(
     })
 }
 
+/// Rename a parameter in memory (transition conditions, blend-tree params).
+pub fn apply_rename_controller_param(
+    meta: &mut AnimatorControllerMeta,
+    controller: &str,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    let to = to.trim();
+    if to.is_empty() {
+        bail!("animator parameter name must not be empty");
+    }
+    if from != to && meta.parameters.iter().any(|p| p.name == to) {
+        bail!("animator controller '{controller}' already has parameter '{to}'");
+    }
+    let Some(param) = meta.parameters.iter_mut().find(|p| p.name == from) else {
+        bail!("animator controller '{controller}' has no parameter '{from}'");
+    };
+    param.name = to.to_string();
+    retarget_param_name(meta, from, to);
+    Ok(())
+}
+
+/// Remove a parameter in memory and strip transition conditions that referenced it.
+pub fn apply_remove_controller_param(
+    meta: &mut AnimatorControllerMeta,
+    controller: &str,
+    name: &str,
+) -> Result<()> {
+    let before = meta.parameters.len();
+    meta.parameters.retain(|p| p.name != name);
+    if meta.parameters.len() == before {
+        bail!("animator controller '{controller}' has no parameter '{name}'");
+    }
+    strip_param_references(meta, name);
+    Ok(())
+}
+
 /// Rename a parameter and retarget transition conditions and blend-tree param names.
 pub fn rename_controller_param(
     assets_dir: &Path,
@@ -922,20 +959,8 @@ pub fn rename_controller_param(
     from: &str,
     to: &str,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
-    let to = to.trim();
-    if to.is_empty() {
-        bail!("animator parameter name must not be empty");
-    }
     edit_controller(assets_dir, controller, |meta| {
-        if from != to && meta.parameters.iter().any(|p| p.name == to) {
-            bail!("animator controller '{controller}' already has parameter '{to}'");
-        }
-        let Some(param) = meta.parameters.iter_mut().find(|p| p.name == from) else {
-            bail!("animator controller '{controller}' has no parameter '{from}'");
-        };
-        param.name = to.to_string();
-        retarget_param_name(meta, from, to);
-        Ok(())
+        apply_rename_controller_param(meta, controller, from, to)
     })
 }
 
@@ -945,13 +970,7 @@ pub fn remove_controller_param(
     name: &str,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
     edit_controller(assets_dir, controller, |meta| {
-        let before = meta.parameters.len();
-        meta.parameters.retain(|p| p.name != name);
-        if meta.parameters.len() == before {
-            bail!("animator controller '{controller}' has no parameter '{name}'");
-        }
-        strip_param_references(meta, name);
-        Ok(())
+        apply_remove_controller_param(meta, controller, name)
     })
 }
 

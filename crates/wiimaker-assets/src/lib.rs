@@ -31,7 +31,8 @@ pub use animator_graph::{
     GraphNodeId, GraphTransitionDump, LayerGraphView, NodeRole, STATE_H, STATE_W, TRANSITION_SLOP,
 };
 pub use controller::{
-    add_controller_layer, add_controller_param, add_layer_transition, check_layer_weight,
+    add_controller_layer, add_controller_param, add_layer_transition, apply_remove_controller_param,
+    apply_rename_controller_param, check_layer_weight,
     is_any_state, is_base_layer_name, list_animator_controllers, move_layer_node,
     remove_controller_layer, remove_controller_param, remove_layer_state, remove_layer_transition,
     rename_controller_layer, rename_controller_param, rename_layer_state,

@@ -1,6 +1,7 @@
-//! Atomic file replace (write temp + rename).
+//! Atomic file replace (write temp + fsync + rename).
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -17,13 +18,24 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(format!(".{}.{}", file_name.to_string_lossy(), std::process::id()));
-    fs::write(&tmp, contents).with_context(|| format!("write {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| {
-        format!(
-            "rename {} → {}",
-            tmp.display(),
-            path.display()
-        )
-    })?;
-    Ok(())
+    {
+        let mut file = File::create(&tmp).with_context(|| format!("create {}", tmp.display()))?;
+        file.write_all(contents)
+            .with_context(|| format!("write {}", tmp.display()))?;
+        file.sync_all()
+            .with_context(|| format!("fsync {}", tmp.display()))?;
+    }
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(e).with_context(|| {
+                format!(
+                    "rename {} → {}",
+                    tmp.display(),
+                    path.display()
+                )
+            })
+        }
+    }
 }
