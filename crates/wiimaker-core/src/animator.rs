@@ -326,7 +326,12 @@ impl Animator {
             return 0.0;
         }
         let t = if state.loop_ {
-            time.rem_euclid(dur) / dur
+            // `f32::rem_euclid` is not in core on the PowerPC `no_std` target.
+            let mut wrapped = time % dur;
+            if wrapped < 0.0 {
+                wrapped += dur;
+            }
+            wrapped / dur
         } else {
             (time / dur).clamp(0.0, 1.0)
         };
