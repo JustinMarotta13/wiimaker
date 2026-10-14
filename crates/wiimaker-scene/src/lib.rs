@@ -1,7 +1,9 @@
 //! Scene / project authoring types — source of truth for editor + CLI.
 
 mod animate;
+mod authoring_remap;
 mod collider;
+mod controller_param;
 mod doctor;
 mod gizmo;
 mod hydrate;
@@ -19,6 +21,10 @@ mod wscn;
 mod wscn_anim;
 
 pub use animate::{animate_world, apply_animation_frame};
+pub use controller_param::{
+    remove_controller_param_for_game, remove_scene_animator_param, remap_scene_animator_param,
+    rename_controller_param_for_game,
+};
 pub use collider::{
     add_component_collider, entities_overlap, entity_overlaps, entity_triggers_entered,
     remove_component_collider,

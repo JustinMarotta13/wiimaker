@@ -15,6 +15,7 @@ use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
 
 mod anim;
 mod animator_graph;
+mod atomic_io;
 mod controller;
 mod font;
 mod sprites;
@@ -23,6 +24,7 @@ mod timeline_curve;
 mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
+pub use atomic_io::atomic_write;
 pub use animator_graph::{
     arrow_head, auto_any, auto_entry, auto_exit, auto_state_pos, hit_node, hit_transition,
     layer_graph_view, layout_layer, point_segment_dist, unique_label, GraphNode, GraphNodeDump,

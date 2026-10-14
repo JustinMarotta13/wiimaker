@@ -5,11 +5,15 @@
 use eframe::egui::{
     self, pos2, Align2, Color32, FontId, PointerButton, Pos2, Rect, RichText, Sense, Stroke, Vec2,
 };
+use wiimaker_scene::{
+    remove_controller_param_for_game, remove_scene_animator_param, remap_scene_animator_param,
+    rename_controller_param_for_game,
+};
 use wiimaker_assets::{
     add_controller_layer, add_controller_param, add_layer_transition, arrow_head, hit_node,
     hit_transition, is_any_state, is_base_layer_name, layout_layer, move_layer_node,
-    remove_controller_layer, remove_controller_param, remove_layer_state, remove_layer_transition,
-    rename_controller_layer, rename_controller_param, rename_layer_state,
+    remove_controller_layer, remove_layer_state, remove_layer_transition, rename_controller_layer,
+    rename_layer_state,
     set_controller_layer_weight, set_controller_param_default, set_layer_default,
     set_layer_transition, unique_label, write_layer_state, write_layer_state_blend_tree,
     write_layer_state_clip, AnimatorControllerMeta, BlendDimension, BlendTreeMeta,
@@ -1007,8 +1011,18 @@ impl EditorApp {
                     )
                 }
                 AnimEdit::RenameParam { from, to } => {
-                    match rename_controller_param(&assets, stem, &from, &to) {
+                    match rename_controller_param_for_game(
+                        &self.game_dir,
+                        stem,
+                        &from,
+                        &to,
+                        Some(&self.scene_path),
+                    ) {
                         Ok(v) => {
+                            let n = remap_scene_animator_param(&mut self.scene, stem, &from, &to);
+                            if n > 0 {
+                                self.dirty = true;
+                            }
                             self.animator_view.rename_param = to.clone();
                             self.animator_view.param_draft = to;
                             Ok(v)
@@ -1016,7 +1030,23 @@ impl EditorApp {
                         Err(e) => Err(e),
                     }
                 }
-                AnimEdit::RemoveParam(name) => remove_controller_param(&assets, stem, &name),
+                AnimEdit::RemoveParam(name) => {
+                    match remove_controller_param_for_game(
+                        &self.game_dir,
+                        stem,
+                        &name,
+                        Some(&self.scene_path),
+                    ) {
+                        Ok(v) => {
+                            let n = remove_scene_animator_param(&mut self.scene, stem, &name);
+                            if n > 0 {
+                                self.dirty = true;
+                            }
+                            Ok(v)
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 AnimEdit::ParamDefault { name, value } => {
                     set_controller_param_default(&assets, stem, &name, value)
                 }

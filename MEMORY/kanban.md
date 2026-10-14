@@ -47,6 +47,8 @@ Follow-ups from #56 (Animator layers) non-blocking review notes (Code Reviewer r
 - **PT-A — `--layer base` case dup** — `entity animator-set --layer base` (lowercase) passes validation (`entity.rs:40` compares case-insensitively) but saves a second `base` weight override beside `Base`. Normalize any case-insensitive match to `BASE_LAYER_NAME` before storing.
 - **PT-B — controller-layer rename/remove vs scene overrides** — `asset controller-layer rename` / `remove` do not update scene per-entity layer weight overrides (rename silently orphans them; doctor does not flag the stale name). Remap/remove them across scenes + prefabs, mirroring `sorting-layer rename`. Doctor guard landed in #56: doctor now warns when a scene Animator weight override names a layer its controller lacks (`Base` any case is valid); the rename/remove auto-update is still the follow-up.
 - **Layer nits (Play Tester #56)** — scene doctor does not warn on out-of-range per-entity layer weights; `controller-layer` unknown-name errors do not list valid names (unlike `animator-set`); `"default": null` in a layer fails to parse (treat as no default); `--json` errors print plain text instead of a JSON error object.
+- **Exit as transition target** — Animator graph: allow transitions into Exit (or document why Exit is display-only).
+- **scene Base weight override no-op** — scene `animator-set --layer Base --weight` still stores an override; consider omitting or warning since playback ignores Base weight.
 
 ---
 

@@ -1,15 +1,13 @@
 //! Project-level sorting layers (Unity Tags & Layers analogue) + entity assignment.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{bail, Result};
 use wiimaker_core::{default_sorting_layers, is_default_sorting_layer_name, DEFAULT_SORTING_LAYER};
 
-use crate::project::{list_scenes, load_project, save_project, GameProject};
-use crate::scene::{
-    display_sorting_layer, load_prefab, load_scene, save_prefab, save_scene, EntityData, Scene,
-};
+use crate::authoring_remap::remap_authoring_files;
+use crate::project::{load_project, save_project, GameProject};
+use crate::scene::{display_sorting_layer, EntityData, Scene};
 
 /// Validate a new layer name (non-empty, no path separators).
 pub fn validate_sorting_layer_name(name: &str) -> Result<()> {
@@ -179,50 +177,6 @@ fn normalize_stored_layer(name: &str) -> String {
     }
 }
 
-fn remap_authoring_files(
-    game_dir: &Path,
-    skip_scene: Option<&Path>,
-    mut f: impl FnMut(&mut Scene) -> usize,
-) -> Result<()> {
-    let skip = skip_scene.map(|p| dunce_norm(p));
-    for rel in list_scenes(game_dir)? {
-        let abs = game_dir.join(&rel);
-        if skip.as_ref().is_some_and(|s| dunce_norm(&abs) == *s) {
-            continue;
-        }
-        if !abs.is_file() {
-            continue;
-        }
-        let mut scene = load_scene(&abs)?;
-        if f(&mut scene) > 0 {
-            save_scene(&abs, &scene)?;
-        }
-    }
-    let prefab_dir = game_dir.join("assets").join("prefabs");
-    if prefab_dir.is_dir() {
-        for entry in fs::read_dir(&prefab_dir)? {
-            let path = entry?.path();
-            if path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with(".prefab.json"))
-            {
-                let mut prefab = load_prefab(&path)?;
-                let mut dummy = Scene::new("prefab");
-                dummy.entities.push(prefab.entity.clone());
-                if f(&mut dummy) > 0 {
-                    prefab.entity = dummy.entities.remove(0);
-                    save_prefab(&path, &prefab)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn dunce_norm(p: &Path) -> PathBuf {
-    fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
-}
 
 /// Set Sorting Layer and/or Order in Layer on every drawable component on `name`.
 pub fn set_entity_sorting(

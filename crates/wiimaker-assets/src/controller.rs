@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::atomic_io::atomic_write;
+
 fn default_speed() -> f32 {
     1.0
 }
@@ -343,7 +345,8 @@ impl AnimatorControllerMeta {
             fs::create_dir_all(parent)?;
         }
         let text = serde_json::to_string_pretty(self)?;
-        fs::write(path, text + "\n").with_context(|| format!("write {}", path.display()))?;
+        atomic_write(path, (text + "\n").as_bytes())
+            .with_context(|| format!("write {}", path.display()))?;
         Ok(())
     }
 
@@ -947,6 +950,7 @@ pub fn remove_controller_param(
         if meta.parameters.len() == before {
             bail!("animator controller '{controller}' has no parameter '{name}'");
         }
+        strip_param_references(meta, name);
         Ok(())
     })
 }
@@ -985,6 +989,23 @@ fn retarget_param_name(meta: &mut AnimatorControllerMeta, from: &str, to: &str) 
     retarget_machine(&mut meta.states, &mut meta.transitions, from, to);
     for layer in &mut meta.layers {
         retarget_machine(&mut layer.states, &mut layer.transitions, from, to);
+    }
+}
+
+fn strip_param_references(meta: &mut AnimatorControllerMeta, name: &str) {
+    strip_machine(&mut meta.states, &mut meta.transitions, name);
+    for layer in &mut meta.layers {
+        strip_machine(&mut layer.states, &mut layer.transitions, name);
+    }
+}
+
+fn strip_machine(
+    _states: &mut [ControllerState],
+    transitions: &mut [ControllerTransition],
+    name: &str,
+) {
+    for t in transitions.iter_mut() {
+        t.conditions.retain(|c| c.param != name);
     }
 }
 
@@ -1583,7 +1604,37 @@ mod tests {
         assert_eq!(params, &vec!["Pace".to_string()]);
         let (_, meta) = remove_controller_param(&dir, "player", "Running").unwrap();
         assert!(meta.parameters.iter().all(|p| p.name != "Running"));
-        assert!(meta.transitions[0].conditions[0].param == "Running");
+        assert!(meta
+            .transitions
+            .iter()
+            .all(|t| t.conditions.iter().all(|c| c.param != "Running")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn param_remove_strips_layer_transition_conditions() {
+        let dir = tmp_dir("param-rm-layer");
+        let mut meta = sample();
+        meta.layers.push(ControllerLayer {
+            name: "Upper".into(),
+            weight: 1.0,
+            default_state: "Idle".into(),
+            states: meta.states.clone(),
+            transitions: vec![ControllerTransition {
+                from: "Idle".into(),
+                to: "Walk".into(),
+                conditions: vec![ControllerCondition {
+                    param: "Moving".into(),
+                    equals: Some(serde_json::json!(true)),
+                    ..Default::default()
+                }],
+                has_exit_time: false,
+            }],
+            graph: ControllerGraph::default(),
+        });
+        write_animator_controller(&dir, "player", meta).unwrap();
+        let (_, meta) = remove_controller_param(&dir, "player", "Moving").unwrap();
+        assert!(meta.layers[0].transitions[0].conditions.is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 }
