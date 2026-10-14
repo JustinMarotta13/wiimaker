@@ -23,6 +23,7 @@ use wiimaker_scene::{
 use crate::dock::{self, EditorTab};
 use crate::sprite_editor::{self, SpriteEditorState};
 use crate::theme;
+use crate::ui_animator::AnimatorView;
 use crate::ui_project;
 use crate::viewport::{VIEW_H, VIEW_W};
 
@@ -208,6 +209,8 @@ pub(crate) struct EditorApp {
     pub(crate) tl_curve_open: Vec<String>,
     /// Selected curve key in the Timeline dock.
     pub(crate) tl_curve_key: Option<TlCurveKeySel>,
+    /// Animator window pan / zoom / selection (session-only; positions live in the controller).
+    pub(crate) animator_view: AnimatorView,
 }
 
 /// Selected key on a timeline curve (asset edit, not scene undo).
@@ -308,6 +311,7 @@ impl EditorApp {
             tl_control_end: 1.0,
             tl_curve_open: Vec::new(),
             tl_curve_key: None,
+            animator_view: AnimatorView::default(),
         };
         app.reload_assets()?;
         app.refresh_scenes();
@@ -335,6 +339,9 @@ impl EditorApp {
         }
         if std::env::var("WIIMAKER_EDITOR_PLAY").ok().as_deref() == Some("1") {
             app.play();
+        }
+        if std::env::var("WIIMAKER_EDITOR_TAB").ok().as_deref() == Some("Animator") {
+            app.pending_focus = Some(EditorTab::Animator);
         }
         Ok(app)
     }

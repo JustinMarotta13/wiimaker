@@ -5,6 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use wiimaker_assets::atomic_write;
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::math::{Quat, Vec2, Vec3};
 use wiimaker_core::world::Transform;
@@ -1301,11 +1302,8 @@ pub fn load_scene(path: &Path) -> Result<Scene> {
 }
 
 pub fn save_scene(path: &Path, scene: &Scene) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let text = serde_json::to_string_pretty(scene)?;
-    fs::write(path, text + "\n")?;
+    atomic_write(path, (text + "\n").as_bytes()).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -1315,11 +1313,8 @@ pub fn load_prefab(path: &Path) -> Result<Prefab> {
 }
 
 pub fn save_prefab(path: &Path, prefab: &Prefab) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let text = serde_json::to_string_pretty(prefab)?;
-    fs::write(path, text + "\n")?;
+    atomic_write(path, (text + "\n").as_bytes()).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 

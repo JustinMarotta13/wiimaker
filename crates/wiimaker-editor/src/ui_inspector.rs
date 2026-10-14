@@ -7,8 +7,7 @@ use wiimaker_scene::{
     remove_component_camera, remove_component_collider, remove_component_disc,
     remove_component_grid_mover, remove_component_sprite, remove_component_text,
     remove_component_tilemap, save_project, set_component_enabled, set_scene_clear, tilemap_resize,
-    SceneColliderKind, SceneDir,
-    SceneTextAlign, DEFAULT_CLEAR_COLOR, DEFAULT_SORTING_LAYER,
+    SceneColliderKind, SceneDir, SceneTextAlign, DEFAULT_CLEAR_COLOR, DEFAULT_SORTING_LAYER,
 };
 
 use crate::app::{EditorApp, PlayMode};
@@ -633,7 +632,7 @@ impl EditorApp {
                                 let layers = (0..an.layer_count())
                                     .filter_map(|i| {
                                         let name = an.layer_name(i)?.to_string();
-                                        let weight = an.layer_weight(i).unwrap_or(0.0);
+                                        let weight = an.layer_weight_raw(i).unwrap_or(0.0);
                                         let state =
                                             an.layer_state_name(i).unwrap_or("—").to_string();
                                         let blend = an.layer_blend(i).and_then(|bt| {
@@ -702,16 +701,14 @@ impl EditorApp {
                                         .color(theme::TEXT),
                                 );
                                 let mut w = *lweight;
-                                if ui
-                                    .add(
-                                        egui::DragValue::new(&mut w)
-                                            .speed(0.01)
-                                            .range(0.0..=1.0)
-                                            .max_decimals(2)
-                                            .prefix("w "),
-                                    )
-                                    .changed()
-                                {
+                                let base = lname.eq_ignore_ascii_case("Base");
+                                let drag = egui::DragValue::new(&mut w)
+                                    .speed(0.01)
+                                    .max_decimals(2)
+                                    .prefix("w ");
+                                if base {
+                                    ui.add_enabled(false, drag);
+                                } else if ui.add(drag).changed() && w.is_finite() {
                                     if playing {
                                         live_layer_weight = Some((lname.clone(), w));
                                     } else {

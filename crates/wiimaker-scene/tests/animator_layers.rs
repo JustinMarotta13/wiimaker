@@ -54,7 +54,9 @@ fn controller() -> AnimatorControllerMeta {
                 ControllerState::plain("Empty", ""),
             ],
             transitions: vec![],
+            graph: Default::default(),
         }],
+        graph: Default::default(),
     }
 }
 
@@ -142,6 +144,7 @@ fn doctor_warns_on_layer_problems() {
         default_state: "Aim".into(),
         states: vec![ControllerState::plain("Aim", "aim")],
         transitions: vec![],
+        graph: Default::default(),
     });
     meta.layers.push(ControllerLayer {
         name: "Empty".into(),
@@ -158,6 +161,7 @@ fn doctor_warns_on_layer_problems() {
             }],
             has_exit_time: false,
         }],
+        graph: Default::default(),
     });
     // Unknown transition endpoints are a load error. Keep the empty layer valid
     // and put the bad default / missing clip / undeclared param on a layer that has states.
@@ -168,6 +172,7 @@ fn doctor_warns_on_layer_problems() {
         default_state: String::new(),
         states: vec![],
         transitions: vec![],
+        graph: Default::default(),
     });
     meta.layers.push(ControllerLayer {
         name: "Broken".into(),
@@ -184,6 +189,7 @@ fn doctor_warns_on_layer_problems() {
             }],
             has_exit_time: false,
         }],
+        graph: Default::default(),
     });
     write_animator_controller(&assets, "player", meta).unwrap();
     let project = GameProject::new("probe");

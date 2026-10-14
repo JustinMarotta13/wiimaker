@@ -10,7 +10,8 @@ use crate::scene::{load_scene, Scene};
 use wiimaker_assets::{
     inspect_wav, is_base_layer_name, list_anim_clips, list_animator_controllers, list_timelines,
     list_wav_clips, AnimClipMeta, AnimatorControllerMeta, BlendDimension, BlendTreeMeta,
-    ControllerParam, ControllerParamType, ControllerState, SpriteCatalog, TimelineMeta,
+    ControllerGraph, ControllerParam, ControllerParamType, ControllerState, SpriteCatalog,
+    TimelineMeta,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -229,6 +230,7 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
                     false,
                     &mut issues,
                 );
+                warn_graph_positions(cname, "Base", &meta.states, &meta.graph, &mut issues);
                 let mut seen = std::collections::HashSet::new();
                 for layer in &meta.layers {
                     let key = layer.name.to_ascii_lowercase();
@@ -256,6 +258,13 @@ pub fn diagnose(game_dir: &Path, project: &GameProject) -> Diagnosis {
                         &meta.parameters,
                         &anim_names,
                         true,
+                        &mut issues,
+                    );
+                    warn_graph_positions(
+                        cname,
+                        &layer.name,
+                        &layer.states,
+                        &layer.graph,
                         &mut issues,
                     );
                 }
@@ -426,6 +435,39 @@ fn warn_unknown_sorting_layer(
                 ent.name
             ),
         });
+    }
+}
+
+fn warn_graph_positions(
+    cname: &str,
+    layer: &str,
+    states: &[ControllerState],
+    graph: &ControllerGraph,
+    issues: &mut Vec<Issue>,
+) {
+    let mut warn = |what: &str, p: [f32; 2]| {
+        if !p[0].is_finite() || !p[1].is_finite() {
+            issues.push(Issue {
+                severity: Severity::Warning,
+                message: format!(
+                    "controller '{cname}': layer '{layer}' {what} position {p:?} is not finite"
+                ),
+            });
+        }
+    };
+    for s in states {
+        if let Some(p) = s.position {
+            warn(&format!("state '{}'", s.name), p);
+        }
+    }
+    if let Some(p) = graph.entry {
+        warn("Entry", p);
+    }
+    if let Some(p) = graph.any {
+        warn("Any State", p);
+    }
+    if let Some(p) = graph.exit {
+        warn("Exit", p);
     }
 }
 

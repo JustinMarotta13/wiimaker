@@ -96,22 +96,20 @@ impl EditorApp {
             for layer in &meta.layers {
                 rows.push((layer.name.clone(), layer.weight, false));
             }
-            for (name, weight, _base) in rows {
+            for (name, weight, base) in rows {
                 ui.horizontal(|ui| {
                     if ui.selectable_label(selected == name, &name).clicked() {
                         selected = name.clone();
                     }
-                    let mut w = weight.clamp(0.0, 1.0);
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut w)
-                                .speed(0.01)
-                                .range(0.0..=1.0)
-                                .max_decimals(2)
-                                .prefix("w "),
-                        )
-                        .changed()
-                    {
+                    let mut w = weight;
+                    let drag = egui::DragValue::new(&mut w)
+                        .speed(0.01)
+                        .max_decimals(2)
+                        .prefix("w ");
+                    if base {
+                        ui.add_enabled(false, drag);
+                        ui.label(RichText::new("no effect").size(11.0).color(theme::TEXT_DIM));
+                    } else if ui.add(drag).changed() && w.is_finite() {
                         edit = Some(ControllerEdit::Weight {
                             name: name.clone(),
                             weight: w,

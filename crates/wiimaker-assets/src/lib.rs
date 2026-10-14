@@ -14,6 +14,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
 
 mod anim;
+mod animator_graph;
+mod atomic_io;
 mod controller;
 mod font;
 mod sprites;
@@ -22,15 +24,24 @@ mod timeline_curve;
 mod wav;
 
 pub use anim::{list_anim_clips, write_anim_clip, AnimClipCatalog, AnimClipMeta};
+pub use atomic_io::atomic_write;
+pub use animator_graph::{
+    arrow_head, auto_any, auto_entry, auto_exit, auto_state_pos, hit_node, hit_transition,
+    layer_graph_view, layout_layer, point_segment_dist, unique_label, GraphNode, GraphNodeDump,
+    GraphNodeId, GraphTransitionDump, LayerGraphView, NodeRole, STATE_H, STATE_W, TRANSITION_SLOP,
+};
 pub use controller::{
-    add_controller_layer, add_layer_transition, check_layer_weight, is_any_state,
-    is_base_layer_name, list_animator_controllers, remove_controller_layer, remove_layer_state,
-    remove_layer_transition, rename_controller_layer, set_controller_layer_weight,
-    set_layer_default, write_animator_controller, write_layer_state, write_layer_state_blend_tree,
-    write_layer_state_clip, write_state_blend_tree, write_state_clip, AnimatorControllerCatalog,
-    AnimatorControllerMeta, BlendDimension, BlendMotion, BlendTreeMeta, ControllerCondition,
-    ControllerLayer, ControllerParam, ControllerParamType, ControllerState, ControllerTransition,
-    BASE_LAYER_NAME,
+    add_controller_layer, add_controller_param, add_layer_transition, apply_remove_controller_param,
+    apply_rename_controller_param, check_layer_weight,
+    is_any_state, is_base_layer_name, list_animator_controllers, move_layer_node,
+    remove_controller_layer, remove_controller_param, remove_layer_state, remove_layer_transition,
+    rename_controller_layer, rename_controller_param, rename_layer_state,
+    set_controller_layer_weight, set_controller_param_default, set_layer_default,
+    set_layer_transition, write_animator_controller, write_layer_state,
+    write_layer_state_blend_tree, write_layer_state_clip, write_state_blend_tree, write_state_clip,
+    AnimatorControllerCatalog, AnimatorControllerMeta, BlendDimension, BlendMotion, BlendTreeMeta,
+    ControllerCondition, ControllerGraph, ControllerLayer, ControllerParam, ControllerParamType,
+    ControllerState, ControllerTransition, BASE_LAYER_NAME,
 };
 pub use font::{
     atlas_image, atlas_rgba8, font8x8_c_header, glyph_bits, glyph_uv, map_char,
