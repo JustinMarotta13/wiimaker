@@ -725,7 +725,8 @@ pub enum ControllerLayerCmd {
         #[arg(long)]
         to: String,
     },
-    /// Set a layer weight (`--name Base` for the base layer). Must be finite; out-of-range values clamp at runtime.
+    /// Set an override-layer weight. Must be finite; out-of-range values stay raw and clamp at runtime.
+    /// `Base` is rejected (base weight does not affect playback).
     Weight {
         #[arg(long)]
         name: String,
@@ -768,6 +769,86 @@ pub enum ControllerLayerCmd {
         has_exit_time: bool,
         #[arg(long)]
         remove_index: Option<usize>,
+    },
+    /// Move a state, or Entry / Any / Exit, to a graph position `x,y`
+    MoveState {
+        /// Layer name (`Base` for the top-level machine)
+        #[arg(long)]
+        name: String,
+        /// State name, or `Entry` / `Any` / `Exit`
+        #[arg(long)]
+        state: String,
+        /// Graph position `x,y`
+        #[arg(long)]
+        pos: String,
+    },
+    /// Rename a state and retarget transitions and the layer default
+    RenameState {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        state: String,
+        #[arg(long)]
+        to: String,
+    },
+    /// Edit one transition's exit time and/or conditions
+    SetTransition {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        index: usize,
+        #[arg(long, action = clap::ArgAction::Set)]
+        has_exit_time: Option<bool>,
+        /// Condition `Param=value` (repeatable). Replaces the condition list when set.
+        #[arg(long = "condition")]
+        conditions: Vec<String>,
+        /// Clear every condition on this transition
+        #[arg(long, default_value_t = false)]
+        clear_conditions: bool,
+    },
+    /// Resolved node positions (authored and auto-layout) plus transitions
+    Graph {
+        /// Layer name (`Base` for the top-level machine)
+        #[arg(long, default_value = "Base")]
+        name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ControllerParamCmd {
+    /// List parameters
+    List,
+    /// Add a Bool, Float, or Trigger parameter
+    Add {
+        #[arg(long)]
+        name: String,
+        /// `Bool`, `Float`, or `Trigger`
+        #[arg(long = "type")]
+        kind: String,
+        /// Default `true`/`false` or a number. Omitted → false / 0.
+        #[arg(long)]
+        default: Option<String>,
+    },
+    /// Rename a parameter and retarget conditions and blend-tree params
+    Rename {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        to: String,
+    },
+    /// Remove a parameter. Conditions that named it stay (doctor warns).
+    Remove {
+        #[arg(long)]
+        name: String,
+    },
+    /// Set a parameter's default value
+    #[command(name = "default")]
+    SetDefault {
+        #[arg(long)]
+        name: String,
+        /// `true`/`false` or a number
+        #[arg(long)]
+        value: String,
     },
 }
 
@@ -879,6 +960,14 @@ pub enum AssetCmd {
         controller: String,
         #[command(subcommand)]
         cmd: ControllerLayerCmd,
+    },
+    /// Add, rename, or remove controller parameters (`Bool` / `Float` / `Trigger`)
+    ControllerParam {
+        game: String,
+        /// Controller stem (e.g. player)
+        controller: String,
+        #[command(subcommand)]
+        cmd: ControllerParamCmd,
     },
     /// Create / overwrite `assets/<name>.timeline.json`
     Timeline {

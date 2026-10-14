@@ -62,6 +62,7 @@ fn player_controller() -> AnimatorControllerMeta {
         ],
         weight: 1.0,
         layers: Vec::new(),
+        graph: Default::default(),
     }
 }
 

@@ -154,6 +154,10 @@ impl EditorApp {
                             self.focus_tab(EditorTab::Timeline);
                             ui.close_menu();
                         }
+                        if ui.button("Animator").clicked() {
+                            self.focus_tab(EditorTab::Animator);
+                            ui.close_menu();
+                        }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

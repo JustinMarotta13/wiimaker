@@ -291,6 +291,52 @@ impl Animator {
         self.layer_weight_raw(index).map(clamp_layer_weight)
     }
 
+    /// `Base` (any case) is index 0. Override names match exactly.
+    pub fn layer_index(&self, name: &str) -> Option<usize> {
+        if name.trim().is_empty() || name.eq_ignore_ascii_case(BASE_LAYER_NAME) {
+            Some(0)
+        } else {
+            self.layers
+                .iter()
+                .position(|l| l.name == name)
+                .map(|i| i + 1)
+        }
+    }
+
+    /// Normalized playback of the layer's current state, in 0..1.
+    ///
+    /// Looping states wrap. A state with no duration stays at 0.
+    pub fn layer_normalized_time(&self, index: usize) -> f32 {
+        let (time, state_name, states) = if index == 0 {
+            (self.state_time, self.state.as_str(), self.states.as_slice())
+        } else if let Some(layer) = self.layers.get(index - 1) {
+            (
+                layer.state_time,
+                layer.state.as_str(),
+                layer.states.as_slice(),
+            )
+        } else {
+            return 0.0;
+        };
+        let Some(state) = states.iter().find(|s| s.name == state_name) else {
+            return 0.0;
+        };
+        let dur = state.duration();
+        if dur <= 1.0e-6 {
+            return 0.0;
+        }
+        let t = if state.loop_ {
+            time.rem_euclid(dur) / dur
+        } else {
+            (time / dur).clamp(0.0, 1.0)
+        };
+        if t.is_finite() {
+            t
+        } else {
+            0.0
+        }
+    }
+
     pub fn layer_state_name(&self, index: usize) -> Option<&str> {
         if index == 0 {
             Some(self.state.as_str())
@@ -1283,5 +1329,19 @@ mod tests {
         assert_eq!(world.animation(id).unwrap().clip, "idle");
         world.set_animator_layer_weight(id, "UpperBody", 1.0);
         assert_eq!(world.animation(id).unwrap().clip, "shoot");
+    }
+
+    #[test]
+    fn layer_normalized_time_wraps_a_looping_clip() {
+        let mut a = walk_aim();
+        a.state_time = 0.0625;
+        assert!((a.layer_normalized_time(0) - 0.5).abs() < 1e-4);
+        a.state_time = 0.125;
+        assert!(a.layer_normalized_time(0).abs() < 1e-4);
+        a.layers[0].state_time = 0.0625;
+        assert!((a.layer_normalized_time(1) - 0.5).abs() < 1e-4);
+        assert_eq!(a.layer_normalized_time(9), 0.0);
+        assert_eq!(a.layer_index("Base"), Some(0));
+        assert_eq!(a.layer_index("UpperBody"), Some(1));
     }
 }

@@ -187,6 +187,8 @@ impl EditorApp {
             {
                 self.open_sprite_editor_stem = Some(stem);
             }
+        } else if name.ends_with(".controller.json") {
+            self.focus_tab(crate::dock::EditorTab::Animator);
         } else if name.ends_with(".timeline.json") {
             self.focus_tab(crate::dock::EditorTab::Timeline);
             if let Some(stem) = name

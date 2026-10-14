@@ -215,6 +215,10 @@ pub struct ControllerState {
     pub speed: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_tree: Option<BlendTreeMeta>,
+    /// Animator window node position `[x, y]` in graph space. Omitted when unset
+    /// so files without a layout resave unchanged. Missing → auto-layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 2]>,
 }
 
 impl ControllerState {
@@ -224,7 +228,27 @@ impl ControllerState {
             clip: clip.into(),
             speed: default_speed(),
             blend_tree: None,
+            position: None,
         }
+    }
+}
+
+/// Optional Animator-window positions for the Entry / Any State / Exit nodes.
+///
+/// Omitted entirely when every field is unset.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ControllerGraph {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub any: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit: Option<[f32; 2]>,
+}
+
+impl ControllerGraph {
+    pub fn is_empty(&self) -> bool {
+        self.entry.is_none() && self.any.is_none() && self.exit.is_none()
     }
 }
 
@@ -265,6 +289,9 @@ pub struct ControllerLayer {
     pub states: Vec<ControllerState>,
     #[serde(default)]
     pub transitions: Vec<ControllerTransition>,
+    /// Entry / Any / Exit node positions for this override layer.
+    #[serde(default, skip_serializing_if = "ControllerGraph::is_empty")]
+    pub graph: ControllerGraph,
 }
 
 /// Authoring animator controller (`assets/<name>.controller.json`).
@@ -289,6 +316,9 @@ pub struct AnimatorControllerMeta {
     /// Override layers (runtime index 1+). Empty / omitted = base only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<ControllerLayer>,
+    /// Entry / Any / Exit positions for the base layer.
+    #[serde(default, skip_serializing_if = "ControllerGraph::is_empty")]
+    pub graph: ControllerGraph,
 }
 
 impl AnimatorControllerMeta {
@@ -358,7 +388,7 @@ impl AnimatorControllerMeta {
             &self.default_state,
             &self.states,
             &self.transitions,
-            false,
+            true,
         )?;
         if self.default_state.is_empty() {
             bail!("animator controller default state must not be empty");
@@ -496,12 +526,9 @@ pub fn write_layer_state_blend_tree(
                 s.blend_tree = Some(tree);
             }
             None => {
-                states.push(ControllerState {
-                    name: state.to_string(),
-                    clip: String::new(),
-                    speed: default_speed(),
-                    blend_tree: Some(tree),
-                });
+                let mut created = ControllerState::plain(state, "");
+                created.blend_tree = Some(tree);
+                states.push(created);
                 if default.is_empty() {
                     *default = state.to_string();
                 }
@@ -521,7 +548,7 @@ pub fn write_state_clip(
     write_layer_state_clip(assets_dir, controller, None, state, clip)
 }
 
-/// Same as [`write_state_clip`], scoped to a layer. An empty clip is a placeholder on override layers only.
+/// Same as [`write_state_clip`], scoped to a layer. An empty clip is a placeholder (no motion).
 pub fn write_layer_state_clip(
     assets_dir: &Path,
     controller: &str,
@@ -529,10 +556,6 @@ pub fn write_layer_state_clip(
     state: &str,
     clip: &str,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
-    let base = layer.map(is_base_layer_name).unwrap_or(true);
-    if clip.trim().is_empty() && base {
-        bail!("state '{state}' clip must not be empty");
-    }
     edit_controller(assets_dir, controller, |meta| {
         let (states, _) = machine_mut(meta, layer)?;
         let Some(s) = states.iter_mut().find(|s| s.name == state) else {
@@ -544,7 +567,7 @@ pub fn write_layer_state_clip(
     })
 }
 
-/// Add or replace a clip state. Empty `clip` is allowed on an override layer (placeholder).
+/// Add or replace a clip state. An empty `clip` is a placeholder (no motion).
 pub fn write_layer_state(
     assets_dir: &Path,
     controller: &str,
@@ -554,10 +577,6 @@ pub fn write_layer_state(
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
     if state.trim().is_empty() {
         bail!("animator state name must not be empty");
-    }
-    let base = layer.map(is_base_layer_name).unwrap_or(true);
-    if clip.trim().is_empty() && base {
-        bail!("state '{state}' clip must not be empty");
     }
     edit_controller(assets_dir, controller, |meta| {
         let (states, default) = machine_mut(meta, layer)?;
@@ -594,7 +613,7 @@ pub fn remove_layer_state(
         if base && states.is_empty() {
             bail!("animator controller must list at least one state");
         }
-        transitions.retain(|t| is_any_state(&t.from) || (t.from != state && t.to != state));
+        transitions.retain(|t| t.to != state && (is_any_state(&t.from) || t.from != state));
         if default == state {
             *default = states.first().map(|s| s.name.clone()).unwrap_or_default();
         }
@@ -696,6 +715,7 @@ pub fn add_controller_layer(
             default_state: String::new(),
             states: Vec::new(),
             transitions: Vec::new(),
+            graph: ControllerGraph::default(),
         });
         Ok(())
     })
@@ -746,7 +766,9 @@ pub fn rename_controller_layer(
 }
 
 /// Store a finite `weight` as authored (runtime clamps out-of-range values to 0..1).
-/// `layer` `Base` writes the controller base weight.
+///
+/// The base layer weight does not affect playback, so `Base` is rejected. Override
+/// layers keep finite out-of-range values raw so doctor can warn.
 pub fn set_controller_layer_weight(
     assets_dir: &Path,
     controller: &str,
@@ -754,17 +776,240 @@ pub fn set_controller_layer_weight(
     weight: f32,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
     check_layer_weight(weight)?;
+    if is_base_layer_name(layer) {
+        bail!(
+            "animator base layer weight does not affect playback; set an override layer weight instead"
+        );
+    }
     edit_controller(assets_dir, controller, |meta| {
-        if is_base_layer_name(layer) {
-            meta.weight = weight;
-            return Ok(());
-        }
         let Some(found) = meta.layers.iter_mut().find(|l| l.name == layer) else {
             bail!("animator controller '{controller}' has no layer '{layer}'");
         };
         found.weight = weight;
         Ok(())
     })
+}
+
+/// Rename a state and retarget transitions and the layer default that name it.
+pub fn rename_layer_state(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    from: &str,
+    to: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    let to = to.trim();
+    if to.is_empty() {
+        bail!("animator state name must not be empty");
+    }
+    if from == to {
+        let path = AnimatorControllerMeta::path(assets_dir, controller);
+        let meta = AnimatorControllerMeta::load(&path)?;
+        return Ok((path, meta));
+    }
+    edit_controller(assets_dir, controller, |meta| {
+        let (states, default, transitions) = machine_mut_full(meta, layer)?;
+        if states.iter().any(|s| s.name == to) {
+            bail!("animator state '{to}' already exists");
+        }
+        let Some(state) = states.iter_mut().find(|s| s.name == from) else {
+            bail!("animator controller '{controller}' has no state '{from}'");
+        };
+        state.name = to.to_string();
+        if default == from {
+            *default = to.to_string();
+        }
+        for t in transitions.iter_mut() {
+            if t.from == from {
+                t.from = to.to_string();
+            }
+            if t.to == from {
+                t.to = to.to_string();
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Move a state node, or Entry / Any / Exit chrome, on one layer.
+///
+/// An exact state name wins over the Entry/Any/Exit chrome labels.
+pub fn move_layer_node(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    node: &str,
+    pos: [f32; 2],
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    if !pos[0].is_finite() || !pos[1].is_finite() {
+        bail!("animator node position must be finite, got {pos:?}");
+    }
+    let node = node.trim();
+    if node.is_empty() {
+        bail!("animator node name must not be empty");
+    }
+    edit_controller(assets_dir, controller, |meta| {
+        let (states, _, _, graph) = machine_mut_graph(meta, layer)?;
+        if let Some(state) = states.iter_mut().find(|s| s.name == node) {
+            state.position = Some(pos);
+            return Ok(());
+        }
+        match node.to_ascii_lowercase().as_str() {
+            "entry" => graph.entry = Some(pos),
+            "any" | "any state" => graph.any = Some(pos),
+            "exit" => graph.exit = Some(pos),
+            _ => bail!("animator controller '{controller}' has no node '{node}'"),
+        }
+        Ok(())
+    })
+}
+
+/// Replace conditions and/or `has_exit_time` on one transition.
+///
+/// `None` leaves that field unchanged. Pass `Some(vec![])` to clear conditions.
+pub fn set_layer_transition(
+    assets_dir: &Path,
+    controller: &str,
+    layer: Option<&str>,
+    index: usize,
+    has_exit_time: Option<bool>,
+    conditions: Option<Vec<ControllerCondition>>,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    edit_controller(assets_dir, controller, |meta| {
+        let (_, _, transitions) = machine_mut_full(meta, layer)?;
+        let Some(t) = transitions.get_mut(index) else {
+            bail!("animator transition index {index} is out of range");
+        };
+        if let Some(flag) = has_exit_time {
+            t.has_exit_time = flag;
+        }
+        if let Some(conditions) = conditions {
+            t.conditions = conditions;
+        }
+        Ok(())
+    })
+}
+
+pub fn add_controller_param(
+    assets_dir: &Path,
+    controller: &str,
+    param: ControllerParam,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    let name = param.name.trim().to_string();
+    if name.is_empty() {
+        bail!("animator parameter name must not be empty");
+    }
+    edit_controller(assets_dir, controller, |meta| {
+        if meta.parameters.iter().any(|p| p.name == name) {
+            bail!("animator controller '{controller}' already has parameter '{name}'");
+        }
+        meta.parameters.push(ControllerParam {
+            name,
+            kind: param.kind,
+            default: param.default,
+        });
+        Ok(())
+    })
+}
+
+/// Rename a parameter and retarget transition conditions and blend-tree param names.
+pub fn rename_controller_param(
+    assets_dir: &Path,
+    controller: &str,
+    from: &str,
+    to: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    let to = to.trim();
+    if to.is_empty() {
+        bail!("animator parameter name must not be empty");
+    }
+    edit_controller(assets_dir, controller, |meta| {
+        if from != to && meta.parameters.iter().any(|p| p.name == to) {
+            bail!("animator controller '{controller}' already has parameter '{to}'");
+        }
+        let Some(param) = meta.parameters.iter_mut().find(|p| p.name == from) else {
+            bail!("animator controller '{controller}' has no parameter '{from}'");
+        };
+        param.name = to.to_string();
+        retarget_param_name(meta, from, to);
+        Ok(())
+    })
+}
+
+pub fn remove_controller_param(
+    assets_dir: &Path,
+    controller: &str,
+    name: &str,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    edit_controller(assets_dir, controller, |meta| {
+        let before = meta.parameters.len();
+        meta.parameters.retain(|p| p.name != name);
+        if meta.parameters.len() == before {
+            bail!("animator controller '{controller}' has no parameter '{name}'");
+        }
+        Ok(())
+    })
+}
+
+pub fn set_controller_param_default(
+    assets_dir: &Path,
+    controller: &str,
+    name: &str,
+    default: serde_json::Value,
+) -> Result<(PathBuf, AnimatorControllerMeta)> {
+    edit_controller(assets_dir, controller, |meta| {
+        let Some(param) = meta.parameters.iter_mut().find(|p| p.name == name) else {
+            bail!("animator controller '{controller}' has no parameter '{name}'");
+        };
+        match param.kind {
+            ControllerParamType::Float => {
+                if !default.is_number() {
+                    bail!("parameter '{name}' default must be a number");
+                }
+            }
+            ControllerParamType::Bool | ControllerParamType::Trigger => {
+                if !default.is_boolean() {
+                    bail!("parameter '{name}' default must be true or false");
+                }
+            }
+        }
+        param.default = Some(default);
+        Ok(())
+    })
+}
+
+fn retarget_param_name(meta: &mut AnimatorControllerMeta, from: &str, to: &str) {
+    if from == to {
+        return;
+    }
+    retarget_machine(&mut meta.states, &mut meta.transitions, from, to);
+    for layer in &mut meta.layers {
+        retarget_machine(&mut layer.states, &mut layer.transitions, from, to);
+    }
+}
+
+fn retarget_machine(
+    states: &mut [ControllerState],
+    transitions: &mut [ControllerTransition],
+    from: &str,
+    to: &str,
+) {
+    for t in transitions.iter_mut() {
+        for c in &mut t.conditions {
+            if c.param == from {
+                c.param = to.to_string();
+            }
+        }
+    }
+    for s in states.iter_mut() {
+        if let Some(tree) = s.blend_tree.as_mut() {
+            for p in &mut tree.params {
+                if p == from {
+                    *p = to.to_string();
+                }
+            }
+        }
+    }
 }
 
 fn edit_controller(
@@ -777,6 +1022,36 @@ fn edit_controller(
     edit(&mut meta)?;
     meta.save(&path)?;
     Ok((path, meta))
+}
+
+fn machine_mut_graph<'a>(
+    meta: &'a mut AnimatorControllerMeta,
+    layer: Option<&str>,
+) -> Result<(
+    &'a mut Vec<ControllerState>,
+    &'a mut String,
+    &'a mut Vec<ControllerTransition>,
+    &'a mut ControllerGraph,
+)> {
+    match layer.map(str::trim).filter(|n| !is_base_layer_name(n)) {
+        None => Ok((
+            &mut meta.states,
+            &mut meta.default_state,
+            &mut meta.transitions,
+            &mut meta.graph,
+        )),
+        Some(name) => {
+            let Some(found) = meta.layers.iter_mut().find(|l| l.name == name) else {
+                bail!("animator controller has no layer '{name}'");
+            };
+            Ok((
+                &mut found.states,
+                &mut found.default_state,
+                &mut found.transitions,
+                &mut found.graph,
+            ))
+        }
+    }
 }
 
 fn machine_mut<'a>(
@@ -907,6 +1182,7 @@ mod tests {
             ],
             weight: 1.0,
             layers: Vec::new(),
+            graph: ControllerGraph::default(),
         }
     }
 
@@ -984,10 +1260,12 @@ mod tests {
                 clip: String::new(),
                 speed: 1.0,
                 blend_tree: Some(tree),
+                position: None,
             }],
             transitions: Vec::new(),
             weight: 1.0,
             layers: Vec::new(),
+            graph: ControllerGraph::default(),
         }
     }
 
@@ -1071,7 +1349,8 @@ mod tests {
 
         let mut m = with_blend(tree1d());
         m.states[0].blend_tree = None;
-        assert!(m.validate().is_err());
+        m.states[0].clip.clear();
+        assert!(m.validate().is_ok(), "empty clip is a placeholder state");
     }
 
     #[test]
@@ -1143,6 +1422,7 @@ mod tests {
                 ControllerState::plain("Empty", ""),
             ],
             transitions: vec![],
+            graph: ControllerGraph::default(),
         });
         assert!(authored.validate().is_ok());
         let (path, _) = write_animator_controller(&dir, "player", authored).unwrap();
@@ -1177,6 +1457,7 @@ mod tests {
             default_state: "Idle".into(),
             states: vec![ControllerState::plain("Idle", "idle")],
             transitions: vec![],
+            graph: ControllerGraph::default(),
         });
         write_animator_controller(&dir, "player", authored).unwrap();
         let before = fs::read_to_string(&path).unwrap();
@@ -1195,6 +1476,114 @@ mod tests {
         poisoned.layer_mut("UpperBody").unwrap().weight = f32::NAN;
         assert!(poisoned.save(&path).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        assert!(set_controller_layer_weight(&dir, "player", "Base", 0.25).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn positions_roundtrip_and_missing_positions_stay_omitted() {
+        let legacy = "{\n  \"default\": \"Idle\",\n  \"parameters\": [],\n  \"states\": [\n    {\n      \"name\": \"Idle\",\n      \"clip\": \"idle\",\n      \"speed\": 1.0\n    }\n  ],\n  \"transitions\": []\n}\n";
+        let dir = tmp_dir("pos");
+        let path = AnimatorControllerMeta::path(&dir, "player");
+        fs::write(&path, legacy).unwrap();
+        let meta = AnimatorControllerMeta::load(&path).unwrap();
+        assert!(meta.states[0].position.is_none());
+        assert!(meta.graph.is_empty());
+        meta.save(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+
+        write_animator_controller(&dir, "player", sample()).unwrap();
+        let (_, meta) = move_layer_node(&dir, "player", None, "Walk", [180.0, 40.0]).unwrap();
+        assert_eq!(meta.state("Walk").unwrap().position, Some([180.0, 40.0]));
+        assert!(meta.state("Idle").unwrap().position.is_none());
+        let (_, meta) = move_layer_node(&dir, "player", None, "Entry", [12.0, 8.0]).unwrap();
+        assert_eq!(meta.graph.entry, Some([12.0, 8.0]));
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"position\": ["));
+        assert!(text.contains("\"entry\": ["));
+        let loaded = AnimatorControllerMeta::load(&path).unwrap();
+        assert_eq!(loaded.state("Walk").unwrap().position, Some([180.0, 40.0]));
+        loaded.save(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+
+        let before = fs::read_to_string(&path).unwrap();
+        assert!(move_layer_node(&dir, "player", None, "Walk", [f32::NAN, 1.0]).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_state_updates_transitions_and_default() {
+        let dir = tmp_dir("rename-state");
+        write_animator_controller(&dir, "player", sample()).unwrap();
+        let (_, meta) = rename_layer_state(&dir, "player", None, "Idle", "Stand").unwrap();
+        assert!(meta.state("Idle").is_none());
+        assert!(meta.state("Stand").is_some());
+        assert_eq!(meta.default_state, "Stand");
+        assert!(meta
+            .transitions
+            .iter()
+            .any(|t| t.from == "Stand" && t.to == "Walk"));
+        assert!(meta
+            .transitions
+            .iter()
+            .any(|t| t.from == "Walk" && t.to == "Stand"));
+        assert!(rename_layer_state(&dir, "player", None, "Stand", "Walk").is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remove_state_drops_its_transitions_including_any() {
+        let dir = tmp_dir("rm-state");
+        let mut meta = sample();
+        meta.transitions.push(ControllerTransition {
+            from: "Any".into(),
+            to: "Walk".into(),
+            conditions: vec![],
+            has_exit_time: false,
+        });
+        write_animator_controller(&dir, "player", meta).unwrap();
+        let (_, meta) = remove_layer_state(&dir, "player", None, "Walk").unwrap();
+        assert!(meta.state("Walk").is_none());
+        assert!(meta
+            .transitions
+            .iter()
+            .all(|t| t.from != "Walk" && t.to != "Walk"));
+        assert!(meta.transitions.is_empty());
+        assert_eq!(meta.default_state, "Idle");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn param_rename_updates_conditions_and_blend_params() {
+        let dir = tmp_dir("param");
+        let mut meta = sample();
+        meta.parameters.push(ControllerParam {
+            name: "Speed".into(),
+            kind: ControllerParamType::Float,
+            default: Some(serde_json::json!(0.0)),
+        });
+        write_animator_controller(&dir, "player", meta).unwrap();
+        write_state_blend_tree(&dir, "player", "Walk", tree1d()).unwrap();
+        let (_, meta) = rename_controller_param(&dir, "player", "Moving", "Running").unwrap();
+        assert!(meta.parameters.iter().any(|p| p.name == "Running"));
+        assert!(meta
+            .transitions
+            .iter()
+            .all(|t| t.conditions.iter().all(|c| c.param == "Running")));
+        let (_, meta) = rename_controller_param(&dir, "player", "Speed", "Pace").unwrap();
+        let params = &meta
+            .state("Walk")
+            .unwrap()
+            .blend_tree
+            .as_ref()
+            .unwrap()
+            .params;
+        assert_eq!(params, &vec!["Pace".to_string()]);
+        let (_, meta) = remove_controller_param(&dir, "player", "Running").unwrap();
+        assert!(meta.parameters.iter().all(|p| p.name != "Running"));
+        assert!(meta.transitions[0].conditions[0].param == "Running");
         let _ = fs::remove_dir_all(&dir);
     }
 }

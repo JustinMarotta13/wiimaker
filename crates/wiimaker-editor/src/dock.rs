@@ -15,6 +15,7 @@ pub(crate) enum EditorTab {
     Project,
     Console,
     Timeline,
+    Animator,
 }
 
 impl EditorTab {
@@ -27,8 +28,19 @@ impl EditorTab {
             Self::Project => "Project",
             Self::Console => "Console",
             Self::Timeline => "Timeline",
+            Self::Animator => "Animator",
         }
     }
+}
+
+/// Top-child share for the center/bottom split. Default bottom leaf is ~22%.
+fn bottom_top_share() -> f32 {
+    std::env::var("WIIMAKER_EDITOR_BOTTOM")
+        .ok()
+        .and_then(|s| s.trim().parse::<f32>().ok())
+        .filter(|bottom| (0.15..0.75).contains(bottom))
+        .map(|bottom| 1.0 - bottom)
+        .unwrap_or(0.78)
 }
 
 /// Default Unity layout:
@@ -42,10 +54,16 @@ pub(crate) fn default_unity_layout() -> DockState<EditorTab> {
     // split_right fraction = left (old) child share → inspector ~0.22 of remaining.
     let [center, _insp] = surface.split_right(center, 0.78, vec![EditorTab::Inspector]);
     // split_below fraction = top (old) child share → bottom ~0.22 of remaining center.
+    // `WIIMAKER_EDITOR_BOTTOM=0.45` grows that leaf for screenshot runs.
     let [_center, _bottom] = surface.split_below(
         center,
-        0.78,
-        vec![EditorTab::Project, EditorTab::Console, EditorTab::Timeline],
+        bottom_top_share(),
+        vec![
+            EditorTab::Project,
+            EditorTab::Console,
+            EditorTab::Timeline,
+            EditorTab::Animator,
+        ],
     );
     if let Some(loc) = dock.find_tab(&EditorTab::Scene) {
         dock.set_active_tab(loc);
@@ -116,6 +134,7 @@ impl TabViewer for EditorTabViewer<'_> {
             EditorTab::Project => self.app.ui_project_body(ui),
             EditorTab::Console => self.app.ui_console(ui),
             EditorTab::Timeline => self.app.ui_timeline(ui),
+            EditorTab::Animator => self.app.ui_animator(ui),
         }
     }
 
