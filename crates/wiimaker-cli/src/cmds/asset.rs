@@ -631,8 +631,9 @@ fn controller_layer_cmd(
             )
         }
         ControllerLayerCmd::Rename { name, to } => {
+            let to = to.trim();
             let (path, meta) =
-                rename_controller_layer_for_game(&game_dir, controller, &name, &to, None)?;
+                rename_controller_layer_for_game(&game_dir, controller, &name, to, None)?;
             emit_layer(
                 json,
                 &path,

@@ -179,6 +179,73 @@ fn rename_remaps_nested_prefab_child_layer_override() {
 }
 
 #[test]
+fn rename_trims_new_layer_name_in_scene_overrides() {
+    let dir = tmp_game("trim-rename");
+    let mut project = GameProject::new("ctrl-layer-trim");
+    project.default_scene = "scenes/main.scene.json".into();
+    save_project(&dir, &project).unwrap();
+    write_animator_controller(&dir.join("assets"), "player", player_controller()).unwrap();
+
+    let mut scene = wiimaker_scene::Scene::new("main");
+    add_entity(&mut scene, "hero", &MutateOpts::default()).unwrap();
+    add_component_animator(&mut scene, "hero", "player").unwrap();
+    set_entity_animator_layer_weight(&mut scene, "hero", "Power", 0.55).unwrap();
+    save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+
+    rename_controller_layer_for_game(&dir, "player", "Power", " Upper ", None).unwrap();
+    let reloaded = load_scene(&dir.join("scenes/main.scene.json")).unwrap();
+    let anim = reloaded
+        .find_entity("hero")
+        .unwrap()
+        .components
+        .animator
+        .as_ref()
+        .unwrap();
+    assert!(anim
+        .layers
+        .iter()
+        .any(|l| l.name == "Upper" && (l.weight - 0.55).abs() < 1e-6));
+    assert!(!anim.layers.iter().any(|l| l.name == "Power" || l.name == " Upper "));
+
+    let meta = AnimatorControllerMeta::load(&dir.join("assets/player.controller.json")).unwrap();
+    assert!(meta.layers.iter().any(|l| l.name == "Upper"));
+}
+
+#[test]
+fn rename_keeps_renamed_layer_weight_when_target_override_exists() {
+    let dir = tmp_game("merge-weight");
+    let mut project = GameProject::new("ctrl-layer-merge");
+    project.default_scene = "scenes/main.scene.json".into();
+    save_project(&dir, &project).unwrap();
+    write_animator_controller(&dir.join("assets"), "player", player_controller()).unwrap();
+
+    let mut scene = wiimaker_scene::Scene::new("main");
+    add_entity(&mut scene, "hero", &MutateOpts::default()).unwrap();
+    add_component_animator(&mut scene, "hero", "player").unwrap();
+    set_entity_animator_layer_weight(&mut scene, "hero", "Power", 0.25).unwrap();
+    set_entity_animator_layer_weight(&mut scene, "hero", "Upper", 0.75).unwrap();
+    save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+
+    rename_controller_layer_for_game(&dir, "player", "Power", "Upper", None).unwrap();
+    let reloaded = load_scene(&dir.join("scenes/main.scene.json")).unwrap();
+    let anim = reloaded
+        .find_entity("hero")
+        .unwrap()
+        .components
+        .animator
+        .as_ref()
+        .unwrap();
+    let upper = anim
+        .layers
+        .iter()
+        .filter(|l| l.name == "Upper")
+        .collect::<Vec<_>>();
+    assert_eq!(upper.len(), 1);
+    assert!((upper[0].weight - 0.25).abs() < 1e-6);
+    assert!(!anim.layers.iter().any(|l| l.name == "Power"));
+}
+
+#[test]
 fn doctor_still_warns_on_unknown_scene_layer_override() {
     let dir = tmp_game("doctor-stale");
     let mut project = GameProject::new("ctrl-layer-doctor");

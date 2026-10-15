@@ -977,22 +977,33 @@ impl EditorApp {
                     }
                 }
                 AnimEdit::RenameLayer { from, to } => {
-                    match rename_controller_layer_for_game(
-                        &self.game_dir,
-                        stem,
-                        &from,
-                        &to,
-                        Some(&self.scene_path),
-                    ) {
-                        Ok(v) => {
-                            let n = remap_scene_animator_layer(&mut self.scene, stem, &from, &to);
-                            if n > 0 {
-                                self.dirty = true;
+                    let to = to.trim();
+                    if to.is_empty() {
+                        Err(anyhow::anyhow!("animator layer name must not be empty"))
+                    } else {
+                        let to = to.to_string();
+                        match rename_controller_layer_for_game(
+                            &self.game_dir,
+                            stem,
+                            &from,
+                            &to,
+                            Some(&self.scene_path),
+                        ) {
+                            Ok(v) => {
+                                let n = remap_scene_animator_layer(
+                                    &mut self.scene,
+                                    stem,
+                                    &from,
+                                    &to,
+                                );
+                                if n > 0 {
+                                    self.dirty = true;
+                                }
+                                self.animator_view.layer = to;
+                                Ok(v)
                             }
-                            self.animator_view.layer = to;
-                            Ok(v)
+                            Err(e) => Err(e),
                         }
-                        Err(e) => Err(e),
                     }
                 }
                 AnimEdit::Weight { name, weight } => {
