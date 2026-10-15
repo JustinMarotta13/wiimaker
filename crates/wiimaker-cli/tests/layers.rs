@@ -488,8 +488,56 @@ fn copy_dir(src: &Path, dst: &Path) {
 }
 
 #[test]
-fn doctor_warns_on_orphaned_scene_layer_weight_override_after_rename() {
-    let dir = tmp_game("orphan-override");
+fn animator_set_lowercase_base_stores_canonical_name() {
+    let dir = animator_game("base-case");
+    let game = dir.to_str().unwrap();
+    run(&[
+        "entity",
+        "animator-set",
+        game,
+        "--name",
+        "Player",
+        "--layer",
+        "base",
+        "--weight",
+        "0.75",
+        "--json",
+    ]);
+    run(&[
+        "entity",
+        "animator-set",
+        game,
+        "--name",
+        "Player",
+        "--layer",
+        "Base",
+        "--weight",
+        "0.5",
+        "--json",
+    ]);
+    let scene = fs::read_to_string(dir.join("scenes/main.scene.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&scene).unwrap();
+    let layers = v["entities"][0]["components"]["Animator"]["layers"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let bases: Vec<_> = layers
+        .iter()
+        .filter(|l| {
+            l["name"]
+                .as_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case("Base"))
+        })
+        .collect();
+    assert_eq!(bases.len(), 1, "{scene}");
+    assert_eq!(bases[0]["name"], "Base");
+    assert_eq!(bases[0]["weight"].as_f64().unwrap(), 0.5);
+    assert!(!scene.contains("\"name\": \"base\""));
+}
+
+#[test]
+fn controller_layer_rename_remaps_scene_overrides() {
+    let dir = tmp_game("remap-override");
     let game = dir.to_str().unwrap();
     run(&["asset", "anim", game, "walk", "--cells", "w0,w1", "--json"]);
     run(&["asset", "anim", game, "look", "--cells", "l0", "--json"]);
@@ -581,14 +629,28 @@ fn doctor_warns_on_orphaned_scene_layer_weight_override_after_rename() {
         "Face2",
         "--json",
     ]);
+    let scene = fs::read_to_string(dir.join("scenes/main.scene.json")).unwrap();
+    assert!(scene.contains("\"name\": \"Face2\""), "{scene}");
+    assert!(!scene.contains("\"name\": \"Head\""), "{scene}");
+    assert!(scene.contains("\"name\": \"Base\""), "{scene}");
     let after = run(&["doctor", game]);
     let text = String::from_utf8_lossy(&after.stdout);
-    assert!(
-        text.contains(
-            "scene 'main' entity 'Player': animator layer weight override 'Head' does not match any layer on controller 'player' (valid: Base, Face2)"
-        ),
-        "{text}"
-    );
-    // `base` (any case) is always valid.
+    assert!(!text.contains("does not match any layer"), "{text}");
+    assert!(!text.contains("override 'Head'"), "{text}");
     assert!(!text.contains("override 'base'"), "{text}");
+
+    run(&[
+        "asset",
+        "controller-layer",
+        game,
+        "player",
+        "remove",
+        "--name",
+        "Face2",
+        "--json",
+    ]);
+    let scene = fs::read_to_string(dir.join("scenes/main.scene.json")).unwrap();
+    assert!(!scene.contains("Face2"), "{scene}");
+    assert!(!scene.contains("\"name\": \"Head\""), "{scene}");
+    assert!(scene.contains("\"name\": \"Base\""), "{scene}");
 }

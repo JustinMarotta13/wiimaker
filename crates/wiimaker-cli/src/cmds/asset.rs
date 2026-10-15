@@ -6,9 +6,8 @@ use serde::Serialize;
 use wiimaker_assets::{
     add_controller_layer, add_controller_param, add_layer_transition, inspect_wav,
     layer_graph_view, list_anim_clips, list_animator_controllers, list_timelines, list_wav_clips,
-    move_layer_node, remove_controller_layer, remove_layer_state, remove_layer_transition,
-    rename_controller_layer, rename_layer_state,
-    resolve_wav, set_controller_layer_weight, set_controller_param_default, set_layer_default,
+    move_layer_node, remove_layer_state, remove_layer_transition, rename_layer_state, resolve_wav,
+    set_controller_layer_weight, set_controller_param_default, set_layer_default,
     set_layer_transition, set_sprite_pivot, slice_sheet, spawn_wav_player, write_anim_clip,
     write_animator_controller, write_layer_state, write_layer_state_blend_tree,
     write_layer_state_clip, write_timeline, AnimatorControllerMeta, BlendDimension, BlendMotion,
@@ -17,7 +16,9 @@ use wiimaker_assets::{
     TimelineMeta, TimelineTrack, TimelineTrackKind,
 };
 use wiimaker_scene::{
-    find_game_dir, load_project, remove_controller_param_for_game, rename_controller_param_for_game,
+    find_game_dir, load_project, remove_controller_layer_for_game,
+    remove_controller_param_for_game, rename_controller_layer_for_game,
+    rename_controller_param_for_game,
 };
 
 use crate::args::{AssetCmd, ControllerLayerCmd, ControllerParamCmd, TimelineCurveCmd};
@@ -619,7 +620,8 @@ fn controller_layer_cmd(
             )
         }
         ControllerLayerCmd::Remove { name } => {
-            let (path, meta) = remove_controller_layer(&assets, controller, &name)?;
+            let (path, meta) =
+                remove_controller_layer_for_game(&game_dir, controller, &name, None)?;
             emit_layer(
                 json,
                 &path,
@@ -629,7 +631,8 @@ fn controller_layer_cmd(
             )
         }
         ControllerLayerCmd::Rename { name, to } => {
-            let (path, meta) = rename_controller_layer(&assets, controller, &name, &to)?;
+            let (path, meta) =
+                rename_controller_layer_for_game(&game_dir, controller, &name, &to, None)?;
             emit_layer(
                 json,
                 &path,
@@ -905,7 +908,8 @@ fn controller_param_cmd(
             (path, meta, format!("renamed parameter {name} → {to}"))
         }
         ControllerParamCmd::Remove { name } => {
-            let (path, meta) = remove_controller_param_for_game(&game_dir, controller, &name, None)?;
+            let (path, meta) =
+                remove_controller_param_for_game(&game_dir, controller, &name, None)?;
             (path, meta, format!("removed parameter {name}"))
         }
         ControllerParamCmd::SetDefault { name, value } => {

@@ -724,18 +724,55 @@ pub fn add_controller_layer(
     })
 }
 
+/// Drop an override layer in memory. `Base` is not in `layers[]`.
+pub fn apply_remove_controller_layer(
+    meta: &mut AnimatorControllerMeta,
+    controller: &str,
+    name: &str,
+) -> Result<()> {
+    let before = meta.layers.len();
+    meta.layers.retain(|l| l.name != name);
+    if meta.layers.len() == before {
+        bail!("animator controller '{controller}' has no layer '{name}'");
+    }
+    Ok(())
+}
+
+/// Rename an override layer in memory.
+pub fn apply_rename_controller_layer(
+    meta: &mut AnimatorControllerMeta,
+    controller: &str,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    let to = to.trim();
+    if to.is_empty() {
+        bail!("animator layer name must not be empty");
+    }
+    if is_base_layer_name(to) {
+        bail!("animator layer name '{to}' is reserved for the base layer");
+    }
+    if meta
+        .layers
+        .iter()
+        .any(|l| l.name.eq_ignore_ascii_case(to) && l.name != from)
+    {
+        bail!("animator controller '{controller}' already has layer '{to}'");
+    }
+    let Some(layer) = meta.layers.iter_mut().find(|l| l.name == from) else {
+        bail!("animator controller '{controller}' has no layer '{from}'");
+    };
+    layer.name = to.to_string();
+    Ok(())
+}
+
 pub fn remove_controller_layer(
     assets_dir: &Path,
     controller: &str,
     name: &str,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
     edit_controller(assets_dir, controller, |meta| {
-        let before = meta.layers.len();
-        meta.layers.retain(|l| l.name != name);
-        if meta.layers.len() == before {
-            bail!("animator controller '{controller}' has no layer '{name}'");
-        }
-        Ok(())
+        apply_remove_controller_layer(meta, controller, name)
     })
 }
 
@@ -745,26 +782,8 @@ pub fn rename_controller_layer(
     from: &str,
     to: &str,
 ) -> Result<(PathBuf, AnimatorControllerMeta)> {
-    let to = to.trim();
-    if to.is_empty() {
-        bail!("animator layer name must not be empty");
-    }
-    if is_base_layer_name(to) {
-        bail!("animator layer name '{to}' is reserved for the base layer");
-    }
     edit_controller(assets_dir, controller, |meta| {
-        if meta
-            .layers
-            .iter()
-            .any(|l| l.name.eq_ignore_ascii_case(to) && l.name != from)
-        {
-            bail!("animator controller '{controller}' already has layer '{to}'");
-        }
-        let Some(layer) = meta.layers.iter_mut().find(|l| l.name == from) else {
-            bail!("animator controller '{controller}' has no layer '{from}'");
-        };
-        layer.name = to.to_string();
-        Ok(())
+        apply_rename_controller_layer(meta, controller, from, to)
     })
 }
 

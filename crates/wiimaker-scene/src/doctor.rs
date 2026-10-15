@@ -641,7 +641,7 @@ fn check_blend_tree(
 }
 
 /// Scene Animator per-layer weight overrides must name `Base` (any case) or a layer
-/// the controller still has. A `controller-layer rename` / `remove` orphans them.
+/// the controller still has. Rename/remove remap overrides; leftover unknown names warn.
 fn check_animator_layer_overrides(
     scene: &Scene,
     assets: &Path,

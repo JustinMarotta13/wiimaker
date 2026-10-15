@@ -6,10 +6,11 @@
 use anyhow::Result;
 use eframe::egui::{self, RichText};
 use wiimaker_assets::{
-    add_controller_layer, remove_controller_layer, set_controller_layer_weight,
-    write_layer_state_blend_tree, write_layer_state_clip, BlendDimension, BlendMotion,
-    BlendTreeMeta, ControllerParamType, ControllerState, BASE_LAYER_NAME,
+    add_controller_layer, set_controller_layer_weight, write_layer_state_blend_tree,
+    write_layer_state_clip, BlendDimension, BlendMotion, BlendTreeMeta, ControllerParamType,
+    ControllerState, BASE_LAYER_NAME,
 };
+use wiimaker_scene::{remove_controller_layer_for_game, remove_scene_animator_layer};
 
 use crate::app::EditorApp;
 use crate::theme;
@@ -304,10 +305,22 @@ impl EditorApp {
             )),
             Some(ControllerEdit::RemoveLayer { name }) => {
                 ui.data_mut(|d| d.insert_temp(layer_id, BASE_LAYER_NAME.to_string()));
-                Some((
-                    name.clone(),
-                    remove_controller_layer(&assets, &stem, &name).map(|_| ()),
-                ))
+                let result = match remove_controller_layer_for_game(
+                    &self.game_dir,
+                    &stem,
+                    &name,
+                    Some(&self.scene_path),
+                ) {
+                    Ok(_) => {
+                        let n = remove_scene_animator_layer(&mut self.scene, &stem, &name);
+                        if n > 0 {
+                            self.dirty = true;
+                        }
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                };
+                Some((name.clone(), result))
             }
             Some(ControllerEdit::Weight { name, weight }) => Some((
                 name.clone(),
