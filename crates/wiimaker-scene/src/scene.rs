@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use wiimaker_assets::atomic_write;
+use wiimaker_assets::{atomic_write, BASE_LAYER_NAME};
 use wiimaker_core::color::Rgba8;
 use wiimaker_core::math::{Quat, Vec2, Vec3};
 use wiimaker_core::world::Transform;
@@ -904,6 +904,34 @@ impl SceneAnimator {
     }
 
     pub fn set_layer_weight(&mut self, name: &str, weight: f32) {
+        // PT-A: any ASCII case of "Base" stores exactly BASE_LAYER_NAME and
+        // merges into a single entry so `--layer base` cannot duplicate `Base`.
+        if name.eq_ignore_ascii_case(BASE_LAYER_NAME) {
+            if let Some(layer) = self
+                .layers
+                .iter_mut()
+                .find(|l| l.name.eq_ignore_ascii_case(BASE_LAYER_NAME))
+            {
+                layer.name = BASE_LAYER_NAME.to_string();
+                layer.weight = weight;
+            } else {
+                self.layers.push(SceneAnimatorLayer {
+                    name: BASE_LAYER_NAME.to_string(),
+                    weight,
+                });
+            }
+            let mut seen_base = false;
+            self.layers.retain(|l| {
+                if l.name.eq_ignore_ascii_case(BASE_LAYER_NAME) {
+                    if seen_base {
+                        return false;
+                    }
+                    seen_base = true;
+                }
+                true
+            });
+            return;
+        }
         if let Some(layer) = self.layers.iter_mut().find(|l| l.name == name) {
             layer.weight = weight;
             return;
@@ -1303,7 +1331,8 @@ pub fn load_scene(path: &Path) -> Result<Scene> {
 
 pub fn save_scene(path: &Path, scene: &Scene) -> Result<()> {
     let text = serde_json::to_string_pretty(scene)?;
-    atomic_write(path, (text + "\n").as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    atomic_write(path, (text + "\n").as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -1314,7 +1343,8 @@ pub fn load_prefab(path: &Path) -> Result<Prefab> {
 
 pub fn save_prefab(path: &Path, prefab: &Prefab) -> Result<()> {
     let text = serde_json::to_string_pretty(prefab)?;
-    atomic_write(path, (text + "\n").as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    atomic_write(path, (text + "\n").as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 

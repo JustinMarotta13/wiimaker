@@ -3,6 +3,7 @@
 mod animate;
 mod authoring_remap;
 mod collider;
+mod controller_layer;
 mod controller_param;
 mod doctor;
 mod gizmo;
@@ -21,13 +22,17 @@ mod wscn;
 mod wscn_anim;
 
 pub use animate::{animate_world, apply_animation_frame};
-pub use controller_param::{
-    remove_controller_param_for_game, remove_entity_animator_param, remove_scene_animator_param,
-    remap_entity_animator_param, remap_scene_animator_param, rename_controller_param_for_game,
-};
 pub use collider::{
     add_component_collider, entities_overlap, entity_overlaps, entity_triggers_entered,
     remove_component_collider,
+};
+pub use controller_layer::{
+    remap_entity_animator_layer, remap_scene_animator_layer, remove_controller_layer_for_game,
+    remove_entity_animator_layer, remove_scene_animator_layer, rename_controller_layer_for_game,
+};
+pub use controller_param::{
+    remap_entity_animator_param, remap_scene_animator_param, remove_controller_param_for_game,
+    remove_entity_animator_param, remove_scene_animator_param, rename_controller_param_for_game,
 };
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use gizmo::{constrain_translate, MoveHandleLayout, TranslateHandle};

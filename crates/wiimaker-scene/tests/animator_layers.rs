@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use wiimaker_assets::{
     write_anim_clip, write_animator_controller, AnimClipCatalog, AnimatorControllerCatalog,
     AnimatorControllerMeta, ControllerCondition, ControllerLayer, ControllerParam,
-    ControllerParamType, ControllerState, ControllerTransition,
+    ControllerParamType, ControllerState, ControllerTransition, BASE_LAYER_NAME,
 };
 use wiimaker_scene::{
     add_component_animator, add_entity, diagnose, hydrate_with_all_catalogs, save_project,
@@ -127,6 +127,35 @@ fn scene_layer_weight_rejects_non_finite_without_touching_scene() {
     let world = world_for(&dir);
     let id = world.find_by_name("Player").unwrap();
     assert_eq!(world.animator(id).unwrap().layer_weight(1), Some(0.5));
+}
+
+#[test]
+fn lowercase_base_layer_weight_stores_as_base_once() {
+    let mut scene = Scene::new("main");
+    add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
+    add_component_animator(&mut scene, "Player", "player").unwrap();
+    set_entity_animator_layer_weight(&mut scene, "Player", "Base", 1.0).unwrap();
+    set_entity_animator_layer_weight(&mut scene, "Player", "base", 0.25).unwrap();
+    set_entity_animator_layer_weight(&mut scene, "Player", "BASE", 0.5).unwrap();
+    let anim = scene
+        .find_entity("Player")
+        .unwrap()
+        .components
+        .animator
+        .as_ref()
+        .unwrap();
+    let bases: Vec<_> = anim
+        .layers
+        .iter()
+        .filter(|l| l.name.eq_ignore_ascii_case(BASE_LAYER_NAME))
+        .collect();
+    assert_eq!(bases.len(), 1, "{:?}", anim.layers);
+    assert_eq!(bases[0].name, BASE_LAYER_NAME);
+    assert_eq!(bases[0].weight, 0.5);
+    assert!(!anim
+        .layers
+        .iter()
+        .any(|l| l.name == "base" || l.name == "BASE"));
 }
 
 #[test]

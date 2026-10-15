@@ -5,20 +5,20 @@
 use eframe::egui::{
     self, pos2, Align2, Color32, FontId, PointerButton, Pos2, Rect, RichText, Sense, Stroke, Vec2,
 };
-use wiimaker_scene::{
-    remove_controller_param_for_game, remove_scene_animator_param, remap_scene_animator_param,
-    rename_controller_param_for_game,
-};
 use wiimaker_assets::{
     add_controller_layer, add_controller_param, add_layer_transition, arrow_head, hit_node,
     hit_transition, is_any_state, is_base_layer_name, layout_layer, move_layer_node,
-    remove_controller_layer, remove_layer_state, remove_layer_transition, rename_controller_layer,
-    rename_layer_state,
-    set_controller_layer_weight, set_controller_param_default, set_layer_default,
-    set_layer_transition, unique_label, write_layer_state, write_layer_state_blend_tree,
-    write_layer_state_clip, AnimatorControllerMeta, BlendDimension, BlendTreeMeta,
-    ControllerCondition, ControllerParam, ControllerParamType, ControllerTransition, GraphNode,
-    GraphNodeId, BASE_LAYER_NAME, TRANSITION_SLOP,
+    remove_layer_state, remove_layer_transition, rename_layer_state, set_controller_layer_weight,
+    set_controller_param_default, set_layer_default, set_layer_transition, unique_label,
+    write_layer_state, write_layer_state_blend_tree, write_layer_state_clip,
+    AnimatorControllerMeta, BlendDimension, BlendTreeMeta, ControllerCondition, ControllerParam,
+    ControllerParamType, ControllerTransition, GraphNode, GraphNodeId, BASE_LAYER_NAME,
+    TRANSITION_SLOP,
+};
+use wiimaker_scene::{
+    remap_scene_animator_layer, remap_scene_animator_param, remove_controller_layer_for_game,
+    remove_controller_param_for_game, remove_scene_animator_layer, remove_scene_animator_param,
+    rename_controller_layer_for_game, rename_controller_param_for_game,
 };
 
 use crate::app::{EditorApp, PlayMode};
@@ -957,8 +957,17 @@ impl EditorApp {
                     }
                 }
                 AnimEdit::RemoveLayer(name) => {
-                    match remove_controller_layer(&assets, stem, &name) {
+                    match remove_controller_layer_for_game(
+                        &self.game_dir,
+                        stem,
+                        &name,
+                        Some(&self.scene_path),
+                    ) {
                         Ok(v) => {
+                            let n = remove_scene_animator_layer(&mut self.scene, stem, &name);
+                            if n > 0 {
+                                self.dirty = true;
+                            }
                             if self.animator_view.layer == name {
                                 self.animator_view.layer = BASE_LAYER_NAME.into();
                             }
@@ -968,12 +977,33 @@ impl EditorApp {
                     }
                 }
                 AnimEdit::RenameLayer { from, to } => {
-                    match rename_controller_layer(&assets, stem, &from, &to) {
-                        Ok(v) => {
-                            self.animator_view.layer = to;
-                            Ok(v)
+                    let to = to.trim();
+                    if to.is_empty() {
+                        Err(anyhow::anyhow!("animator layer name must not be empty"))
+                    } else {
+                        let to = to.to_string();
+                        match rename_controller_layer_for_game(
+                            &self.game_dir,
+                            stem,
+                            &from,
+                            &to,
+                            Some(&self.scene_path),
+                        ) {
+                            Ok(v) => {
+                                let n = remap_scene_animator_layer(
+                                    &mut self.scene,
+                                    stem,
+                                    &from,
+                                    &to,
+                                );
+                                if n > 0 {
+                                    self.dirty = true;
+                                }
+                                self.animator_view.layer = to;
+                                Ok(v)
+                            }
+                            Err(e) => Err(e),
                         }
-                        Err(e) => Err(e),
                     }
                 }
                 AnimEdit::Weight { name, weight } => {
