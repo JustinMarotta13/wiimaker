@@ -6,11 +6,12 @@ use std::path::PathBuf;
 use wiimaker_assets::{
     write_anim_clip, write_animator_controller, AnimClipCatalog, AnimatorControllerCatalog,
     AnimatorControllerMeta, ControllerCondition, ControllerLayer, ControllerParam,
-    ControllerParamType, ControllerState, ControllerTransition, BASE_LAYER_NAME,
+    ControllerParamType, ControllerState, ControllerTransition, SpriteCatalog, BASE_LAYER_NAME,
 };
 use wiimaker_scene::{
-    add_component_animator, add_entity, diagnose, hydrate_with_all_catalogs, save_project,
-    save_scene, set_entity_animator_layer_weight, GameProject, MutateOpts, Scene, TextureMap,
+    add_component_animator, add_entity, animate_world, diagnose, hydrate_with_all_catalogs,
+    remove_controller_layer_for_game, save_project, save_scene, set_entity_animator_layer_weight,
+    GameProject, MutateOpts, Scene, TextureMap,
 };
 
 fn tmp_game(label: &str) -> PathBuf {
@@ -235,4 +236,103 @@ fn doctor_warns_on_layer_problems() {
     assert!(has("default 'Nope' is not a state"), "{msgs:?}");
     assert!(has("clip 'missing' missing"), "{msgs:?}");
     assert!(has("transition param 'Ghost' is not declared"), "{msgs:?}");
+}
+
+#[test]
+fn override_exit_time_waits_for_clip_then_fires() {
+    let dir = tmp_game("exit-time");
+    let assets = dir.join("assets");
+    for (name, cells) in [
+        ("walk", vec!["w0".into(), "w1".into()]),
+        ("aim", vec!["a0".into(), "a1".into()]),
+        ("shoot", vec!["s0".into()]),
+    ] {
+        write_anim_clip(&assets, name, cells, 10.0, true).unwrap();
+    }
+    let meta = AnimatorControllerMeta {
+        default_state: "Walk".into(),
+        parameters: vec![ControllerParam {
+            name: "Fire".into(),
+            kind: ControllerParamType::Bool,
+            default: Some(serde_json::json!(false)),
+        }],
+        states: vec![ControllerState::plain("Walk", "walk")],
+        transitions: vec![],
+        weight: 1.0,
+        layers: vec![ControllerLayer {
+            name: "UpperBody".into(),
+            weight: 1.0,
+            default_state: "Aim".into(),
+            states: vec![
+                ControllerState::plain("Aim", "aim"),
+                ControllerState::plain("Shoot", "shoot"),
+            ],
+            transitions: vec![ControllerTransition {
+                from: "Aim".into(),
+                to: "Shoot".into(),
+                conditions: vec![ControllerCondition {
+                    param: "Fire".into(),
+                    equals: Some(serde_json::json!(true)),
+                    ..Default::default()
+                }],
+                has_exit_time: true,
+            }],
+            graph: Default::default(),
+        }],
+        graph: Default::default(),
+    };
+    write_animator_controller(&assets, "player", meta).unwrap();
+    let mut scene = Scene::new("main");
+    add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
+    add_component_animator(&mut scene, "Player", "player").unwrap();
+    save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+
+    let mut world = world_for(&dir);
+    let id = world.find_by_name("Player").unwrap();
+    assert_eq!(world.animation(id).unwrap().clip, "aim");
+    assert!(world.set_animator_bool(id, "Fire", true));
+    let catalog = SpriteCatalog::empty();
+    let textures = TextureMap::new();
+    animate_world(&mut world, &catalog, &textures, 0.05);
+    assert_eq!(world.animator(id).unwrap().layer_state_name(1), Some("Aim"));
+    assert_eq!(world.animation(id).unwrap().clip, "aim");
+    animate_world(&mut world, &catalog, &textures, 0.16);
+    assert_eq!(
+        world.animator(id).unwrap().layer_state_name(1),
+        Some("Shoot")
+    );
+    assert_eq!(world.animation(id).unwrap().clip, "shoot");
+}
+
+#[test]
+fn removing_winning_override_rehydrates_onto_base() {
+    let dir = tmp_game("drop-layer");
+    let assets = dir.join("assets");
+    for (name, cell) in [("walk", "w0"), ("aim", "a0")] {
+        write_anim_clip(&assets, name, vec![cell.into()], 8.0, true).unwrap();
+    }
+    write_animator_controller(&assets, "player", controller()).unwrap();
+    let mut project = GameProject::new("layers");
+    project.default_scene = "scenes/main.scene.json".into();
+    save_project(&dir, &project).unwrap();
+    let mut scene = Scene::new("main");
+    add_entity(&mut scene, "Player", &MutateOpts::default()).unwrap();
+    add_component_animator(&mut scene, "Player", "player").unwrap();
+    save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+
+    let world = world_for(&dir);
+    let id = world.find_by_name("Player").unwrap();
+    assert_eq!(world.animation(id).unwrap().clip, "aim");
+    assert_eq!(world.animator(id).unwrap().playback_layer(), Some(1));
+    assert_eq!(world.animator(id).unwrap().layer_count(), 2);
+
+    remove_controller_layer_for_game(&dir, "player", "UpperBody", None).unwrap();
+    let world = world_for(&dir);
+    let id = world.find_by_name("Player").unwrap();
+    assert_eq!(world.animator(id).unwrap().layer_count(), 1);
+    assert_eq!(world.animator(id).unwrap().winning_layer(), 0);
+    assert_eq!(world.animator(id).unwrap().playback_layer(), Some(0));
+    assert_eq!(world.animation(id).unwrap().clip, "walk");
+    assert_eq!(world.animation(id).unwrap().frame, 0);
+    assert_eq!(world.animation(id).unwrap().time, 0.0);
 }

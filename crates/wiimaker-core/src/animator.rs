@@ -1337,6 +1337,173 @@ mod tests {
     }
 
     #[test]
+    fn non_winning_layer_becoming_winner_resets_clip_to_frame_zero() {
+        let mut a = walk_aim();
+        a.layers[0].weight = 0.0;
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(a));
+        world.apply_animator_state(id, "Walk");
+        assert_eq!(world.animator(id).unwrap().playback_layer(), Some(0));
+
+        world.set_animator_trigger(id, "Fire");
+        world.tick_animators(0.0);
+        assert_eq!(
+            world.animator(id).unwrap().layer_state_name(1),
+            Some("Shoot")
+        );
+        assert_eq!(world.animator(id).unwrap().state, "Idle");
+        assert_eq!(world.animation(id).unwrap().clip, "idle");
+        assert_eq!(world.animator(id).unwrap().playback_layer(), Some(0));
+
+        {
+            let anim = world.animation_mut(id).unwrap();
+            anim.time = 0.08;
+            anim.frame = 1;
+        }
+
+        world.set_animator_layer_weight(id, "UpperBody", 1.0);
+        let anim = world.animation(id).unwrap();
+        assert_eq!(anim.clip, "shoot");
+        assert_eq!(anim.frame, 0);
+        assert_eq!(anim.time, 0.0);
+        assert_eq!(world.animator(id).unwrap().playback_layer(), Some(1));
+        assert_eq!(world.animator(id).unwrap().winning_layer(), 1);
+    }
+
+    fn clip_state_timed(name: &str, clip: &str, cells: usize, fps: f32) -> AnimatorState {
+        AnimatorState {
+            name: name.into(),
+            clip: clip.into(),
+            speed: 1.0,
+            cells: (0..cells).map(|i| format!("{clip}_{i}")).collect(),
+            fps,
+            loop_: true,
+            blend: None,
+        }
+    }
+
+    #[test]
+    fn override_layer_exit_time_waits_for_clip_duration() {
+        let mut a = Animator::new("player");
+        a.state = "Walk".into();
+        a.states.push(clip_state("Walk", "walk"));
+        a.parameters.push(AnimatorParam::bool_param("Fire", false));
+        a.layers.push(AnimatorLayer {
+            name: "UpperBody".into(),
+            weight: 1.0,
+            state: "Aim".into(),
+            state_time: 0.0,
+            states: vec![
+                clip_state_timed("Aim", "aim", 2, 10.0),
+                clip_state("Shoot", "shoot"),
+            ],
+            transitions: vec![AnimatorTransition {
+                from: "Aim".into(),
+                from_any: false,
+                to: "Shoot".into(),
+                conditions: vec![AnimatorCondition::BoolEq {
+                    param: "Fire".into(),
+                    value: true,
+                }],
+                has_exit_time: true,
+            }],
+        });
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(a));
+        world.apply_animator_state(id, "Walk");
+        assert_eq!(world.animation(id).unwrap().clip, "aim");
+        world.set_animator_bool(id, "Fire", true);
+        world.tick_animators(0.05);
+        assert_eq!(world.animator(id).unwrap().layer_state_name(1), Some("Aim"));
+        assert_eq!(world.animation(id).unwrap().clip, "aim");
+        world.tick_animators(0.16);
+        assert_eq!(
+            world.animator(id).unwrap().layer_state_name(1),
+            Some("Shoot")
+        );
+        assert_eq!(world.animation(id).unwrap().clip, "shoot");
+        assert_eq!(world.animation(id).unwrap().frame, 0);
+        assert_eq!(world.animation(id).unwrap().time, 0.0);
+    }
+
+    #[test]
+    fn dropping_winning_layer_falls_back_and_resets_stale_playback() {
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(walk_aim()));
+        world.apply_animator_state(id, "Walk");
+        assert_eq!(world.animator(id).unwrap().playback_layer(), Some(1));
+        assert_eq!(world.animation(id).unwrap().clip, "aim");
+        {
+            let anim = world.animation_mut(id).unwrap();
+            anim.time = 0.05;
+            anim.frame = 1;
+        }
+
+        world.animator_mut(id).unwrap().layers.clear();
+        assert_eq!(world.animator(id).unwrap().playback_layer(), Some(1));
+        world.tick_animators(0.0);
+        let a = world.animator(id).unwrap();
+        assert_eq!(a.layer_count(), 1);
+        assert_eq!(a.winning_layer(), 0);
+        assert_eq!(a.playback_layer(), Some(0));
+        let anim = world.animation(id).unwrap();
+        assert_eq!(anim.clip, "walk");
+        assert_eq!(anim.frame, 0);
+        assert_eq!(anim.time, 0.0);
+    }
+
+    #[test]
+    fn override_blend_tree_keeps_phase_across_motion_switch() {
+        let mut a = Animator::new("player");
+        a.state = "Walk".into();
+        a.states.push(clip_state("Walk", "walk"));
+        a.parameters.push(AnimatorParam::float_param("Speed", 0.0));
+        a.layers.push(AnimatorLayer {
+            name: "UpperBody".into(),
+            weight: 1.0,
+            state: "Locomotion".into(),
+            state_time: 0.0,
+            states: vec![AnimatorState {
+                name: "Locomotion".into(),
+                clip: String::new(),
+                speed: 1.0,
+                cells: Vec::new(),
+                fps: 10.0,
+                loop_: true,
+                blend: Some(BlendTree::new(
+                    BlendDimension::OneD,
+                    vec!["Speed".into()],
+                    vec![
+                        blend_motion("idle", 0.0, [0.0, 0.0], &["i0", "i1"]),
+                        blend_motion("walk", 1.0, [0.0, 0.0], &["w0", "w1"]),
+                    ],
+                )),
+            }],
+            transitions: Vec::new(),
+        });
+        let mut world = World::new();
+        let id = world.spawn(Transform::default());
+        world.set_animator(id, Some(a));
+        world.apply_animator_state(id, "Walk");
+        assert_eq!(world.animation(id).unwrap().clip, "idle");
+        assert_eq!(world.animator(id).unwrap().playback_layer(), Some(1));
+        world.animation_mut(id).unwrap().time = 0.1;
+        world.set_animator_float(id, "Speed", 1.0);
+        world.tick_animators(0.0);
+        let anim = world.animation(id).unwrap();
+        assert_eq!(anim.clip, "walk");
+        assert!(
+            (anim.time - 0.1).abs() < 1e-5,
+            "phase reset on motion switch: time {}",
+            anim.time
+        );
+        assert_eq!(world.animator(id).unwrap().playback_layer(), Some(1));
+    }
+
+    #[test]
     fn layer_normalized_time_wraps_a_looping_clip() {
         let mut a = walk_aim();
         a.state_time = 0.0625;
