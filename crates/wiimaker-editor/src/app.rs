@@ -1986,6 +1986,7 @@ impl eframe::App for EditorApp {
         self.flush_prefs();
 
         self.frame_i = self.frame_i.saturating_add(1);
+        self.maybe_capture_shot(ctx);
         if let Ok(n) = std::env::var("WIIMAKER_EDITOR_EXIT_FRAMES") {
             if let Ok(n) = n.parse::<u32>() {
                 if self.frame_i > n {
@@ -1996,4 +1997,54 @@ impl eframe::App for EditorApp {
 
         ctx.request_repaint();
     }
+}
+
+impl EditorApp {
+    /// `WIIMAKER_EDITOR_SHOT=path.png` grabs the window after layout and exits.
+    fn maybe_capture_shot(&mut self, ctx: &egui::Context) {
+        let Ok(path) = std::env::var("WIIMAKER_EDITOR_SHOT") else {
+            return;
+        };
+        if path.is_empty() {
+            return;
+        }
+        if self.frame_i == 24 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        }
+        let image = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        if let Some(image) = image {
+            match save_screenshot(&path, &image) {
+                Ok(()) => eprintln!("screenshot wrote {path}"),
+                Err(e) => eprintln!("screenshot failed: {e:#}"),
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if self.frame_i > 90 {
+            eprintln!("screenshot timed out");
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+}
+
+fn save_screenshot(path: &str, image: &egui::ColorImage) -> Result<()> {
+    let mut bytes = Vec::with_capacity(image.pixels.len() * 4);
+    for p in &image.pixels {
+        bytes.push(p.r());
+        bytes.push(p.g());
+        bytes.push(p.b());
+        bytes.push(p.a());
+    }
+    let img = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, bytes)
+        .context("screenshot buffer size")?;
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    img.save(path).with_context(|| format!("write {path}"))?;
+    Ok(())
 }

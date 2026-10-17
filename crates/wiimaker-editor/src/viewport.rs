@@ -10,8 +10,8 @@ use wiimaker_scene::{
     rotate_point_about, rotation_after_drag, scale_factors, scale_point_about, scene_blit_rect,
     screen_axis_dirs, set_entity_rotation_z, set_entity_scale, set_entity_world_xy,
     sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell, union_aabbs, GameViewAspect,
-    GameViewPreset, HandlePosition, HandleRotation, MoveHandleLayout, RotateHandle,
-    RotateHandleLayout, ScaleHandle, ScaleHandleLayout, Scene, TranslateHandle,
+    GameViewPreset, HandlePosition, HandleRotation, MoveHandleLayout, RotateHandleLayout,
+    ScaleHandle, ScaleHandleLayout, Scene, TranslateHandle,
 };
 
 use crate::app::{
@@ -24,7 +24,8 @@ use crate::theme;
 enum ToolHit {
     Move(TranslateHandle),
     Scale(ScaleHandle),
-    Rotate(RotateHandle),
+    /// Z ring or the faint outer ring. Both sweep Z in 2D.
+    Rotate,
 }
 
 pub(crate) const VIEW_W: usize = 640;
@@ -534,7 +535,7 @@ impl EditorApp {
                     ToolHit::Move(TranslateHandle::Free) | ToolHit::Scale(ScaleHandle::Uniform) => {
                         egui::CursorIcon::Move
                     }
-                    ToolHit::Rotate(_) => egui::CursorIcon::Alias,
+                    ToolHit::Rotate => egui::CursorIcon::Alias,
                 };
                 response.ctx.set_cursor_icon(icon);
             }
@@ -574,7 +575,7 @@ impl EditorApp {
                             match hit {
                                 ToolHit::Move(h) => (name, grab, h, ScaleHandle::Uniform),
                                 ToolHit::Scale(h) => (name, grab, TranslateHandle::Free, h),
-                                ToolHit::Rotate(_) => {
+                                ToolHit::Rotate => {
                                     (name, grab, TranslateHandle::Free, ScaleHandle::Uniform)
                                 }
                             }
@@ -862,7 +863,7 @@ impl EditorApp {
             EditTool::Scale => ScaleHandleLayout::oriented(o, x_dir, y_dir)
                 .hit(p)
                 .map(ToolHit::Scale),
-            EditTool::Rotate => RotateHandleLayout::at(o).hit(p).map(ToolHit::Rotate),
+            EditTool::Rotate => RotateHandleLayout::at(o).hit(p).map(|_| ToolHit::Rotate),
             _ => None,
         }
     }
@@ -1330,10 +1331,10 @@ fn paint_rotate_handles(
     fan.push([origin.x, origin.y]);
     fan.extend(arc.iter().copied());
     let fill = egui::Color32::from_rgba_unmultiplied(
-        theme::AXIS_Z.r(),
-        theme::AXIS_Z.g(),
-        theme::AXIS_Z.b(),
-        70,
+        theme::HANDLE_HOT.r(),
+        theme::HANDLE_HOT.g(),
+        theme::HANDLE_HOT.b(),
+        110,
     );
     // Fan may exceed 180°, so draw it as a triangle list instead of one convex polygon.
     for w in fan.windows(2).skip(1) {
