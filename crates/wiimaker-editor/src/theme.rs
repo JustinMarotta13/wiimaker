@@ -4,8 +4,8 @@
 //! Geometric stand-ins only — no trademarked Unity icons.
 
 use eframe::egui::{
-    self, style::ScrollStyle, Color32, Frame, Margin, RichText, Rounding, Sense,
-    Shadow, Shape, Stroke, Vec2, Visuals,
+    self, style::ScrollStyle, Color32, Frame, Margin, RichText, Rounding, Sense, Shadow, Shape,
+    Stroke, Vec2, Visuals,
 };
 
 /// Workspace behind the Scene/Game well (Unity Pro ~#191919).
@@ -46,6 +46,8 @@ pub const WARN_OUTLINE: Color32 = Color32::from_rgb(255, 200, 64);
 pub const AXIS_X: Color32 = Color32::from_rgb(219, 62, 62);
 pub const AXIS_Y: Color32 = Color32::from_rgb(90, 168, 62);
 pub const AXIS_Z: Color32 = Color32::from_rgb(86, 156, 214);
+/// Unity handle hover / active (yellow).
+pub const HANDLE_HOT: Color32 = Color32::from_rgb(255, 238, 4);
 
 pub fn apply(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
@@ -351,11 +353,8 @@ pub fn dock_tabs<T: Copy + PartialEq>(ui: &mut egui::Ui, tabs: &[(&str, T)], cur
         }
     });
     let y = ui.cursor().top() - 1.0;
-    ui.painter().hline(
-        ui.max_rect().x_range(),
-        y,
-        Stroke::new(1.0, BORDER),
-    );
+    ui.painter()
+        .hline(ui.max_rect().x_range(), y, Stroke::new(1.0, BORDER));
     ui.add_space(4.0);
     selected
 }
@@ -377,8 +376,16 @@ pub fn paint_cube(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = Stroke::new(1.0_f32, color);
     let top_fill = Color32::from_rgb(92, 92, 92);
     let front_fill = Color32::from_rgb(48, 48, 48);
-    painter.add(Shape::convex_polygon(vec![p3, p2, p1, p0], top_fill, stroke));
-    painter.add(Shape::convex_polygon(vec![p0, p1, p5, p4], front_fill, stroke));
+    painter.add(Shape::convex_polygon(
+        vec![p3, p2, p1, p0],
+        top_fill,
+        stroke,
+    ));
+    painter.add(Shape::convex_polygon(
+        vec![p0, p1, p5, p4],
+        front_fill,
+        stroke,
+    ));
 }
 
 pub fn cube_icon(ui: &mut egui::Ui, size: f32, color: Color32) {
@@ -452,8 +459,11 @@ pub fn enable_checkbox(ui: &mut egui::Ui, checked: bool) -> egui::Response {
     let inner = rect.shrink(1.0);
     ui.painter()
         .rect_filled(inner, Rounding::same(2.0), BG_SUNKEN);
-    ui.painter()
-        .rect_stroke(inner, Rounding::same(2.0), Stroke::new(1.0_f32, BORDER_SOFT));
+    ui.painter().rect_stroke(
+        inner,
+        Rounding::same(2.0),
+        Stroke::new(1.0_f32, BORDER_SOFT),
+    );
     if checked {
         let r = inner.shrink(2.5);
         ui.painter().line_segment(
@@ -508,11 +518,8 @@ pub fn icon_menu_button<R>(
         }
         MenuIcon::Kebab => {
             if hovered {
-                ui.painter().rect_filled(
-                    rect,
-                    Rounding::same(2.0),
-                    Color32::from_white_alpha(16),
-                );
+                ui.painter()
+                    .rect_filled(rect, Rounding::same(2.0), Color32::from_white_alpha(16));
             }
             paint_kebab(ui.painter(), rect, TEXT_MUTED);
         }
@@ -578,11 +585,7 @@ pub fn component_card_header_ov(
                     toggle = Some(!en);
                 }
             }
-            let title_color = if overridden {
-                PREFAB_OVERRIDE
-            } else {
-                TEXT
-            };
+            let title_color = if overridden { PREFAB_OVERRIDE } else { TEXT };
             ui.label(RichText::new(title).strong().size(13.0).color(title_color));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if removable {
@@ -617,9 +620,18 @@ pub enum PlayBtn {
 }
 
 /// Geometric Play / Pause / Stop — no Unity glyphs.
-pub fn play_control(ui: &mut egui::Ui, kind: PlayBtn, active: bool, enabled: bool) -> egui::Response {
+pub fn play_control(
+    ui: &mut egui::Ui,
+    kind: PlayBtn,
+    active: bool,
+    enabled: bool,
+) -> egui::Response {
     let size = egui::vec2(30.0, 22.0);
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
     let (rect, mut resp) = ui.allocate_exact_size(size, sense);
     if enabled {
         resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -633,8 +645,7 @@ pub fn play_control(ui: &mut egui::Ui, kind: PlayBtn, active: bool, enabled: boo
     } else {
         BG_RAISED
     };
-    ui.painter()
-        .rect_filled(rect, Rounding::same(3.0), bg);
+    ui.painter().rect_filled(rect, Rounding::same(3.0), bg);
     if active && enabled {
         ui.painter()
             .rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.0, ACCENT));
@@ -690,9 +701,18 @@ pub enum ToolGlyph {
     Mode2d,
     Grid,
     Gizmo,
+    Pivot,
+    Center,
+    Local,
+    Global,
 }
 
-pub fn tool_toggle(ui: &mut egui::Ui, selected: bool, tooltip: &str, glyph: ToolGlyph) -> egui::Response {
+pub fn tool_toggle(
+    ui: &mut egui::Ui,
+    selected: bool,
+    tooltip: &str,
+    glyph: ToolGlyph,
+) -> egui::Response {
     let size = egui::vec2(24.0, 22.0);
     let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
     resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -734,17 +754,26 @@ fn paint_tool_glyph(painter: &egui::Painter, r: egui::Rect, glyph: ToolGlyph, co
             );
             let a = 3.0;
             painter.line_segment(
-                [egui::pos2(r.right(), c.y), egui::pos2(r.right() - a, c.y - a)],
+                [
+                    egui::pos2(r.right(), c.y),
+                    egui::pos2(r.right() - a, c.y - a),
+                ],
                 stroke,
             );
             painter.line_segment(
-                [egui::pos2(r.right(), c.y), egui::pos2(r.right() - a, c.y + a)],
+                [
+                    egui::pos2(r.right(), c.y),
+                    egui::pos2(r.right() - a, c.y + a),
+                ],
                 stroke,
             );
         }
         ToolGlyph::Scale => {
             painter.rect_stroke(r.shrink(2.0), Rounding::ZERO, stroke);
-            let h = egui::Rect::from_center_size(r.right_bottom() - egui::vec2(3.0, 3.0), egui::vec2(5.0, 5.0));
+            let h = egui::Rect::from_center_size(
+                r.right_bottom() - egui::vec2(3.0, 3.0),
+                egui::vec2(5.0, 5.0),
+            );
             painter.rect_filled(h, Rounding::ZERO, color);
         }
         ToolGlyph::Rotate => {
@@ -768,7 +797,10 @@ fn paint_tool_glyph(painter: &egui::Painter, r: egui::Rect, glyph: ToolGlyph, co
                 stroke,
             );
             painter.line_segment(
-                [egui::pos2(c.x - 4.0, c.y - 2.0), egui::pos2(c.x + 4.0, c.y + 2.0)],
+                [
+                    egui::pos2(c.x - 4.0, c.y - 2.0),
+                    egui::pos2(c.x + 4.0, c.y + 2.0),
+                ],
                 stroke,
             );
         }
@@ -815,8 +847,83 @@ fn paint_tool_glyph(painter: &egui::Painter, r: egui::Rect, glyph: ToolGlyph, co
             }
         }
         ToolGlyph::Gizmo => {
-            painter.line_segment([c, egui::pos2(r.right() - 1.0, c.y)], Stroke::new(1.4_f32, AXIS_X));
-            painter.line_segment([c, egui::pos2(c.x, r.top() + 1.0)], Stroke::new(1.4_f32, AXIS_Y));
+            painter.line_segment(
+                [c, egui::pos2(r.right() - 1.0, c.y)],
+                Stroke::new(1.4_f32, AXIS_X),
+            );
+            painter.line_segment(
+                [c, egui::pos2(c.x, r.top() + 1.0)],
+                Stroke::new(1.4_f32, AXIS_Y),
+            );
+        }
+        ToolGlyph::Pivot => {
+            let box_r = egui::Rect::from_min_max(
+                egui::pos2(r.left() + 1.0, r.top() + 3.0),
+                egui::pos2(r.right() - 3.0, r.bottom() - 1.0),
+            );
+            painter.rect_stroke(box_r, Rounding::ZERO, stroke);
+            painter.circle_filled(box_r.left_top(), 2.2, color);
+        }
+        ToolGlyph::Center => {
+            let box_r = r.shrink(2.5);
+            painter.rect_stroke(box_r, Rounding::ZERO, stroke);
+            painter.circle_filled(box_r.center(), 2.2, color);
+        }
+        ToolGlyph::Local => {
+            let o = egui::pos2(r.left() + 3.0, r.bottom() - 3.0);
+            painter.line_segment(
+                [o, egui::pos2(r.right() - 2.0, r.top() + 5.0)],
+                Stroke::new(1.5_f32, AXIS_X),
+            );
+            painter.line_segment(
+                [o, egui::pos2(r.left() + 6.0, r.top() + 2.0)],
+                Stroke::new(1.5_f32, AXIS_Y),
+            );
+        }
+        ToolGlyph::Global => {
+            let o = egui::pos2(r.left() + 3.0, r.bottom() - 3.0);
+            painter.line_segment(
+                [o, egui::pos2(r.right() - 2.0, o.y)],
+                Stroke::new(1.5_f32, AXIS_X),
+            );
+            painter.line_segment(
+                [o, egui::pos2(o.x, r.top() + 2.0)],
+                Stroke::new(1.5_f32, AXIS_Y),
+            );
         }
     }
+}
+
+/// Scene toolbar Pivot/Center and Local/Global. Dark Pro; label is the current mode.
+pub fn mode_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    tooltip: &str,
+    glyph: ToolGlyph,
+) -> egui::Response {
+    let width = 22.0 + label.len() as f32 * 6.4;
+    let size = egui::vec2(width.max(62.0), 22.0);
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if !tooltip.is_empty() {
+        resp = resp.on_hover_text(tooltip);
+    }
+    let bg = if resp.hovered() {
+        Color32::from_rgb(80, 80, 80)
+    } else {
+        BG_RAISED
+    };
+    ui.painter().rect_filled(rect, Rounding::same(3.0), bg);
+    ui.painter()
+        .rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.0_f32, BORDER_SOFT));
+    let icon = egui::Rect::from_min_size(rect.min, egui::vec2(22.0, rect.height())).shrink(3.0);
+    paint_tool_glyph(ui.painter(), icon, glyph, TEXT);
+    ui.painter().text(
+        egui::pos2(rect.min.x + 22.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(11.0),
+        TEXT,
+    );
+    resp
 }

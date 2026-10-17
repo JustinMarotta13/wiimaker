@@ -5,14 +5,28 @@ use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
-    constrain_translate, fitted_blit_rect, pick_entity_at_with_catalog_and_layers,
-    pointer_to_scene, render_world_ex, scene_blit_rect, set_entity_rotation_z, set_entity_scale,
-    set_entity_world_xy, sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell,
-    GameViewAspect, GameViewPreset, MoveHandleLayout, Scene, TranslateHandle,
+    apply_axis_scale, arc_points, constrain_translate_oriented, fitted_blit_rect, gizmo_origin,
+    pick_entity_at_with_catalog_and_layers, pointer_to_scene, quat_z_radians, render_world_ex,
+    rotate_point_about, rotation_after_drag, scale_factors, scale_point_about, scene_blit_rect,
+    screen_axis_dirs, set_entity_rotation_z, set_entity_scale, set_entity_world_xy,
+    sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell, union_aabbs, GameViewAspect,
+    GameViewPreset, HandlePosition, HandleRotation, MoveHandleLayout, RotateHandleLayout,
+    ScaleHandle, ScaleHandleLayout, Scene, TranslateHandle,
 };
 
-use crate::app::{CenterTab, EditTool, EditorApp, PlayKind, PlayMode, TilePaintDrag, ViewportDrag};
+use crate::app::{
+    CenterTab, EditTool, EditorApp, PlayKind, PlayMode, TilePaintDrag, ViewportDrag, XformSnap,
+};
 use crate::theme;
+
+/// Which gizmo part the pointer is over.
+#[derive(Clone, Copy, Debug)]
+enum ToolHit {
+    Move(TranslateHandle),
+    Scale(ScaleHandle),
+    /// Z ring or the faint outer ring. Both sweep Z in 2D.
+    Rotate,
+}
 
 pub(crate) const VIEW_W: usize = 640;
 pub(crate) const VIEW_H: usize = 480;
@@ -49,8 +63,48 @@ impl EditorApp {
                 ];
                 for (tool, tip, glyph) in tools {
                     if theme::tool_toggle(ui, self.edit_tool == tool, tip, glyph).clicked() {
-                        self.edit_tool = tool;
+                        self.set_edit_tool(tool);
                     }
+                }
+                let (pos_label, pos_glyph, pos_tip) = match self.prefs.scene_view.handle_position {
+                    HandlePosition::Pivot => (
+                        "Pivot",
+                        theme::ToolGlyph::Pivot,
+                        "Pivot — handle at the active object's origin",
+                    ),
+                    HandlePosition::Center => (
+                        "Center",
+                        theme::ToolGlyph::Center,
+                        "Center — handle at the center of the selection bounds",
+                    ),
+                };
+                if theme::mode_button(ui, pos_label, pos_tip, pos_glyph).clicked() {
+                    self.prefs.scene_view.handle_position =
+                        match self.prefs.scene_view.handle_position {
+                            HandlePosition::Pivot => HandlePosition::Center,
+                            HandlePosition::Center => HandlePosition::Pivot,
+                        };
+                    self.persist_prefs();
+                }
+                let (rot_label, rot_glyph, rot_tip) = match self.prefs.scene_view.handle_rotation {
+                    HandleRotation::Local => (
+                        "Local",
+                        theme::ToolGlyph::Local,
+                        "Local — Move and Scale handles follow the active object's rotation",
+                    ),
+                    HandleRotation::Global => (
+                        "Global",
+                        theme::ToolGlyph::Global,
+                        "Global — Move and Scale handles stay world-aligned",
+                    ),
+                };
+                if theme::mode_button(ui, rot_label, rot_tip, rot_glyph).clicked() {
+                    self.prefs.scene_view.handle_rotation =
+                        match self.prefs.scene_view.handle_rotation {
+                            HandleRotation::Local => HandleRotation::Global,
+                            HandleRotation::Global => HandleRotation::Local,
+                        };
+                    self.persist_prefs();
                 }
             });
             // 2D is always-on (engine is 2D-only) — still show the control.
@@ -320,13 +374,44 @@ impl EditorApp {
                     paint_tilemap_overlay(ui, image_rect, &self.scene, &name);
                 }
             }
-            if is_scene
-                && self.play_mode == PlayMode::Edit
-                && self.edit_tool == EditTool::Translate
-                && !self.selected.is_empty()
-            {
+            if is_scene && self.play_mode == PlayMode::Edit && !self.selected.is_empty() {
                 let hover = ui.input(|i| i.pointer.hover_pos());
-                paint_move_handles(ui, image_rect, &self.scene, &self.selected, hover);
+                let angle = self.handle_axis_angle();
+                match self.edit_tool {
+                    EditTool::Translate => {
+                        let active = self.viewport_drag.as_ref().map(|d| d.translate_handle);
+                        paint_move_handles(
+                            ui,
+                            image_rect,
+                            self.gizmo_scene_origin(),
+                            angle,
+                            active,
+                            hover,
+                        );
+                    }
+                    EditTool::Scale => {
+                        let active = self.viewport_drag.as_ref().map(|d| d.scale_handle);
+                        paint_scale_handles(
+                            ui,
+                            image_rect,
+                            self.gizmo_scene_origin(),
+                            angle,
+                            active,
+                            hover,
+                        );
+                    }
+                    EditTool::Rotate => {
+                        let sweep = self.rotate_sweep_visual();
+                        paint_rotate_handles(
+                            ui,
+                            image_rect,
+                            self.gizmo_scene_origin(),
+                            sweep,
+                            hover,
+                        );
+                    }
+                    _ => {}
+                }
             }
             self.handle_scene_nav(&well_resp, well);
             self.handle_viewport_input(&response, image_rect);
@@ -435,23 +520,24 @@ impl EditorApp {
             return;
         }
 
-        let handle_hit = if self.edit_tool == EditTool::Translate {
-            response
-                .interact_pointer_pos()
-                .and_then(|p| self.hit_move_handle(rect, p))
-        } else {
-            None
-        };
-        if self.edit_tool == EditTool::Translate {
-            if let Some(hover) = response.hover_pos() {
-                if let Some((_, h)) = self.hit_move_handle(rect, hover) {
-                    let icon = match h {
-                        TranslateHandle::X => egui::CursorIcon::ResizeHorizontal,
-                        TranslateHandle::Y => egui::CursorIcon::ResizeVertical,
-                        TranslateHandle::Free => egui::CursorIcon::Move,
-                    };
-                    response.ctx.set_cursor_icon(icon);
-                }
+        let handle_hit = response
+            .interact_pointer_pos()
+            .and_then(|p| self.hit_tool_handle(rect, p));
+        if let Some(hover) = response.hover_pos() {
+            if let Some(hit) = self.hit_tool_handle(rect, hover) {
+                let icon = match hit {
+                    ToolHit::Move(TranslateHandle::X) | ToolHit::Scale(ScaleHandle::X) => {
+                        egui::CursorIcon::ResizeHorizontal
+                    }
+                    ToolHit::Move(TranslateHandle::Y) | ToolHit::Scale(ScaleHandle::Y) => {
+                        egui::CursorIcon::ResizeVertical
+                    }
+                    ToolHit::Move(TranslateHandle::Free) | ToolHit::Scale(ScaleHandle::Uniform) => {
+                        egui::CursorIcon::Move
+                    }
+                    ToolHit::Rotate => egui::CursorIcon::Alias,
+                };
+                response.ctx.set_cursor_icon(icon);
             }
         }
 
@@ -468,127 +554,134 @@ impl EditorApp {
             }
         }
 
-        // Drag start: axis handle (Move) or hit entity, then begin tool gesture.
+        // Drag start: gizmo handle or entity body, one undo step.
         if response.drag_started() {
-            if let Some(pos) = response.interact_pointer_pos().and_then(to_scene) {
-                let started = if let Some((name, handle)) = handle_hit.clone() {
+            if let (Some(pos), Some(screen)) = (
+                response.interact_pointer_pos().and_then(&to_scene),
+                response.interact_pointer_pos(),
+            ) {
+                let tool_hit = handle_hit.clone();
+                let body = if tool_hit.is_none() {
+                    pick_at(self, pos)
+                } else {
+                    None
+                };
+                if tool_hit.is_some() || body.is_some() {
+                    let (name, grab_offset, translate_handle, scale_handle) =
+                        if let Some(hit) = tool_hit {
+                            let name = self.selected.last().cloned().unwrap_or_else(|| " ".into());
+                            let origin = self.gizmo_scene_origin().unwrap_or(pos);
+                            let grab = [pos[0] - origin[0], pos[1] - origin[1]];
+                            match hit {
+                                ToolHit::Move(h) => (name, grab, h, ScaleHandle::Uniform),
+                                ToolHit::Scale(h) => (name, grab, TranslateHandle::Free, h),
+                                ToolHit::Rotate => {
+                                    (name, grab, TranslateHandle::Free, ScaleHandle::Uniform)
+                                }
+                            }
+                        } else if let Some((name, grab_offset)) = body {
+                            // Body drag: Move is free; Scale is uniform; Rotate sweeps Z.
+                            (
+                                name,
+                                grab_offset,
+                                TranslateHandle::Free,
+                                ScaleHandle::Uniform,
+                            )
+                        } else {
+                            unreachable!()
+                        };
+                    if !self.is_selected(&name) {
+                        self.select(Some(name.clone()));
+                    }
                     let world = self
                         .scene
                         .world_transform(&name)
                         .or_else(|| self.scene.find_entity(&name).map(|e| e.transform.clone()));
-                    let origin = world
+                    let primary_start = world
                         .as_ref()
                         .map(|w| [w.translation[0], w.translation[1]])
-                        .unwrap_or(pos);
-                    Some((name, [pos[0] - origin[0], pos[1] - origin[1]], handle))
+                        .unwrap_or([pos[0], pos[1]]);
+                    // Move tracks the entity origin (handle grab must not jump it to Center).
+                    let grab_offset = if self.edit_tool == EditTool::Translate {
+                        [pos[0] - primary_start[0], pos[1] - primary_start[1]]
+                    } else {
+                        grab_offset
+                    };
+                    let rot_z_start = self
+                        .scene
+                        .find_entity(&name)
+                        .map(|e| quat_z_radians(e.transform.rotation))
+                        .unwrap_or(0.0);
+                    let handle_origin = self.gizmo_scene_origin().unwrap_or(primary_start);
+                    let screen_origin = scene_to_screen(rect, handle_origin[0], handle_origin[1]);
+                    let angle_start =
+                        (screen.y - screen_origin.y).atan2(screen.x - screen_origin.x);
+                    self.push_undo();
+                    let snaps = self.capture_snaps();
+                    self.viewport_drag = Some(ViewportDrag {
+                        entity: name,
+                        grab_offset,
+                        primary_start,
+                        snaps,
+                        angle_start,
+                        rot_z_start,
+                        translate_handle,
+                        scale_handle,
+                        handle_origin,
+                        axis_angle: self.handle_axis_angle(),
+                        screen_pointer_start: [screen.x, screen.y],
+                        scene_pointer_start: pos,
+                    });
                 } else {
-                    match pick_at(self, pos) {
-                        Some((name, grab_offset)) => {
-                            Some((name, grab_offset, TranslateHandle::Free))
-                        }
-                        None => None,
-                    }
-                };
-                match started {
-                    Some((name, grab_offset, translate_handle)) => {
-                        if !self.is_selected(&name) {
-                            self.select(Some(name.clone()));
-                        }
-                        let world = self
-                            .scene
-                            .world_transform(&name)
-                            .or_else(|| self.scene.find_entity(&name).map(|e| e.transform.clone()));
-                        let primary_start = world
-                            .as_ref()
-                            .map(|w| [w.translation[0], w.translation[1]])
-                            .unwrap_or([pos[0], pos[1]]);
-                        let scale_start = self
-                            .scene
-                            .find_entity(&name)
-                            .map(|e| [e.transform.scale[0], e.transform.scale[1]])
-                            .unwrap_or([1.0, 1.0]);
-                        let dx0 = pos[0] - primary_start[0];
-                        let dy0 = pos[1] - primary_start[1];
-                        let dist_start = (dx0 * dx0 + dy0 * dy0).sqrt().max(1.0);
-                        let angle_start = dy0.atan2(dx0);
-                        let rot = self
-                            .scene
-                            .find_entity(&name)
-                            .map(|e| e.transform.rotation)
-                            .unwrap_or([0.0, 0.0, 0.0, 1.0]);
-                        // quat z,w → angle (2D): atan2(2*z*w, w²-z²) simplified for x=y=0
-                        let rot_z_start =
-                            (2.0 * rot[2] * rot[3]).atan2(rot[3] * rot[3] - rot[2] * rot[2]);
-                        self.push_undo();
-                        let others_start: Vec<(String, [f32; 2])> = self
-                            .selected
-                            .iter()
-                            .filter(|n| *n != &name)
-                            .filter_map(|n| {
-                                let w = self.scene.world_transform(n)?;
-                                Some((n.clone(), [w.translation[0], w.translation[1]]))
-                            })
-                            .collect();
-                        self.viewport_drag = Some(ViewportDrag {
-                            entity: name,
-                            grab_offset,
-                            primary_start,
-                            others_start,
-                            scale_start,
-                            dist_start,
-                            angle_start,
-                            rot_z_start,
-                            translate_handle,
-                        });
-                    }
-                    None => {
-                        self.select(None);
-                        self.viewport_drag = None;
-                    }
+                    self.select(None);
+                    self.viewport_drag = None;
                 }
             }
         }
 
         if let Some(drag) = self.viewport_drag.clone() {
             if response.dragged() {
-                if let Some(pos) = response.interact_pointer_pos().and_then(to_scene) {
+                if let (Some(pos), Some(screen)) = (
+                    response.interact_pointer_pos().and_then(&to_scene),
+                    response.interact_pointer_pos(),
+                ) {
                     match self.edit_tool {
                         EditTool::Translate => {
                             let mut x = pos[0] - drag.grab_offset[0];
                             let mut y = pos[1] - drag.grab_offset[1];
-                            let xy = constrain_translate(
+                            let xy = constrain_translate_oriented(
                                 drag.translate_handle,
                                 x,
                                 y,
                                 drag.primary_start,
+                                drag.axis_angle,
                             );
                             x = xy[0];
                             y = xy[1];
                             if self.prefs.scene_view.snap && self.prefs.scene_view.snap_size > 0.0 {
-                                let g = self.prefs.scene_view.snap_size;
-                                match drag.translate_handle {
-                                    TranslateHandle::X => {
-                                        x = (x / g).round() * g;
-                                    }
-                                    TranslateHandle::Y => {
-                                        y = (y / g).round() * g;
-                                    }
-                                    TranslateHandle::Free => {
-                                        x = (x / g).round() * g;
-                                        y = (y / g).round() * g;
-                                    }
-                                }
+                                let snapped = snap_move(
+                                    drag.translate_handle,
+                                    [x, y],
+                                    drag.primary_start,
+                                    drag.axis_angle,
+                                    self.prefs.scene_view.snap_size,
+                                );
+                                x = snapped[0];
+                                y = snapped[1];
                             }
                             let dx = x - drag.primary_start[0];
                             let dy = y - drag.primary_start[1];
                             let mut ok =
                                 set_entity_world_xy(&mut self.scene, &drag.entity, x, y).is_ok();
-                            for (other, start) in &drag.others_start {
+                            for snap in &drag.snaps {
+                                if snap.name == drag.entity {
+                                    continue;
+                                }
                                 if set_entity_world_xy(
                                     &mut self.scene,
-                                    other,
-                                    start[0] + dx,
-                                    start[1] + dy,
+                                    &snap.name,
+                                    snap.world_xy[0] + dx,
+                                    snap.world_xy[1] + dy,
                                 )
                                 .is_err()
                                 {
@@ -600,27 +693,71 @@ impl EditorApp {
                             }
                         }
                         EditTool::Scale => {
-                            let dx = pos[0] - drag.primary_start[0];
-                            let dy = pos[1] - drag.primary_start[1];
-                            let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-                            let factor = (dist / drag.dist_start).clamp(0.05, 32.0);
-                            let sx = (drag.scale_start[0] * factor).clamp(0.05, 32.0);
-                            let sy = (drag.scale_start[1] * factor).clamp(0.05, 32.0);
-                            if set_entity_scale(&mut self.scene, &drag.entity, sx, sy).is_ok() {
+                            let factors = scale_factors(
+                                drag.scale_handle,
+                                drag.handle_origin,
+                                drag.axis_angle,
+                                drag.scene_pointer_start,
+                                pos,
+                            );
+                            let mut ok = true;
+                            for snap in &drag.snaps {
+                                let p = scale_point_about(
+                                    drag.handle_origin,
+                                    snap.world_xy,
+                                    drag.axis_angle,
+                                    factors,
+                                );
+                                if set_entity_world_xy(&mut self.scene, &snap.name, p[0], p[1])
+                                    .is_err()
+                                {
+                                    ok = false;
+                                }
+                                let sx = apply_axis_scale(snap.scale[0], factors[0]);
+                                let sy = apply_axis_scale(snap.scale[1], factors[1]);
+                                if set_entity_scale(&mut self.scene, &snap.name, sx, sy).is_err() {
+                                    ok = false;
+                                }
+                            }
+                            if ok {
                                 self.mark_dirty();
                             }
                         }
                         EditTool::Rotate => {
-                            let dx = pos[0] - drag.primary_start[0];
-                            let dy = pos[1] - drag.primary_start[1];
-                            let angle = dy.atan2(dx);
-                            let mut radians = drag.rot_z_start + (angle - drag.angle_start);
-                            if self.prefs.scene_view.snap {
-                                let step = std::f32::consts::FRAC_PI_4; // 45°
-                                radians = (radians / step).round() * step;
+                            let screen_origin =
+                                scene_to_screen(rect, drag.handle_origin[0], drag.handle_origin[1]);
+                            let snap_rot = self.prefs.scene_view.snap
+                                || response
+                                    .ctx
+                                    .input(|i| i.modifiers.ctrl || i.modifiers.command);
+                            let new_rot = rotation_after_drag(
+                                drag.rot_z_start,
+                                [screen_origin.x, screen_origin.y],
+                                drag.screen_pointer_start,
+                                [screen.x, screen.y],
+                                snap_rot,
+                            );
+                            let delta = new_rot - drag.rot_z_start;
+                            let mut ok = true;
+                            for snap in &drag.snaps {
+                                let p =
+                                    rotate_point_about(drag.handle_origin, snap.world_xy, delta);
+                                if set_entity_world_xy(&mut self.scene, &snap.name, p[0], p[1])
+                                    .is_err()
+                                {
+                                    ok = false;
+                                }
+                                let rot = if snap.name == drag.entity {
+                                    new_rot
+                                } else {
+                                    snap.rot_z + delta
+                                };
+                                if set_entity_rotation_z(&mut self.scene, &snap.name, rot).is_err()
+                                {
+                                    ok = false;
+                                }
                             }
-                            if set_entity_rotation_z(&mut self.scene, &drag.entity, radians).is_ok()
-                            {
+                            if ok {
                                 self.mark_dirty();
                             }
                         }
@@ -638,20 +775,97 @@ impl EditorApp {
         }
     }
 
-    fn hit_move_handle(
-        &self,
-        rect: egui::Rect,
-        pointer: egui::Pos2,
-    ) -> Option<(String, TranslateHandle)> {
-        let name = self.selected.last()?.clone();
-        let world = self
-            .scene
-            .world_transform(&name)
-            .or_else(|| self.scene.find_entity(&name).map(|e| e.transform.clone()))?;
-        let origin = scene_to_screen(rect, world.translation[0], world.translation[1]);
-        let layout = MoveHandleLayout::at([origin.x, origin.y]);
-        let handle = layout.hit([pointer.x, pointer.y])?;
-        Some((name, handle))
+    fn handle_axis_angle(&self) -> f32 {
+        if self.prefs.scene_view.handle_rotation == HandleRotation::Global {
+            return 0.0;
+        }
+        let Some(name) = self.selected.last() else {
+            return 0.0;
+        };
+        self.scene
+            .world_transform(name)
+            .map(|w| quat_z_radians(w.rotation))
+            .unwrap_or(0.0)
+    }
+
+    fn gizmo_scene_origin(&self) -> Option<[f32; 2]> {
+        let name = self.selected.last()?;
+        let world = self.scene.world_transform(name)?;
+        let active = [world.translation[0], world.translation[1]];
+        let aabbs = self.selection_aabbs();
+        let center =
+            union_aabbs(&aabbs).map(|(mn, mx)| [(mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5]);
+        Some(gizmo_origin(
+            self.prefs.scene_view.handle_position,
+            active,
+            center,
+            self.selected.len(),
+        ))
+    }
+
+    fn selection_aabbs(&self) -> Vec<([f32; 2], [f32; 2])> {
+        self.selected
+            .iter()
+            .filter_map(|n| entity_world_aabb(&self.scene, n, &self.catalog))
+            .collect()
+    }
+
+    fn capture_snaps(&self) -> Vec<XformSnap> {
+        self.selected
+            .iter()
+            .filter_map(|n| {
+                let world = self.scene.world_transform(n)?;
+                let local = self.scene.find_entity(n)?;
+                Some(XformSnap {
+                    name: n.clone(),
+                    world_xy: [world.translation[0], world.translation[1]],
+                    scale: [local.transform.scale[0], local.transform.scale[1]],
+                    rot_z: quat_z_radians(local.transform.rotation),
+                })
+            })
+            .collect()
+    }
+
+    /// Screen-space start angle and applied delta while a rotate drag (or demo) is showing.
+    fn rotate_sweep_visual(&self) -> Option<(f32, f32)> {
+        if let Some(drag) = &self.viewport_drag {
+            if self.edit_tool != EditTool::Rotate {
+                return None;
+            }
+            let cur = self
+                .scene
+                .find_entity(&drag.entity)
+                .map(|e| quat_z_radians(e.transform.rotation))
+                .unwrap_or(drag.rot_z_start);
+            return Some((drag.angle_start, cur - drag.rot_z_start));
+        }
+        self.gizmo_demo_sweep.map(|deg| (0.0, deg.to_radians()))
+    }
+
+    fn hit_tool_handle(&self, rect: egui::Rect, pointer: egui::Pos2) -> Option<ToolHit> {
+        if self.selected.is_empty() {
+            return None;
+        }
+        let origin_scene = self.gizmo_scene_origin()?;
+        let origin = scene_to_screen(rect, origin_scene[0], origin_scene[1]);
+        let angle = self.handle_axis_angle();
+        let (x_dir, y_dir) = screen_axis_dirs(
+            angle,
+            rect.width() / VIEW_W as f32,
+            rect.height() / VIEW_H as f32,
+        );
+        let p = [pointer.x, pointer.y];
+        let o = [origin.x, origin.y];
+        match self.edit_tool {
+            EditTool::Translate => MoveHandleLayout::oriented(o, x_dir, y_dir)
+                .hit(p)
+                .map(ToolHit::Move),
+            EditTool::Scale => ScaleHandleLayout::oriented(o, x_dir, y_dir)
+                .hit(p)
+                .map(ToolHit::Scale),
+            EditTool::Rotate => RotateHandleLayout::at(o).hit(p).map(|_| ToolHit::Rotate),
+            _ => None,
+        }
     }
 
     fn handle_tile_paint(
@@ -942,81 +1156,329 @@ fn paint_tilemap_gizmos(ui: &egui::Ui, image_rect: egui::Rect, scene: &Scene, se
     }
 }
 
+fn handle_layout_dirs(image_rect: egui::Rect, axis_angle: f32) -> ([f32; 2], [f32; 2]) {
+    screen_axis_dirs(
+        axis_angle,
+        image_rect.width() / VIEW_W as f32,
+        image_rect.height() / VIEW_H as f32,
+    )
+}
+
+fn hot_or(active: bool, hover: bool, rest: egui::Color32) -> egui::Color32 {
+    if active || hover {
+        theme::HANDLE_HOT
+    } else {
+        rest
+    }
+}
+
+fn paint_poly(
+    painter: &egui::Painter,
+    pts: &[[f32; 2]],
+    fill: egui::Color32,
+    stroke: egui::Stroke,
+) {
+    if pts.len() < 3 {
+        return;
+    }
+    let v: Vec<egui::Pos2> = pts.iter().map(|p| egui::pos2(p[0], p[1])).collect();
+    painter.add(egui::Shape::convex_polygon(v, fill, stroke));
+}
+
 fn paint_move_handles(
     ui: &egui::Ui,
     image_rect: egui::Rect,
-    scene: &Scene,
-    selected: &[String],
+    origin_scene: Option<[f32; 2]>,
+    axis_angle: f32,
+    active: Option<TranslateHandle>,
     hover: Option<egui::Pos2>,
 ) {
-    let Some(name) = selected.last() else {
+    let Some(origin_scene) = origin_scene else {
         return;
     };
-    let Some(ent) = scene.find_entity(name) else {
-        return;
-    };
-    let world = scene
-        .world_transform(name)
-        .unwrap_or_else(|| ent.transform.clone());
-    let origin = scene_to_screen(image_rect, world.translation[0], world.translation[1]);
-    let layout = MoveHandleLayout::at([origin.x, origin.y]);
+    let origin = scene_to_screen(image_rect, origin_scene[0], origin_scene[1]);
+    let (x_dir, y_dir) = handle_layout_dirs(image_rect, axis_angle);
+    let layout = MoveHandleLayout::oriented([origin.x, origin.y], x_dir, y_dir);
     let hover_part = hover.and_then(|p| layout.hit([p.x, p.y]));
     let painter = ui.painter();
 
-    let x_col = if hover_part == Some(TranslateHandle::X) {
-        egui::Color32::from_rgb(255, 120, 120)
-    } else {
-        theme::AXIS_X
-    };
-    let y_col = if hover_part == Some(TranslateHandle::Y) {
-        egui::Color32::from_rgb(140, 220, 100)
-    } else {
-        theme::AXIS_Y
-    };
-    let free_col = if hover_part == Some(TranslateHandle::Free) {
-        egui::Color32::from_rgb(230, 230, 230)
-    } else {
-        egui::Color32::from_rgb(200, 200, 200)
-    };
-
-    let x_base = egui::pos2(layout.x_base()[0], layout.x_base()[1]);
-    let x_tip = egui::pos2(layout.x_tip()[0], layout.x_tip()[1]);
-    let y_base = egui::pos2(layout.y_base()[0], layout.y_base()[1]);
-    let y_tip = egui::pos2(layout.y_tip()[0], layout.y_tip()[1]);
-    painter.line_segment([x_base, x_tip], egui::Stroke::new(3.0, x_col));
-    painter.line_segment([y_base, y_tip], egui::Stroke::new(3.0, y_col));
-
-    let arrow = MoveHandleLayout::ARROW;
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            x_tip,
-            egui::pos2(x_tip.x - arrow, x_tip.y - arrow * 0.55),
-            egui::pos2(x_tip.x - arrow, x_tip.y + arrow * 0.55),
-        ],
-        x_col,
-        egui::Stroke::NONE,
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            y_tip,
-            egui::pos2(y_tip.x - arrow * 0.55, y_tip.y - arrow),
-            egui::pos2(y_tip.x + arrow * 0.55, y_tip.y - arrow),
-        ],
-        y_col,
-        egui::Stroke::NONE,
-    ));
-
-    let fmin = layout.free_min();
-    let fmax = layout.free_max();
-    let free = egui::Rect::from_min_max(egui::pos2(fmin[0], fmin[1]), egui::pos2(fmax[0], fmax[1]));
-    painter.rect_filled(
-        free,
-        1.0,
-        egui::Color32::from_rgba_unmultiplied(40, 40, 40, 180),
+    let x_col = hot_or(
+        active == Some(TranslateHandle::X),
+        hover_part == Some(TranslateHandle::X),
+        theme::AXIS_X,
     );
-    painter.rect_stroke(free, 1.0, egui::Stroke::new(1.5, free_col));
-    // Origin pivot
+    let y_col = hot_or(
+        active == Some(TranslateHandle::Y),
+        hover_part == Some(TranslateHandle::Y),
+        theme::AXIS_Y,
+    );
+    let free_col = hot_or(
+        active == Some(TranslateHandle::Free),
+        hover_part == Some(TranslateHandle::Free),
+        egui::Color32::from_rgb(200, 200, 200),
+    );
+
+    let seg = |a: [f32; 2], b: [f32; 2]| [egui::pos2(a[0], a[1]), egui::pos2(b[0], b[1])];
+    painter.line_segment(
+        seg(layout.x_base(), layout.x_tip()),
+        egui::Stroke::new(3.0, x_col),
+    );
+    painter.line_segment(
+        seg(layout.y_base(), layout.y_tip()),
+        egui::Stroke::new(3.0, y_col),
+    );
+    paint_poly(painter, &layout.x_arrow(), x_col, egui::Stroke::NONE);
+    paint_poly(painter, &layout.y_arrow(), y_col, egui::Stroke::NONE);
+    paint_poly(
+        painter,
+        &layout.free_corners(),
+        egui::Color32::from_rgba_unmultiplied(40, 40, 40, 180),
+        egui::Stroke::new(1.5, free_col),
+    );
     painter.circle_filled(origin, 3.0, egui::Color32::from_rgb(220, 220, 220));
+}
+
+fn paint_scale_handles(
+    ui: &egui::Ui,
+    image_rect: egui::Rect,
+    origin_scene: Option<[f32; 2]>,
+    axis_angle: f32,
+    active: Option<ScaleHandle>,
+    hover: Option<egui::Pos2>,
+) {
+    let Some(origin_scene) = origin_scene else {
+        return;
+    };
+    let origin = scene_to_screen(image_rect, origin_scene[0], origin_scene[1]);
+    let (x_dir, y_dir) = handle_layout_dirs(image_rect, axis_angle);
+    let layout = ScaleHandleLayout::oriented([origin.x, origin.y], x_dir, y_dir);
+    let hover_part = hover.and_then(|p| layout.hit([p.x, p.y]));
+    let painter = ui.painter();
+    let x_col = hot_or(
+        active == Some(ScaleHandle::X),
+        hover_part == Some(ScaleHandle::X),
+        theme::AXIS_X,
+    );
+    let y_col = hot_or(
+        active == Some(ScaleHandle::Y),
+        hover_part == Some(ScaleHandle::Y),
+        theme::AXIS_Y,
+    );
+    let c_col = hot_or(
+        active == Some(ScaleHandle::Uniform),
+        hover_part == Some(ScaleHandle::Uniform),
+        egui::Color32::from_rgb(180, 180, 180),
+    );
+    let seg = |a: [f32; 2], b: [f32; 2]| [egui::pos2(a[0], a[1]), egui::pos2(b[0], b[1])];
+    painter.line_segment(
+        seg(layout.x_base(), layout.x_tip()),
+        egui::Stroke::new(2.5_f32, x_col),
+    );
+    painter.line_segment(
+        seg(layout.y_base(), layout.y_tip()),
+        egui::Stroke::new(2.5_f32, y_col),
+    );
+    paint_poly(painter, &layout.x_cube(), x_col, egui::Stroke::NONE);
+    paint_poly(painter, &layout.y_cube(), y_col, egui::Stroke::NONE);
+    paint_poly(
+        painter,
+        &layout.center_corners(),
+        egui::Color32::from_rgba_unmultiplied(c_col.r(), c_col.g(), c_col.b(), 210),
+        egui::Stroke::new(1.0_f32, c_col),
+    );
+}
+
+fn paint_rotate_handles(
+    ui: &egui::Ui,
+    image_rect: egui::Rect,
+    origin_scene: Option<[f32; 2]>,
+    sweep: Option<(f32, f32)>,
+    hover: Option<egui::Pos2>,
+) {
+    let Some(origin_scene) = origin_scene else {
+        return;
+    };
+    let origin = scene_to_screen(image_rect, origin_scene[0], origin_scene[1]);
+    let layout = RotateHandleLayout::at([origin.x, origin.y]);
+    let hover_part = hover.and_then(|p| layout.hit([p.x, p.y]));
+    let painter = ui.painter();
+    let hot = sweep.is_some() || hover_part.is_some();
+    let col = if hot {
+        theme::HANDLE_HOT
+    } else {
+        theme::AXIS_Z
+    };
+    painter.circle_stroke(
+        origin,
+        layout.outer_radius,
+        egui::Stroke::new(
+            1.25_f32,
+            egui::Color32::from_rgba_unmultiplied(190, 190, 190, 70),
+        ),
+    );
+    painter.circle_stroke(origin, layout.radius, egui::Stroke::new(2.5_f32, col));
+    painter.circle_filled(origin, 3.0, egui::Color32::from_rgb(220, 220, 220));
+
+    let Some((start, delta)) = sweep else {
+        return;
+    };
+    if delta.abs() < 1e-4 {
+        return;
+    }
+    let steps = ((delta.abs().to_degrees() / 4.0).ceil() as usize).clamp(8, 64);
+    let arc = arc_points([origin.x, origin.y], layout.radius, start, delta, steps);
+    let mut fan = Vec::with_capacity(arc.len() + 1);
+    fan.push([origin.x, origin.y]);
+    fan.extend(arc.iter().copied());
+    let fill = egui::Color32::from_rgba_unmultiplied(
+        theme::HANDLE_HOT.r(),
+        theme::HANDLE_HOT.g(),
+        theme::HANDLE_HOT.b(),
+        110,
+    );
+    // Fan may exceed 180°, so draw it as a triangle list instead of one convex polygon.
+    for w in fan.windows(2).skip(1) {
+        paint_poly(
+            painter,
+            &[[origin.x, origin.y], w[0], w[1]],
+            fill,
+            egui::Stroke::NONE,
+        );
+    }
+    if arc.len() >= 2 {
+        let pts: Vec<egui::Pos2> = arc.iter().map(|p| egui::pos2(p[0], p[1])).collect();
+        painter.add(egui::Shape::line(pts, egui::Stroke::new(2.0_f32, col)));
+        painter.line_segment(
+            [origin, egui::pos2(arc[0][0], arc[0][1])],
+            egui::Stroke::new(1.25_f32, col),
+        );
+        if let Some(end) = arc.last() {
+            painter.line_segment(
+                [origin, egui::pos2(end[0], end[1])],
+                egui::Stroke::new(1.25_f32, col),
+            );
+        }
+    }
+    let mid = start + delta * 0.5;
+    let label_r = layout.radius + 16.0;
+    let label_at = egui::pos2(
+        origin.x + label_r * mid.cos(),
+        origin.y + label_r * mid.sin(),
+    );
+    let text = format!("{:+.1}°", delta.to_degrees());
+    painter.text(
+        label_at + egui::vec2(1.0, 1.0),
+        egui::Align2::CENTER_CENTER,
+        &text,
+        egui::FontId::monospace(13.0),
+        egui::Color32::from_rgb(12, 12, 12),
+    );
+    painter.text(
+        label_at,
+        egui::Align2::CENTER_CENTER,
+        text,
+        egui::FontId::monospace(13.0),
+        egui::Color32::from_rgb(255, 244, 180),
+    );
+}
+
+/// World-grid snap. Axis-aligned handles keep the old absolute snap; a rotated
+/// axis snaps the distance traveled along that axis.
+fn snap_move(
+    handle: TranslateHandle,
+    xy: [f32; 2],
+    start: [f32; 2],
+    axis_angle: f32,
+    grid: f32,
+) -> [f32; 2] {
+    let g = grid.max(1.0);
+    if axis_angle.abs() < 1e-4 {
+        return match handle {
+            TranslateHandle::X => [(xy[0] / g).round() * g, xy[1]],
+            TranslateHandle::Y => [xy[0], (xy[1] / g).round() * g],
+            TranslateHandle::Free => [(xy[0] / g).round() * g, (xy[1] / g).round() * g],
+        };
+    }
+    match handle {
+        TranslateHandle::Free => [(xy[0] / g).round() * g, (xy[1] / g).round() * g],
+        TranslateHandle::X | TranslateHandle::Y => {
+            let d = [xy[0] - start[0], xy[1] - start[1]];
+            let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            if len < 1e-4 {
+                return start;
+            }
+            let snapped = (len / g).round() * g;
+            let s = snapped / len;
+            [start[0] + d[0] * s, start[1] + d[1] * s]
+        }
+    }
+}
+
+fn entity_world_aabb(
+    scene: &Scene,
+    name: &str,
+    catalog: &wiimaker_assets::SpriteCatalog,
+) -> Option<([f32; 2], [f32; 2])> {
+    let ent = scene.find_entity(name)?;
+    let world = scene
+        .world_transform(name)
+        .unwrap_or_else(|| ent.transform.clone());
+    let mut boxes: Vec<([f32; 2], [f32; 2])> = Vec::new();
+    let angle = quat_z_radians(world.rotation);
+    let push_local = |boxes: &mut Vec<([f32; 2], [f32; 2])>, corners: &[[f32; 2]]| {
+        let mut min = [f32::MAX, f32::MAX];
+        let mut max = [f32::MIN, f32::MIN];
+        for c in corners {
+            let p = rotate_point_about([0.0, 0.0], *c, angle);
+            let x = world.translation[0] + p[0];
+            let y = world.translation[1] + p[1];
+            min[0] = min[0].min(x);
+            min[1] = min[1].min(y);
+            max[0] = max[0].max(x);
+            max[1] = max[1].max(y);
+        }
+        boxes.push((min, max));
+    };
+    if let Some(sp) = &ent.components.sprite {
+        if sp.enabled {
+            let pivot = sprite_effective_pivot(sp, Some(catalog));
+            let w = sp.size[0] * world.scale[0];
+            let h = sp.size[1] * world.scale[1];
+            let left = -w * pivot[0];
+            let top = -h * pivot[1];
+            push_local(
+                &mut boxes,
+                &[
+                    [left, top],
+                    [left + w, top],
+                    [left, top + h],
+                    [left + w, top + h],
+                ],
+            );
+        }
+    }
+    if let Some(d) = &ent.components.disc {
+        if d.enabled {
+            let r = d.radius * world.scale[0].abs().max(world.scale[1].abs());
+            boxes.push((
+                [world.translation[0] - r, world.translation[1] - r],
+                [world.translation[0] + r, world.translation[1] + r],
+            ));
+        }
+    }
+    if let Some(tm) = &ent.components.tilemap {
+        if tm.enabled {
+            let (o, size) = tm.world_rect(&world);
+            boxes.push(([o[0], o[1]], [o[0] + size[0], o[1] + size[1]]));
+        }
+    }
+    if boxes.is_empty() {
+        boxes.push((
+            [world.translation[0], world.translation[1]],
+            [world.translation[0], world.translation[1]],
+        ));
+    }
+    union_aabbs(&boxes)
 }
 
 /// Collider gizmos: seafoam AABB/circle (amber when `trigger`).
@@ -1250,10 +1712,22 @@ fn paint_game_input_overlay(ui: &mut egui::Ui, image_rect: egui::Rect, input: &I
         let stroke = egui::Stroke::new(1.5_f32, col);
         let arm = 10.0;
         let gap = 3.0;
-        painter.line_segment([egui::pos2(c.x - arm, c.y), egui::pos2(c.x - gap, c.y)], stroke);
-        painter.line_segment([egui::pos2(c.x + gap, c.y), egui::pos2(c.x + arm, c.y)], stroke);
-        painter.line_segment([egui::pos2(c.x, c.y - arm), egui::pos2(c.x, c.y - gap)], stroke);
-        painter.line_segment([egui::pos2(c.x, c.y + gap), egui::pos2(c.x, c.y + arm)], stroke);
+        painter.line_segment(
+            [egui::pos2(c.x - arm, c.y), egui::pos2(c.x - gap, c.y)],
+            stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(c.x + gap, c.y), egui::pos2(c.x + arm, c.y)],
+            stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(c.x, c.y - arm), egui::pos2(c.x, c.y - gap)],
+            stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(c.x, c.y + gap), egui::pos2(c.x, c.y + arm)],
+            stroke,
+        );
         painter.circle_stroke(c, 5.0, stroke);
     }
 
@@ -1274,10 +1748,8 @@ fn paint_game_input_overlay(ui: &mut egui::Ui, image_rect: egui::Rect, input: &I
             let bg = egui::Rect::from_min_size(egui::pos2(origin.x, y), egui::vec2(bar_w, bar_h));
             painter.rect_filled(bg, 1.0, egui::Color32::from_rgb(28, 28, 28));
             let t = ((*v + 2.0) / 4.0).clamp(0.0, 1.0);
-            let fill = egui::Rect::from_min_size(
-                egui::pos2(origin.x, y),
-                egui::vec2(bar_w * t, bar_h),
-            );
+            let fill =
+                egui::Rect::from_min_size(egui::pos2(origin.x, y), egui::vec2(bar_w * t, bar_h));
             painter.rect_filled(fill, 1.0, col);
         }
         if input.shake() || input.gesture_down(wiimaker_core::Gesture::Shake) {

@@ -177,6 +177,15 @@ pub enum EditorCmd {
         /// Must stay true (2D-only engine)
         #[arg(long, action = clap::ArgAction::Set)]
         mode_2d: Option<bool>,
+        /// Tool handle position: `pivot` (active origin) or `center` (selection bounds)
+        #[arg(long)]
+        handle_position: Option<String>,
+        /// Tool handle orientation: `local` or `global`
+        #[arg(long)]
+        handle_rotation: Option<String>,
+        /// Active Scene tool: `move` | `rotate` | `scale` | `hand` | `paint` | `erase` | `pick`
+        #[arg(long)]
+        tool: Option<String>,
     },
     /// Project explorer collapsed folders (writes `.wiimaker/prefs.toml`)
     SetProjectView {
