@@ -4,6 +4,7 @@
 
 mod app;
 mod dock;
+mod play_layout;
 mod sprite_editor;
 mod theme;
 mod ui_animator;

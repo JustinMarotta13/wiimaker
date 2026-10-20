@@ -7,11 +7,12 @@ use wiimaker_assets::{
     list_wav_clips, AnimClipCatalog, AnimatorControllerCatalog, SpriteCatalog, TimelineCatalog,
     WPack,
 };
+use wiimaker_core::draw::DrawStats;
 use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
-use wiimaker_host::{Framebuffer, HostAudio, PlayOutcome, TextureAtlas};
+use wiimaker_host::{Framebuffer, HostAudio, PlayOutcome, SuppressAudio, TextureAtlas};
 pub(crate) use wiimaker_play::PlayKind;
-use wiimaker_play::{apply_pad_keys, PadKeys, PlaySession, PlayStart};
+use wiimaker_play::{apply_pad_keys, plan_step, PadKeys, PlaySession, PlayStart, Transport};
 use wiimaker_scene::{
     add_build_scene, add_component_sprite, create_named_scene, diagnose, duplicate_entity,
     find_game_dir, hydrate_lenient_with_all_catalogs, insert_entity_clone, list_scenes,
@@ -227,6 +228,17 @@ pub(crate) struct EditorApp {
     pub(crate) edit_tool: EditTool,
     pub(crate) play_mode: PlayMode,
     pub(crate) play_session: Option<PlaySession>,
+    /// Playing + Step: run one shared frame on the next host tick, then pause.
+    pub(crate) step_pending: bool,
+    pub(crate) play_layout: crate::play_layout::PlayLayoutBackup,
+    /// Game-view dropdown changed inside the dock; apply after `DockArea` restores state.
+    pub(crate) play_layout_sync: bool,
+    /// Measured presenter intervals (seconds) for the Stats overlay.
+    pub(crate) stats_dts: Vec<f32>,
+    pub(crate) last_draw: DrawStats,
+    /// Screenshot helper: keep the Play Focused / Maximized menu open.
+    pub(crate) force_play_layout_menu: bool,
+    shot_frames: u32,
     pub(crate) tile_brush_id: u16,
     pub(crate) tile_brush_solid: bool,
     pub(crate) tile_paint: Option<TilePaintDrag>,
@@ -338,6 +350,13 @@ impl EditorApp {
             edit_tool: EditTool::Translate,
             play_mode: PlayMode::Edit,
             play_session: None,
+            step_pending: false,
+            play_layout: crate::play_layout::PlayLayoutBackup::default(),
+            play_layout_sync: false,
+            stats_dts: Vec::new(),
+            last_draw: DrawStats::default(),
+            force_play_layout_menu: false,
+            shot_frames: 0,
             tile_brush_id: 1,
             tile_brush_solid: true,
             tile_paint: None,
@@ -389,11 +408,30 @@ impl EditorApp {
                 app.select_file(Some(PathBuf::from(rel)));
             }
         }
+        if std::env::var("WIIMAKER_EDITOR_STATS").ok().as_deref() == Some("1") {
+            app.prefs.game_view.stats = true;
+        }
+        if std::env::var("WIIMAKER_EDITOR_PLAY_MENU").ok().as_deref() == Some("1") {
+            app.force_play_layout_menu = true;
+        }
+        if let Ok(tab) = std::env::var("WIIMAKER_EDITOR_TAB") {
+            app.pending_focus = match tab.trim() {
+                "Animator" => Some(EditorTab::Animator),
+                "Game" => Some(EditorTab::Game),
+                "Scene" => Some(EditorTab::Scene),
+                "Console" => Some(EditorTab::Console),
+                "Project" => Some(EditorTab::Project),
+                "Hierarchy" => Some(EditorTab::Hierarchy),
+                "Inspector" => Some(EditorTab::Inspector),
+                "Timeline" => Some(EditorTab::Timeline),
+                _ => app.pending_focus,
+            };
+        }
         if std::env::var("WIIMAKER_EDITOR_PLAY").ok().as_deref() == Some("1") {
             app.play();
         }
-        if std::env::var("WIIMAKER_EDITOR_TAB").ok().as_deref() == Some("Animator") {
-            app.pending_focus = Some(EditorTab::Animator);
+        if std::env::var("WIIMAKER_EDITOR_STEP").ok().as_deref() == Some("1") {
+            app.step_play();
         }
         app.apply_gizmo_demo();
         Ok(app)
@@ -445,6 +483,9 @@ impl EditorApp {
     }
 
     pub(crate) fn open_scene_at(&mut self, abs_path: PathBuf) {
+        if self.play_mode != PlayMode::Edit {
+            self.stop_play();
+        }
         match load_scene(&abs_path) {
             Ok(scene) => {
                 self.scene = scene;
@@ -1571,55 +1612,112 @@ impl EditorApp {
         }
     }
 
+    fn begin_play_session(&mut self) {
+        self.timeline_preview = false;
+        self.step_pending = false;
+        self.prepare_assets();
+        self.rehydrate();
+        let scene_json = serde_json::to_string(&self.scene).ok();
+        let mut session = PlaySession::start(PlayStart {
+            workspace: &self.root,
+            package: &self.project.name,
+            game_dir: &self.game_dir,
+            scene_json: scene_json.as_deref(),
+            force_fallback: false,
+            build_if_needed: true,
+        });
+        for line in session.take_logs() {
+            self.log_line(ConsoleLevel::Info, line);
+        }
+        let plugin = session.is_plugin();
+        self.play_session = Some(session);
+        self.play_mode = PlayMode::Playing;
+        self.last_play_hit = None;
+        self.sync_play_layout();
+        if !plugin {
+            self.world.queue_awake_audio();
+            self.play_host_audio();
+        }
+    }
+
+    /// Play Maximized hides other docks until Stop (or Play Focused) restores them.
+    pub(crate) fn sync_play_layout(&mut self) {
+        let in_play = self.play_mode != PlayMode::Edit;
+        self.play_layout.sync(
+            &mut self.dock_state,
+            in_play,
+            self.prefs.game_view.play_mode,
+        );
+    }
+
     pub(crate) fn play(&mut self) {
         match self.play_mode {
             PlayMode::Edit => {
-                self.timeline_preview = false;
-                self.prepare_assets();
-                self.rehydrate();
-                let scene_json = serde_json::to_string(&self.scene).ok();
-                let mut session = PlaySession::start(PlayStart {
-                    workspace: &self.root,
-                    package: &self.project.name,
-                    game_dir: &self.game_dir,
-                    scene_json: scene_json.as_deref(),
-                    force_fallback: false,
-                    build_if_needed: true,
-                });
-                for line in session.take_logs() {
-                    self.log_line(ConsoleLevel::Info, line);
-                }
-                if !session.is_plugin() {
-                    self.world.queue_awake_audio();
-                    let assets = self.project.assets_path(&self.game_dir);
-                    for err in self.host_audio.play_world(&mut self.world, &assets) {
-                        self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
-                    }
-                }
-                self.play_session = Some(session);
-                self.play_mode = PlayMode::Playing;
-                self.last_play_hit = None;
+                self.begin_play_session();
             }
             PlayMode::Paused => {
+                self.step_pending = false;
                 self.play_mode = PlayMode::Playing;
                 self.log_line(ConsoleLevel::Info, "resumed");
             }
             PlayMode::Playing => {
+                self.step_pending = false;
                 self.play_mode = PlayMode::Paused;
                 self.log_line(ConsoleLevel::Info, "paused");
             }
         }
     }
 
+    /// Unity Step: one 60 Hz frame through [`PlaySession::step_one`], then Paused.
+    ///
+    /// Stopped enters Play, runs one frame, and pauses. Paused advances one frame
+    /// and stays paused. Playing finishes the in-flight tick, then the next host
+    /// frame runs one step and pauses.
+    pub(crate) fn step_play(&mut self) {
+        let mode = match self.play_mode {
+            PlayMode::Edit => Transport::Stopped,
+            PlayMode::Playing => Transport::Playing,
+            PlayMode::Paused => Transport::Paused,
+        };
+        let plan = plan_step(mode);
+        if plan.defer_to_next_frame {
+            self.step_pending = true;
+            self.log_line(ConsoleLevel::Info, "step");
+            return;
+        }
+        if plan.enter_play {
+            self.begin_play_session();
+        }
+        self.run_one_play_frame();
+        self.play_mode = PlayMode::Paused;
+        self.log_line(ConsoleLevel::Info, "step · paused");
+    }
+
     pub(crate) fn stop_play(&mut self) {
         if self.play_mode == PlayMode::Edit {
             return;
         }
+        self.step_pending = false;
         self.play_mode = PlayMode::Edit;
         self.play_session = None;
         self.last_play_hit = None;
+        self.sync_play_layout();
         self.rehydrate();
         self.log_line(ConsoleLevel::Info, "stopped · edits preserved");
+    }
+
+    fn play_host_audio(&mut self) {
+        let mute = self.prefs.game_view.mute_audio;
+        let assets = self.project.assets_path(&self.game_dir);
+        let report = self
+            .host_audio
+            .consume_oneshots(&mut self.world, &assets, mute);
+        if mute {
+            return;
+        }
+        for err in report.errors {
+            self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
+        }
     }
 
     pub(crate) fn play_kind(&self) -> Option<PlayKind> {
@@ -1685,40 +1783,74 @@ impl EditorApp {
 
     /// In-editor play tick: game `App` plugin when present, else WASD `Player`.
     pub(crate) fn tick_play_mode(&mut self, ctx: &egui::Context) {
-        if self.play_mode != PlayMode::Playing {
+        if self.play_mode == PlayMode::Edit {
             return;
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.stop_play();
             return;
         }
+        if self.step_pending {
+            self.step_pending = false;
+            self.run_one_play_frame();
+            self.play_mode = PlayMode::Paused;
+            self.log_line(ConsoleLevel::Info, "step · paused");
+            return;
+        }
+        if self.play_mode != PlayMode::Playing {
+            return;
+        }
         let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.05);
-        let play_input = self.live_input.clone();
+        self.run_play_frames(dt, false);
+    }
 
+    fn run_one_play_frame(&mut self) {
+        self.run_play_frames(0.0, true);
+    }
+
+    fn run_play_frames(&mut self, real_dt: f32, one_frame: bool) {
+        let play_input = self.live_input.clone();
+        let mute = self.prefs.game_view.mute_audio;
         let Some(session) = self.play_session.as_mut() else {
             return;
         };
         let plugin = session.is_plugin();
-        let tick = if plugin {
-            session.tick(
-                &play_input,
-                dt,
-                None,
-                None,
-                None,
-                VIEW_W as u32,
-                VIEW_H as u32,
-            )
-        } else {
-            session.tick(
-                &play_input,
-                dt,
-                Some(&mut self.world),
-                Some(&self.catalog),
-                Some(self.atlas.map()),
-                VIEW_W as u32,
-                VIEW_H as u32,
-            )
+        let tick = {
+            let _guard = SuppressAudio::when(mute);
+            if one_frame {
+                if plugin {
+                    session.step_one(&play_input, None, None, None, VIEW_W as u32, VIEW_H as u32)
+                } else {
+                    session.step_one(
+                        &play_input,
+                        Some(&mut self.world),
+                        Some(&self.catalog),
+                        Some(self.atlas.map()),
+                        VIEW_W as u32,
+                        VIEW_H as u32,
+                    )
+                }
+            } else if plugin {
+                session.tick(
+                    &play_input,
+                    real_dt,
+                    None,
+                    None,
+                    None,
+                    VIEW_W as u32,
+                    VIEW_H as u32,
+                )
+            } else {
+                session.tick(
+                    &play_input,
+                    real_dt,
+                    Some(&mut self.world),
+                    Some(&self.catalog),
+                    Some(self.atlas.map()),
+                    VIEW_W as u32,
+                    VIEW_H as u32,
+                )
+            }
         };
         match tick {
             Ok(result) => {
@@ -1734,7 +1866,10 @@ impl EditorApp {
                     self.last_play_hit = None;
                 }
             }
-            Err(e) => self.log_line(ConsoleLevel::Error, format!("play tick: {e}")),
+            Err(e) => {
+                self.log_line(ConsoleLevel::Error, format!("play tick: {e}"));
+                self.stop_play();
+            }
         }
         let signal_lines = if plugin {
             self.play_session
@@ -1743,15 +1878,32 @@ impl EditorApp {
                 .map(crate::ui_timeline::take_timeline_signal_lines)
                 .unwrap_or_default()
         } else {
-            let assets = self.project.assets_path(&self.game_dir);
-            for err in self.host_audio.play_world(&mut self.world, &assets) {
-                self.log_line(ConsoleLevel::Warn, format!("audio: {err}"));
-            }
+            self.play_host_audio();
             crate::ui_timeline::take_timeline_signal_lines(&mut self.world)
         };
         for line in signal_lines {
             self.console_push(ConsoleLevel::Info, line);
         }
+    }
+
+    pub(crate) fn live_entity_count(&self) -> usize {
+        if let Some(world) = self.play_session.as_ref().and_then(|s| s.world()) {
+            world.iter_entities().count()
+        } else {
+            self.world.iter_entities().count()
+        }
+    }
+
+    /// Average of measured presenter intervals. `None` until a real frame lands.
+    pub(crate) fn measured_fps_ms(&self) -> Option<(f32, f32)> {
+        if self.stats_dts.is_empty() {
+            return None;
+        }
+        let avg = self.stats_dts.iter().copied().sum::<f32>() / self.stats_dts.len() as f32;
+        if !(avg.is_finite() && avg > 0.0) {
+            return None;
+        }
+        Some((1.0 / avg, avg * 1000.0))
     }
 
     fn spawn_wiimaker(&mut self, args: &[&str], ok_status: &str) {
@@ -1836,6 +1988,13 @@ impl EditorApp {
 
 impl eframe::App for EditorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let dt = ctx.input(|i| i.unstable_dt);
+        if dt.is_finite() && dt > 0.0 && dt < 2.0 {
+            self.stats_dts.push(dt);
+            if self.stats_dts.len() > 30 {
+                self.stats_dts.remove(0);
+            }
+        }
         let (cmd_s, cmd_z, cmd_shift_z, cmd_y, cmd_d, cmd_c, cmd_v, cmd_i, nudge) =
             ctx.input(|i| {
                 let cmd = i.modifiers.command;
@@ -1984,8 +2143,13 @@ impl eframe::App for EditorApp {
                 self.ui_dock(ui);
             });
         self.apply_pending_focus();
+        if self.play_layout_sync {
+            self.play_layout_sync = false;
+            self.sync_play_layout();
+        }
 
         self.flush_prefs();
+        self.maybe_screenshot(ctx);
 
         self.frame_i = self.frame_i.saturating_add(1);
         self.maybe_capture_shot(ctx);
@@ -2020,7 +2184,7 @@ impl EditorApp {
             })
         });
         if let Some(image) = image {
-            match save_screenshot(&path, &image) {
+            match save_screenshot(std::path::Path::new(&path), &image) {
                 Ok(()) => eprintln!("screenshot wrote {path}"),
                 Err(e) => eprintln!("screenshot failed: {e:#}"),
             }
@@ -2030,23 +2194,47 @@ impl EditorApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
+
+    fn maybe_screenshot(&mut self, ctx: &egui::Context) {
+        let Ok(path) = std::env::var("WIIMAKER_EDITOR_SCREENSHOT") else {
+            return;
+        };
+        if path.trim().is_empty() {
+            return;
+        }
+        self.shot_frames = self.shot_frames.saturating_add(1);
+        if self.shot_frames == 24 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        }
+        let image = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        if let Some(image) = image {
+            match save_screenshot(std::path::Path::new(path.trim()), &image) {
+                Ok(()) => std::process::exit(0),
+                Err(e) => {
+                    eprintln!("screenshot: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
 }
 
-fn save_screenshot(path: &str, image: &egui::ColorImage) -> Result<()> {
-    let mut bytes = Vec::with_capacity(image.pixels.len() * 4);
-    for p in &image.pixels {
-        bytes.push(p.r());
-        bytes.push(p.g());
-        bytes.push(p.b());
-        bytes.push(p.a());
-    }
-    let img = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, bytes)
-        .context("screenshot buffer size")?;
-    if let Some(parent) = std::path::Path::new(path).parent() {
+fn save_screenshot(path: &std::path::Path, image: &egui::ColorImage) -> Result<()> {
+    if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;
         }
     }
-    img.save(path).with_context(|| format!("write {path}"))?;
+    let w = image.width() as u32;
+    let h = image.height() as u32;
+    let buf = image::RgbaImage::from_raw(w, h, image.as_raw().to_vec())
+        .context("screenshot buffer size")?;
+    buf.save(path)
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }

@@ -66,6 +66,42 @@ impl HandlePosition {
     }
 }
 
+/// What entering Play does to the editor layout.
+///
+/// `focused` keeps the current docks. `maximized` fills the editor with the
+/// Game view until Stop restores the previous layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GamePlayMode {
+    #[default]
+    Focused,
+    Maximized,
+}
+
+impl GamePlayMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Focused => "focused",
+            Self::Maximized => "maximized",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Focused => "Play Focused",
+            Self::Maximized => "Play Maximized",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "focused" | "play focused" | "play-focused" => Ok(Self::Focused),
+            "maximized" | "play maximized" | "play-maximized" => Ok(Self::Maximized),
+            other => bail!("play-mode must be focused|maximized, got '{other}'"),
+        }
+    }
+}
+
 /// How Move / Scale handles are oriented. Unity default is Local.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -230,6 +266,15 @@ pub struct GameViewPrefs {
     /// 1.0 = contain-fit the chosen aspect in the Game well.
     #[serde(default = "default_zoom")]
     pub scale: f32,
+    /// `focused` (keep docks) or `maximized` (Game view fills the editor in Play).
+    #[serde(default)]
+    pub play_mode: GamePlayMode,
+    /// Host editor Play drops AudioSource oneshots and play-on-awake while on.
+    #[serde(default)]
+    pub mute_audio: bool,
+    /// Game view stats overlay (measured FPS, entities, DrawList).
+    #[serde(default)]
+    pub stats: bool,
 }
 
 fn default_view_w() -> u32 {
@@ -247,6 +292,9 @@ impl Default for GameViewPrefs {
             width: default_view_w(),
             height: default_view_h(),
             scale: 1.0,
+            play_mode: GamePlayMode::Focused,
+            mute_audio: false,
+            stats: false,
         }
     }
 }
@@ -319,29 +367,63 @@ pub fn infer_game_view_preset(width: u32, height: u32) -> GameViewPreset {
     GameViewPreset::Custom
 }
 
-/// Mutate Game view fields and persist. `aspect`: `free` | `fixed`.
-pub fn set_game_view(
-    game_dir: &Path,
-    width: Option<u32>,
-    height: Option<u32>,
-    aspect: Option<&str>,
-    preset: Option<&str>,
-    scale: Option<f32>,
-) -> Result<EditorPrefs> {
+/// Optional fields for [`set_game_view`] / [`apply_game_view`].
+/// Unset fields are left unchanged. `mute_audio` and `stats` are `on` | `off`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GameViewPatch<'a> {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub aspect: Option<&'a str>,
+    pub preset: Option<&'a str>,
+    pub scale: Option<f32>,
+    /// `focused` | `maximized`
+    pub play_mode: Option<&'a str>,
+    /// `on` | `off`
+    pub mute_audio: Option<&'a str>,
+    /// `on` | `off`
+    pub stats: Option<&'a str>,
+}
+
+impl GameViewPatch<'_> {
+    pub fn is_empty(self) -> bool {
+        self.width.is_none()
+            && self.height.is_none()
+            && self.aspect.is_none()
+            && self.preset.is_none()
+            && self.scale.is_none()
+            && self.play_mode.is_none()
+            && self.mute_audio.is_none()
+            && self.stats.is_none()
+    }
+}
+
+fn parse_on_off(s: &str, flag: &str) -> Result<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "on" | "true" => Ok(true),
+        "off" | "false" => Ok(false),
+        other => bail!("{flag} must be on|off, got '{other}'"),
+    }
+}
+
+/// Mutate Game view fields and persist.
+pub fn set_game_view(game_dir: &Path, patch: GameViewPatch<'_>) -> Result<EditorPrefs> {
     let mut prefs = load_editor_prefs(game_dir)?;
-    apply_game_view(&mut prefs.game_view, width, height, aspect, preset, scale)?;
+    apply_game_view(&mut prefs.game_view, patch)?;
     save_editor_prefs(game_dir, &prefs)?;
     Ok(prefs)
 }
 
-pub fn apply_game_view(
-    gv: &mut GameViewPrefs,
-    width: Option<u32>,
-    height: Option<u32>,
-    aspect: Option<&str>,
-    preset: Option<&str>,
-    scale: Option<f32>,
-) -> Result<()> {
+pub fn apply_game_view(gv: &mut GameViewPrefs, patch: GameViewPatch<'_>) -> Result<()> {
+    let GameViewPatch {
+        width,
+        height,
+        aspect,
+        preset,
+        scale,
+        play_mode,
+        mute_audio,
+        stats,
+    } = patch;
     if let Some(p) = preset {
         gv.preset = GameViewPreset::parse(p)?;
         match gv.preset {
@@ -406,6 +488,15 @@ pub fn apply_game_view(
     }
     if let Some(s) = scale {
         gv.scale = s.clamp(0.1, 8.0);
+    }
+    if let Some(mode) = play_mode {
+        gv.play_mode = GamePlayMode::parse(mode)?;
+    }
+    if let Some(m) = mute_audio {
+        gv.mute_audio = parse_on_off(m, "--mute-audio")?;
+    }
+    if let Some(s) = stats {
+        gv.stats = parse_on_off(s, "--stats")?;
     }
     Ok(())
 }
@@ -663,7 +754,17 @@ mod tests {
     #[test]
     fn set_game_view_roundtrip() {
         let dir = tmp("game-view");
-        set_game_view(&dir, Some(640), Some(480), Some("fixed"), None, Some(0.5)).unwrap();
+        set_game_view(
+            &dir,
+            GameViewPatch {
+                width: Some(640),
+                height: Some(480),
+                aspect: Some("fixed"),
+                scale: Some(0.5),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let p = load_editor_prefs(&dir).unwrap();
         assert_eq!(p.game_view.preset, GameViewPreset::Res640x480);
         assert_eq!(p.game_view.aspect, GameViewAspect::Fixed);
@@ -673,7 +774,14 @@ mod tests {
         let text = fs::read_to_string(editor_prefs_path(&dir)).unwrap();
         assert!(text.contains("640x480") || text.contains("preset"));
 
-        set_game_view(&dir, None, None, Some("free"), None, None).unwrap();
+        set_game_view(
+            &dir,
+            GameViewPatch {
+                aspect: Some("free"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let p = load_editor_prefs(&dir).unwrap();
         assert_eq!(p.game_view.preset, GameViewPreset::Free);
         assert_eq!(p.game_view.aspect, GameViewAspect::Free);
@@ -682,16 +790,39 @@ mod tests {
     #[test]
     fn preset_16_9_and_custom() {
         let dir = tmp("presets");
-        set_game_view(&dir, None, None, None, Some("16:9"), None).unwrap();
+        set_game_view(
+            &dir,
+            GameViewPatch {
+                preset: Some("16:9"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let p = load_editor_prefs(&dir).unwrap();
         assert_eq!(p.game_view.preset, GameViewPreset::Ratio16x9);
         assert_eq!(p.game_view.width, 640);
         assert_eq!(p.game_view.height, 360);
 
-        set_game_view(&dir, Some(800), Some(600), None, None, None).unwrap();
+        set_game_view(
+            &dir,
+            GameViewPatch {
+                width: Some(800),
+                height: Some(600),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let p = load_editor_prefs(&dir).unwrap();
         assert_eq!(p.game_view.preset, GameViewPreset::Ratio4x3);
-        set_game_view(&dir, Some(333), Some(111), None, None, None).unwrap();
+        set_game_view(
+            &dir,
+            GameViewPatch {
+                width: Some(333),
+                height: Some(111),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let p = load_editor_prefs(&dir).unwrap();
         assert_eq!(p.game_view.preset, GameViewPreset::Custom);
         assert_eq!(p.game_view.width, 333);
@@ -931,6 +1062,88 @@ mod tests {
         let p = load_editor_prefs(&dir).unwrap();
         assert!(p.project_view.collapsed.is_empty());
         assert_eq!(p.project_view, ProjectViewPrefs::default());
+    }
+
+    #[test]
+    fn game_view_play_mode_mute_stats_roundtrip() {
+        let dir = tmp("game-view-play");
+        set_game_view(
+            &dir,
+            GameViewPatch {
+                preset: Some("640x480"),
+                play_mode: Some("maximized"),
+                mute_audio: Some("on"),
+                stats: Some("on"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(p.game_view.play_mode, GamePlayMode::Maximized);
+        assert!(p.game_view.mute_audio);
+        assert!(p.game_view.stats);
+        assert_eq!(p.game_view.preset, GameViewPreset::Res640x480);
+        let text = fs::read_to_string(editor_prefs_path(&dir)).unwrap();
+        assert!(text.contains("maximized"));
+        assert!(text.contains("mute_audio"));
+        assert!(text.contains("stats"));
+
+        set_game_view(
+            &dir,
+            GameViewPatch {
+                play_mode: Some("focused"),
+                mute_audio: Some("off"),
+                stats: Some("off"),
+                scale: Some(1.25),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(p.game_view.play_mode, GamePlayMode::Focused);
+        assert!(!p.game_view.mute_audio);
+        assert!(!p.game_view.stats);
+        assert!((p.game_view.scale - 1.25).abs() < 1e-4);
+        assert_eq!(p.game_view.preset, GameViewPreset::Res640x480);
+
+        let err = set_game_view(
+            &dir,
+            GameViewPatch {
+                play_mode: Some("unfocused"),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("focused|maximized"), "{err}");
+        let err = set_game_view(
+            &dir,
+            GameViewPatch {
+                mute_audio: Some("maybe"),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("on|off"), "{err}");
+    }
+
+    #[test]
+    fn old_game_view_prefs_default_play_chrome() {
+        let dir = tmp("old-game-view");
+        fs::create_dir_all(dir.join(".wiimaker")).unwrap();
+        fs::write(
+            editor_prefs_path(&dir),
+            "[game_view]\npreset = \"640x480\"\nwidth = 640\nheight = 480\nscale = 1.0\n",
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(p.game_view.preset, GameViewPreset::Res640x480);
+        assert_eq!(p.game_view.width, 640);
+        assert_eq!(p.game_view.play_mode, GamePlayMode::Focused);
+        assert!(!p.game_view.mute_audio);
+        assert!(!p.game_view.stats);
+        assert_eq!(p.game_view.aspect, GameViewAspect::Free);
     }
 
     #[test]

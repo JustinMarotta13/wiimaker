@@ -11,9 +11,9 @@ use wiimaker_scene::{
     render_world_ex,
     rotate_point_about, rotation_after_drag, scale_factors, scale_point_about, scene_blit_rect,
     screen_axis_dirs, set_entity_rotation_z, set_entity_scale, set_entity_world_xy,
-    sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell, union_aabbs, GameViewAspect,
-    GameViewPreset, HandlePosition, HandleRotation, MoveHandleLayout, RotateHandleLayout,
-    ScaleHandle, ScaleHandleLayout, Scene, TranslateHandle,
+    sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell, union_aabbs, GamePlayMode,
+    GameViewAspect, GameViewPatch, GameViewPreset, HandlePosition, HandleRotation,
+    MoveHandleLayout, RotateHandleLayout, ScaleHandle, ScaleHandleLayout, Scene, TranslateHandle,
 };
 
 use crate::app::{
@@ -213,11 +213,10 @@ impl EditorApp {
             if preset != self.prefs.game_view.preset {
                 let _ = wiimaker_scene::apply_game_view(
                     &mut self.prefs.game_view,
-                    None,
-                    None,
-                    None,
-                    Some(preset.as_str()),
-                    None,
+                    GameViewPatch {
+                        preset: Some(preset.as_str()),
+                        ..Default::default()
+                    },
                 );
                 self.persist_prefs();
             }
@@ -261,21 +260,60 @@ impl EditorApp {
                 self.persist_prefs();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let caption = if self.prefs.game_view.is_free() {
-                    format!("Free · {VIEW_W}x{VIEW_H}")
-                } else {
-                    format!(
-                        "{} · {}x{}",
-                        self.prefs.game_view.preset.as_str(),
-                        self.prefs.game_view.width,
-                        self.prefs.game_view.height
+                ui.spacing_mut().item_spacing.x = 4.0;
+                // Right-to-left so the Unity order on the right is
+                // Play Focused/Maximized, Mute Audio, Stats.
+                if theme::tool_toggle(
+                    ui,
+                    self.prefs.game_view.stats,
+                    "Stats",
+                    theme::ToolGlyph::Stats,
+                )
+                .clicked()
+                {
+                    let next = if self.prefs.game_view.stats {
+                        "off"
+                    } else {
+                        "on"
+                    };
+                    if wiimaker_scene::apply_game_view(
+                        &mut self.prefs.game_view,
+                        GameViewPatch {
+                            stats: Some(next),
+                            ..Default::default()
+                        },
                     )
-                };
-                ui.label(
-                    egui::RichText::new(caption)
-                        .size(11.0)
-                        .color(theme::TEXT_DIM),
-                );
+                    .is_ok()
+                    {
+                        self.persist_prefs();
+                    }
+                }
+                if theme::tool_toggle(
+                    ui,
+                    self.prefs.game_view.mute_audio,
+                    "Mute Audio",
+                    theme::ToolGlyph::Mute,
+                )
+                .clicked()
+                {
+                    let next = if self.prefs.game_view.mute_audio {
+                        "off"
+                    } else {
+                        "on"
+                    };
+                    if wiimaker_scene::apply_game_view(
+                        &mut self.prefs.game_view,
+                        GameViewPatch {
+                            mute_audio: Some(next),
+                            ..Default::default()
+                        },
+                    )
+                    .is_ok()
+                    {
+                        self.persist_prefs();
+                    }
+                }
+                self.ui_play_layout_menu(ui);
                 if self.play_mode != PlayMode::Edit {
                     let label = match self.play_mode {
                         PlayMode::Playing => match self.play_kind() {
@@ -292,8 +330,70 @@ impl EditorApp {
                             .color(theme::ACCENT),
                     );
                 }
+                let caption = if self.prefs.game_view.is_free() {
+                    format!("Free · {VIEW_W}x{VIEW_H}")
+                } else {
+                    format!(
+                        "{} · {}x{}",
+                        self.prefs.game_view.preset.as_str(),
+                        self.prefs.game_view.width,
+                        self.prefs.game_view.height
+                    )
+                };
+                ui.label(
+                    egui::RichText::new(caption)
+                        .size(11.0)
+                        .color(theme::TEXT_DIM),
+                );
             });
         });
+    }
+
+    fn ui_play_layout_menu(&mut self, ui: &mut egui::Ui) {
+        let current = self.prefs.game_view.play_mode;
+        let popup_id = ui.make_persistent_id("game_play_layout");
+        let response = ui.add_sized(
+            [132.0, 22.0],
+            egui::Button::new(egui::RichText::new(current.label()).size(12.0)),
+        );
+        let response = response.on_hover_text(current.label());
+        if response.clicked() {
+            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+        }
+        if self.force_play_layout_menu {
+            ui.memory_mut(|mem| mem.open_popup(popup_id));
+        }
+        let mut picked = None;
+        egui::popup::popup_below_widget(
+            ui,
+            popup_id,
+            &response,
+            egui::PopupCloseBehavior::CloseOnClickOutside,
+            |ui| {
+                ui.set_min_width(148.0);
+                for mode in [GamePlayMode::Focused, GamePlayMode::Maximized] {
+                    if ui.selectable_label(mode == current, mode.label()).clicked() {
+                        picked = Some(mode);
+                    }
+                }
+            },
+        );
+        if let Some(mode) = picked {
+            ui.memory_mut(|mem| mem.close_popup());
+            if mode != current
+                && wiimaker_scene::apply_game_view(
+                    &mut self.prefs.game_view,
+                    GameViewPatch {
+                        play_mode: Some(mode.as_str()),
+                        ..Default::default()
+                    },
+                )
+                .is_ok()
+            {
+                self.persist_prefs();
+                self.play_layout_sync = true;
+            }
+        }
     }
 
     /// Scene: zoom/pan stretch of the 640×480 fb. Game: aspect-fit + letterbox.
@@ -308,6 +408,7 @@ impl EditorApp {
         } else {
             render_world_ex(&self.world, &mut draw, clear, !is_scene);
         }
+        self.last_draw = draw.stats();
         flush_with_atlas(&draw, &mut self.fb, Some(&self.atlas));
 
         let rgb = fb_to_rgb(&self.fb);
@@ -429,6 +530,17 @@ impl EditorApp {
         } else {
             self.game_view_ir_rect = Some(image_rect);
             paint_game_input_overlay(ui, image_rect, &self.live_input);
+        }
+        if !is_scene && self.prefs.game_view.stats {
+            paint_game_stats(
+                ui,
+                image_rect,
+                self.measured_fps_ms(),
+                self.live_entity_count(),
+                self.last_draw,
+                self.fb.width,
+                self.fb.height,
+            );
         }
     }
 
@@ -1722,6 +1834,52 @@ fn paint_one_outline(
 }
 
 /// Compact Game-view pad readout while Playing / Paused (host keyboard + IR + motion).
+fn paint_game_stats(
+    ui: &mut egui::Ui,
+    image_rect: egui::Rect,
+    fps_ms: Option<(f32, f32)>,
+    entities: usize,
+    draw: wiimaker_core::DrawStats,
+    fb_w: usize,
+    fb_h: usize,
+) {
+    let timing = match fps_ms {
+        Some((fps, ms)) => format!("FPS  {fps:.1}\n{ms:.2} ms\n"),
+        None => String::new(),
+    };
+    let text = format!(
+        "{timing}Entities  {entities}\nDraw cmds  {}\nSprites  {}\nText  {}\nQuads  {}\nDiscs  {}\nRender  {fb_w}×{fb_h}",
+        draw.commands, draw.sprites, draw.text, draw.quads, draw.discs
+    );
+    let color = theme::TEXT;
+    let galley = ui.fonts(|f| {
+        f.layout_job(egui::text::LayoutJob::simple(
+            text,
+            egui::FontId::monospace(12.0),
+            color,
+            240.0,
+        ))
+    });
+    let pad = 8.0;
+    let size = galley.size() + egui::vec2(pad * 2.0, pad * 2.0);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(image_rect.right() - size.x - 8.0, image_rect.top() + 8.0),
+        size,
+    );
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        egui::Rounding::same(3.0),
+        egui::Color32::from_rgba_unmultiplied(16, 16, 16, 210),
+    );
+    painter.rect_stroke(
+        rect,
+        egui::Rounding::same(3.0),
+        egui::Stroke::new(1.0_f32, theme::BORDER_SOFT),
+    );
+    painter.galley(rect.min + egui::vec2(pad, pad), galley, color);
+}
+
 fn paint_game_input_overlay(ui: &mut egui::Ui, image_rect: egui::Rect, input: &Input) {
     let painter = ui.painter();
     // Unity-ish IR reticle when aiming (readable on dark clear).

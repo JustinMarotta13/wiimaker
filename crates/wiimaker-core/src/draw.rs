@@ -190,6 +190,40 @@ impl DrawList {
     pub fn cmds(&self) -> &[DrawCmd] {
         &self.cmds
     }
+
+    /// Counts for the Game view stats overlay and `editor play-step`.
+    pub fn stats(&self) -> DrawStats {
+        let mut stats = DrawStats {
+            commands: self.cmds.len(),
+            ..DrawStats::default()
+        };
+        for cmd in &self.cmds {
+            match cmd {
+                DrawCmd::DrawSprite { texture, .. } => {
+                    if *texture == TextureId::UNTEXTURED {
+                        stats.quads += 1;
+                    } else {
+                        stats.sprites += 1;
+                    }
+                }
+                DrawCmd::DrawText { .. } => stats.text += 1,
+                DrawCmd::DrawDisc { .. } => stats.discs += 1,
+                _ => {}
+            }
+        }
+        stats
+    }
+}
+
+/// Measured DrawList breakdown. `commands` is the full buffer length.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DrawStats {
+    pub commands: usize,
+    pub sprites: usize,
+    pub text: usize,
+    /// Untextured [`DrawCmd::DrawSprite`] quads (tile tint cells).
+    pub quads: usize,
+    pub discs: usize,
 }
 
 #[cfg(all(feature = "std", test))]

@@ -38,7 +38,7 @@ pub use collider::{
     ColliderKind, MoveHit,
 };
 pub use color::Rgba8;
-pub use draw::{DrawCmd, DrawList, MeshId, Rect, TextureId};
+pub use draw::{DrawCmd, DrawList, DrawStats, MeshId, Rect, TextureId};
 pub use grid_mover::{cardinal, cell_center, step_grid_movers, Dir, GridMover, CARDINAL_DEADZONE};
 pub use input::{Button, Gesture, Input, Stick, SHAKE_DELTA_G, SWING_G};
 pub use render::{render_world, render_world_ex};

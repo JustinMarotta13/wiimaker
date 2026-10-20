@@ -177,7 +177,7 @@ impl EditorApp {
                 let full = ui.max_rect();
                 ui.set_clip_rect(full);
                 let _ = ui.allocate_rect(full, egui::Sense::hover());
-                let play_w = 120.0;
+                let play_w = 156.0;
                 let mid =
                     egui::Rect::from_center_size(full.center(), egui::vec2(play_w, full.height()));
                 let left = egui::Rect::from_min_max(
@@ -258,6 +258,12 @@ impl EditorApp {
                             .clicked()
                         {
                             self.play();
+                        }
+                        if theme::play_control(ui, PlayBtn::Step, false, true)
+                            .on_hover_text("Step")
+                            .clicked()
+                        {
+                            self.step_play();
                         }
                         if theme::play_control(ui, PlayBtn::Stop, false, in_play)
                             .on_hover_text("Stop")
