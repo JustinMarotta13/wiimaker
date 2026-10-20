@@ -4,7 +4,7 @@ use anyhow::Result;
 use wiimaker_scene::{
     add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,
     load_project, load_scene, remove_build_scene, save_scene, set_default_scene, set_game_view,
-    set_scene_clear, GameProject, Scene, EDITOR_PREFS_REL,
+    set_scene_clear, GameProject, GameViewPatch, Scene, EDITOR_PREFS_REL,
 };
 
 use crate::args::SceneCmd;
@@ -175,26 +175,27 @@ pub fn scene_cmd(root: &Path, cmd: SceneCmd, json: bool) -> Result<()> {
             aspect,
             preset,
             scale,
+            play_mode,
+            mute_audio,
+            stats,
         } => {
             let game_dir = find_game_dir(root, &game)?;
-            if width.is_none()
-                && height.is_none()
-                && aspect.is_none()
-                && preset.is_none()
-                && scale.is_none()
-            {
-                anyhow::bail!(
-                    "set-game-view needs --width/--height, --aspect free|fixed, --preset, or --scale"
-                );
-            }
-            let prefs = set_game_view(
-                &game_dir,
+            let patch = GameViewPatch {
                 width,
                 height,
-                aspect.as_deref(),
-                preset.as_deref(),
+                aspect: aspect.as_deref(),
+                preset: preset.as_deref(),
                 scale,
-            )?;
+                play_mode: play_mode.as_deref(),
+                mute_audio: mute_audio.as_deref(),
+                stats: stats.as_deref(),
+            };
+            if patch.is_empty() {
+                anyhow::bail!(
+                    "set-game-view needs --width/--height, --aspect free|fixed, --preset, --scale, --play-mode focused|maximized, --mute-audio on|off, or --stats on|off"
+                );
+            }
+            let prefs = set_game_view(&game_dir, patch)?;
             if json {
                 println!(
                     "{}",

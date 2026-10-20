@@ -10,6 +10,7 @@ mod plugin;
 mod scene_tick;
 mod session;
 mod status;
+mod step;
 
 pub use abi::{PlayInputC, PLAY_ABI_VERSION};
 pub use input_map::{apply_pad_keys, PadKeys};
@@ -20,6 +21,10 @@ pub use scene_tick::{
 pub use session::{step_app, PlayKind, PlaySession, PlayStart};
 pub use status::{
     build_play_plugin, inspect_play_plugin, package_has_cdylib, PlayStatus, FORCE_FALLBACK_ENV,
+};
+pub use step::{
+    headless_fallback_steps, headless_play_steps, plan_step, PlayStepEntity, PlayStepReport,
+    StepPlan, Transport,
 };
 pub use wiimaker_core::wiimote_map;
 

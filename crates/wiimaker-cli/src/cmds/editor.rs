@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use anyhow::Result;
-use wiimaker_play::{build_play_plugin, inspect_play_plugin};
+use wiimaker_core::input::Input;
+use wiimaker_play::{build_play_plugin, headless_play_steps, inspect_play_plugin, PlayStart};
 use wiimaker_scene::{
     find_game_dir, load_editor_prefs, load_project, set_project_view, set_scene_view,
     EDITOR_PREFS_REL,
@@ -58,6 +59,7 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
             }
             Ok(())
         }
+        EditorCmd::PlayStep { game, frames } => play_step(root, &game, frames, json),
         EditorCmd::Prefs { game } => {
             let game_dir = find_game_dir(root, &game)?;
             let prefs = load_editor_prefs(&game_dir)?;
@@ -90,12 +92,19 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                     prefs.scene_view.handle_rotation.as_str(),
                 );
                 println!(
-                    "game: preset={} aspect={:?} {}x{} scale={:.2}",
+                    "game: preset={} aspect={:?} {}x{} scale={:.2} play={} mute={} stats={}",
                     prefs.game_view.preset.as_str(),
                     prefs.game_view.aspect,
                     prefs.game_view.width,
                     prefs.game_view.height,
                     prefs.game_view.scale,
+                    prefs.game_view.play_mode.as_str(),
+                    if prefs.game_view.mute_audio {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                    if prefs.game_view.stats { "on" } else { "off" },
                 );
                 if prefs.project_view.collapsed.is_empty() {
                     println!("project: collapsed=(all expanded)");
@@ -215,4 +224,68 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
             }
         }
     }
+}
+
+fn play_step(root: &Path, game: &str, frames: u32, json: bool) -> Result<()> {
+    let game_dir = find_game_dir(root, game)?;
+    let project = load_project(&game_dir)?;
+    let input = Input::new();
+    let report = headless_play_steps(
+        PlayStart {
+            workspace: root,
+            package: &project.name,
+            game_dir: &game_dir,
+            scene_json: None,
+            force_fallback: false,
+            build_if_needed: false,
+        },
+        frames,
+        &input,
+    )?;
+    let positions: Vec<_> = report
+        .positions
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "name": e.name,
+                "x": e.x,
+                "y": e.y,
+            })
+        })
+        .collect();
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "backend": report.backend,
+                "frames": report.frames,
+                "entities": report.entities,
+                "draw_commands": report.draw.commands,
+                "sprites": report.draw.sprites,
+                "text": report.draw.text,
+                "quads": report.draw.quads,
+                "discs": report.draw.discs,
+                "positions": positions,
+                "note": report.note,
+            })
+        );
+    } else {
+        println!("play-step {}", project.name);
+        println!("  backend: {}", report.backend);
+        println!("  frames: {}", report.frames);
+        println!("  entities: {}", report.entities);
+        println!(
+            "  draw_commands: {} (sprites {} text {} quads {} discs {})",
+            report.draw.commands,
+            report.draw.sprites,
+            report.draw.text,
+            report.draw.quads,
+            report.draw.discs
+        );
+        if !report.note.is_empty() {
+            println!("  note: {}", report.note);
+        }
+    }
+    Ok(())
 }

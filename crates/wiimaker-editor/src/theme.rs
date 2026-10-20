@@ -616,6 +616,7 @@ pub fn component_card_header_ov(
 pub enum PlayBtn {
     Play,
     Pause,
+    Step,
     Stop,
 }
 
@@ -677,6 +678,20 @@ pub fn play_control(
                 color,
             );
         }
+        PlayBtn::Step => {
+            let pts = vec![
+                egui::pos2(c.x - 7.0, c.y - 6.0),
+                egui::pos2(c.x - 7.0, c.y + 6.0),
+                egui::pos2(c.x + 1.0, c.y),
+            ];
+            ui.painter()
+                .add(Shape::convex_polygon(pts, color, Stroke::NONE));
+            ui.painter().rect_filled(
+                egui::Rect::from_center_size(egui::pos2(c.x + 6.0, c.y), egui::vec2(3.0, 12.0)),
+                Rounding::same(1.0),
+                color,
+            );
+        }
         PlayBtn::Stop => {
             ui.painter().rect_filled(
                 egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)),
@@ -705,6 +720,8 @@ pub enum ToolGlyph {
     Center,
     Local,
     Global,
+    Mute,
+    Stats,
 }
 
 pub fn tool_toggle(
@@ -735,7 +752,18 @@ pub fn tool_toggle(
             .rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.0_f32, BORDER_SOFT));
     }
     let color = if selected { Color32::WHITE } else { TEXT };
-    paint_tool_glyph(ui.painter(), rect.shrink(3.5), glyph, color);
+    let glyph_rect = rect.shrink(3.5);
+    paint_tool_glyph(ui.painter(), glyph_rect, glyph, color);
+    if glyph == ToolGlyph::Mute && selected {
+        let slash = Stroke::new(1.4_f32, color);
+        ui.painter().line_segment(
+            [
+                egui::pos2(glyph_rect.left() + 1.0, glyph_rect.bottom() - 1.0),
+                egui::pos2(glyph_rect.right() - 1.0, glyph_rect.top() + 1.0),
+            ],
+            slash,
+        );
+    }
     resp
 }
 
@@ -890,6 +918,41 @@ fn paint_tool_glyph(painter: &egui::Painter, r: egui::Rect, glyph: ToolGlyph, co
                 [o, egui::pos2(o.x, r.top() + 2.0)],
                 Stroke::new(1.5_f32, AXIS_Y),
             );
+        }
+        ToolGlyph::Mute => {
+            // Speaker: body + cone. A slash means muted (selected).
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(r.left() + 1.0, c.y - 2.5),
+                    egui::pos2(c.x - 1.0, c.y + 2.5),
+                ),
+                Rounding::ZERO,
+                color,
+            );
+            let cone = vec![
+                egui::pos2(c.x - 1.0, c.y - 2.5),
+                egui::pos2(c.x - 1.0, c.y + 2.5),
+                egui::pos2(c.x + 4.0, c.y + 6.0),
+                egui::pos2(c.x + 4.0, c.y - 6.0),
+            ];
+            painter.add(Shape::convex_polygon(cone, color, Stroke::NONE));
+        }
+        ToolGlyph::Stats => {
+            let s = r.shrink(1.5);
+            let bars = [0.35_f32, 0.7, 0.5];
+            let gap = 2.0;
+            let bw = (s.width() - gap * 2.0) / 3.0;
+            for (i, h) in bars.iter().enumerate() {
+                let x = s.left() + i as f32 * (bw + gap);
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(x, s.bottom() - s.height() * h),
+                        egui::pos2(x + bw, s.bottom()),
+                    ),
+                    Rounding::same(1.0),
+                    color,
+                );
+            }
         }
     }
 }

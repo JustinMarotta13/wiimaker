@@ -20,6 +20,7 @@ pub enum PlayKind {
     Fallback,
 }
 
+#[derive(Clone, Copy)]
 pub struct PlayStart<'a> {
     pub workspace: &'a Path,
     pub package: &'a str,
@@ -36,6 +37,8 @@ pub struct PlaySession {
     plugin: Option<LoadedPlugin>,
     clock: Clock,
     logs: Vec<String>,
+    /// Frames advanced by [`PlaySession::step_one`] (the editor Step / `play-step` path).
+    stepped: u32,
 }
 
 impl PlaySession {
@@ -48,6 +51,7 @@ impl PlaySession {
                 plugin: None,
                 clock: Clock::new(60.0),
                 logs: vec!["Play Mode · fallback WASD (WIIMAKER_PLAY_FALLBACK)".into()],
+                stepped: 0,
             };
         }
 
@@ -64,6 +68,7 @@ impl PlaySession {
                             plugin: None,
                             clock: Clock::new(60.0),
                             logs,
+                            stepped: 0,
                         };
                     }
                 }
@@ -80,6 +85,7 @@ impl PlaySession {
                             plugin: Some(plugin),
                             clock: Clock::new(60.0),
                             logs,
+                            stepped: 0,
                         };
                     }
                     Err(e) => logs.push(format!("play plugin load failed: {e} · WASD fallback")),
@@ -99,6 +105,7 @@ impl PlaySession {
             plugin: None,
             clock: Clock::new(60.0),
             logs,
+            stepped: 0,
         }
     }
 
@@ -122,6 +129,10 @@ impl PlaySession {
         self.plugin.as_ref().and_then(|p| p.world())
     }
 
+    pub fn stepped(&self) -> u32 {
+        self.stepped
+    }
+
     /// Fixed-timestep ticks. Plugin runs `App::update`; fallback mutates `world`.
     pub fn tick(
         &mut self,
@@ -133,9 +144,50 @@ impl PlaySession {
         fb_w: u32,
         fb_h: u32,
     ) -> Result<FallbackTickResult> {
-        let mut last = FallbackTickResult::default();
         let steps = self.clock.push_real(real_dt);
         let dt = self.clock.dt;
+        self.run_fixed(
+            steps,
+            dt,
+            input,
+            fallback_world,
+            catalog,
+            textures,
+            fb_w,
+            fb_h,
+        )
+    }
+
+    /// Exactly one 60 Hz Play frame (`Clock::dt`), the same update Step and
+    /// `editor play-step` use. Does not drain the real-time accumulator.
+    pub fn step_one(
+        &mut self,
+        input: &Input,
+        fallback_world: Option<&mut World>,
+        catalog: Option<&SpriteCatalog>,
+        textures: Option<&TextureMap>,
+        fb_w: u32,
+        fb_h: u32,
+    ) -> Result<FallbackTickResult> {
+        let dt = self.clock.dt;
+        self.clock.frame = self.clock.frame.saturating_add(1);
+        self.clock.elapsed += dt;
+        self.stepped = self.stepped.saturating_add(1);
+        self.run_fixed(1, dt, input, fallback_world, catalog, textures, fb_w, fb_h)
+    }
+
+    fn run_fixed(
+        &mut self,
+        steps: u32,
+        dt: f32,
+        input: &Input,
+        mut fallback_world: Option<&mut World>,
+        catalog: Option<&SpriteCatalog>,
+        textures: Option<&TextureMap>,
+        fb_w: u32,
+        fb_h: u32,
+    ) -> Result<FallbackTickResult> {
+        let mut last = FallbackTickResult::default();
         match self.kind {
             PlayKind::Plugin => {
                 if let Some(p) = self.plugin.as_mut() {
@@ -145,7 +197,7 @@ impl PlaySession {
                 }
             }
             PlayKind::Fallback => {
-                if let Some(world) = fallback_world {
+                if let Some(world) = fallback_world.as_mut() {
                     for _ in 0..steps {
                         last = tick_scene_systems(
                             world,
@@ -207,6 +259,7 @@ mod tests {
             plugin: None,
             clock: Clock::new(60.0),
             logs: vec![],
+            stepped: 0,
         };
         let mut world = World::new();
         let id = world.spawn_named(
@@ -228,5 +281,52 @@ mod tests {
         let x = world.transform(id).unwrap().translation.x;
         assert!(x > 40.0, "fallback should move Player, x={x}");
         assert!(!session.is_plugin());
+    }
+
+    #[test]
+    fn step_one_is_exactly_one_60hz_player_frame() {
+        let mut session = PlaySession {
+            kind: PlayKind::Fallback,
+            plugin: None,
+            clock: Clock::new(60.0),
+            logs: vec![],
+            stepped: 0,
+        };
+        let mut world = World::new();
+        world.spawn_named(
+            "Player",
+            wiimaker_core::world::Transform::from_xy(80.0, 80.0),
+        );
+        let mut input = Input::new();
+        input.begin_frame();
+        crate::apply_pad_keys(
+            &mut input,
+            crate::PadKeys {
+                right: true,
+                ..Default::default()
+            },
+        );
+        let step = crate::PLAYER_WASD_SPEED / 60.0;
+        session
+            .step_one(&input, Some(&mut world), None, None, 640, 480)
+            .unwrap();
+        let x1 = world
+            .find_by_name("Player")
+            .and_then(|id| world.transform(id))
+            .unwrap()
+            .translation
+            .x;
+        session
+            .step_one(&input, Some(&mut world), None, None, 640, 480)
+            .unwrap();
+        let x2 = world
+            .find_by_name("Player")
+            .and_then(|id| world.transform(id))
+            .unwrap()
+            .translation
+            .x;
+        assert!((x1 - (80.0 + step)).abs() < 1e-3, "x1={x1} step={step}");
+        assert!((x2 - x1 - step).abs() < 1e-3, "x2={x2}");
+        assert_eq!(session.stepped(), 2);
     }
 }

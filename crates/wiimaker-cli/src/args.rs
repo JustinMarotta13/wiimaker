@@ -143,6 +143,15 @@ pub enum SceneCmd {
         /// Scale slider (1 = contain-fit)
         #[arg(long)]
         scale: Option<f32>,
+        /// `focused` (keep docks) or `maximized` (Game view fills the editor in Play)
+        #[arg(long)]
+        play_mode: Option<String>,
+        /// `on` drops host editor Play oneshots; `off` plays them
+        #[arg(long)]
+        mute_audio: Option<String>,
+        /// `on` shows the Game view stats overlay
+        #[arg(long)]
+        stats: Option<String>,
     },
 }
 
@@ -156,6 +165,13 @@ pub enum EditorCmd {
         /// `cargo build -p <game> --lib` first
         #[arg(long)]
         build: bool,
+    },
+    /// Advance N Play frames on the default scene (same step as the editor Step button)
+    PlayStep {
+        game: String,
+        /// Fixed 60 Hz frames to run (default 1)
+        #[arg(long, default_value_t = 1)]
+        frames: u32,
     },
     /// Scene view zoom / pan / grid / gizmos / snap
     SetSceneView {
