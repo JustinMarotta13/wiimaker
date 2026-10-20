@@ -5,6 +5,7 @@
 //! input; drag math lives here so CLI tests can match the same deltas.
 
 use crate::prefs::HandlePosition;
+use crate::scene::Scene;
 
 /// Which part of the Move gizmo the pointer grabbed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -517,6 +518,30 @@ pub fn rotate_point_about(origin: [f32; 2], point: [f32; 2], delta: f32) -> [f32
     ]
 }
 
+/// True when `name` is nested under another entry in `selected` (both in the scene).
+///
+/// Rotate/Scale gizmo drags skip such entities so parent-driven hierarchy is not
+/// applied twice (Move uses absolute world XY and does not need this filter).
+pub fn gizmo_has_selected_ancestor(scene: &Scene, name: &str, selected: &[String]) -> bool {
+    selected
+        .iter()
+        .any(|other| other != name && scene.is_descendant_of(name, other))
+}
+
+/// Names in `selected` that should receive explicit Rotate/Scale writes.
+pub fn gizmo_rotate_scale_targets(scene: &Scene, selected: &[String]) -> Vec<String> {
+    selected
+        .iter()
+        .filter(|name| !gizmo_has_selected_ancestor(scene, name, selected))
+        .cloned()
+        .collect()
+}
+
+/// Clamp one local scale axis the same way [`apply_axis_scale`] does for factors.
+pub fn clamp_entity_scale_axis(s: f32) -> f32 {
+    apply_axis_scale(1.0, if s.is_finite() && s != 0.0 { s } else { f32::NAN })
+}
+
 /// Pivot: active origin. Center: bounds center when more than one entity is selected.
 /// A single selection uses the active origin for both modes.
 pub fn gizmo_origin(
@@ -954,5 +979,115 @@ mod tests {
         let p = rotate_point_about([0.0, 0.0], [10.0, 0.0], std::f32::consts::FRAC_PI_2);
         assert!(p[0].abs() < 1e-3, "{p:?}");
         assert!((p[1] - 10.0).abs() < 1e-3, "{p:?}");
+    }
+
+    #[test]
+    fn gizmo_rotate_scale_targets_skip_nested_selection() {
+        use crate::mutate::{add_entity, set_entity_parent, MutateOpts};
+        use crate::scene::Scene;
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "P",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "C",
+            &MutateOpts {
+                x: Some(10.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_parent(&mut scene, "C", Some("P")).unwrap();
+
+        let selected = vec!["P".to_string(), "C".to_string()];
+        assert_eq!(
+            gizmo_rotate_scale_targets(&scene, &selected),
+            vec!["P".to_string()]
+        );
+        assert!(gizmo_has_selected_ancestor(&scene, "C", &selected));
+        assert!(!gizmo_has_selected_ancestor(&scene, "P", &selected));
+    }
+
+    #[test]
+    fn rotate_and_scale_apply_once_when_parent_and_child_selected() {
+        use crate::mutate::{
+            add_entity, set_entity_parent, set_entity_rotation_z, set_entity_scale,
+            set_entity_world_xy, MutateOpts,
+        };
+        use crate::scene::Scene;
+
+        let mut scene = Scene::new("t");
+        add_entity(
+            &mut scene,
+            "P",
+            &MutateOpts {
+                x: Some(0.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        add_entity(
+            &mut scene,
+            "C",
+            &MutateOpts {
+                x: Some(10.0),
+                y: Some(0.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        set_entity_parent(&mut scene, "C", Some("P")).unwrap();
+        set_entity_scale(&mut scene, "P", 2.0, 2.0).unwrap();
+        set_entity_scale(&mut scene, "C", 2.0, 2.0).unwrap();
+
+        let selected = vec!["P".to_string(), "C".to_string()];
+        let delta = std::f32::consts::FRAC_PI_2;
+        let factors = [2.0, 2.0];
+        let origin = [0.0, 0.0];
+
+        for name in gizmo_rotate_scale_targets(&scene, &selected) {
+            let snap = scene.world_transform(&name).unwrap();
+            let (rot_z, scale0, scale1) = {
+                let local = scene.find_entity(&name).unwrap();
+                (
+                    quat_z_radians(local.transform.rotation),
+                    local.transform.scale[0],
+                    local.transform.scale[1],
+                )
+            };
+            set_entity_rotation_z(&mut scene, &name, rot_z + delta).unwrap();
+            let p = rotate_point_about(origin, [snap.translation[0], snap.translation[1]], delta);
+            set_entity_world_xy(&mut scene, &name, p[0], p[1]).unwrap();
+            let sx = apply_axis_scale(scale0, factors[0]);
+            let sy = apply_axis_scale(scale1, factors[1]);
+            set_entity_scale(&mut scene, &name, sx, sy).unwrap();
+        }
+
+        let child_world = scene.world_transform("C").unwrap();
+        assert!(
+            (quat_z_radians(child_world.rotation) - delta).abs() < 1e-3,
+            "child world rot {:?}",
+            quat_z_radians(child_world.rotation).to_degrees()
+        );
+        assert!(
+            (child_world.scale[0] - 8.0).abs() < 1e-3,
+            "child world scale {:?}",
+            child_world.scale
+        );
+        assert!(
+            (quat_z_radians(scene.find_entity("C").unwrap().transform.rotation)).abs() < 1e-3,
+            "child local rot should stay 0"
+        );
     }
 }

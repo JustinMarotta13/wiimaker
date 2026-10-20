@@ -63,6 +63,8 @@ pub(crate) struct ViewportDrag {
     pub(crate) screen_pointer_start: [f32; 2],
     /// Scene pointer at drag start (scale projection).
     pub(crate) scene_pointer_start: [f32; 2],
+    /// Unwrapped pointer sweep (radians) for rotate wedge/readout during this drag.
+    pub(crate) rot_sweep_delta: f32,
 }
 
 #[derive(Clone)]

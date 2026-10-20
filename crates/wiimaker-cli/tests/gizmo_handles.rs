@@ -203,3 +203,32 @@ fn cli_rotate_and_scale_match_gizmo_helper() {
         "CLI scene JSON diverged from the gizmo helper\nCLI:\n{cli_json}\nhelper:\n{helper_json}"
     );
 }
+
+#[test]
+fn entity_set_rejects_invalid_scale_like_gizmo() {
+    let dir = tmp_game("clamp");
+    let bad = wiimaker()
+        .args([
+            "entity",
+            "set",
+            dir.to_str().unwrap(),
+            "--name",
+            "Orb",
+            "--sx",
+            "0",
+            "--sy",
+            "nan",
+            "--json",
+        ])
+        .output()
+        .expect("entity set");
+    assert!(
+        bad.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bad.stderr)
+    );
+    let scene = load_scene(&dir.join("scenes/main.scene.json")).unwrap();
+    let ent = scene.find_entity("Orb").unwrap();
+    assert!((ent.transform.scale[0] - SCALE_MIN).abs() < 1e-5);
+    assert!((ent.transform.scale[1] - SCALE_MIN).abs() < 1e-5);
+}

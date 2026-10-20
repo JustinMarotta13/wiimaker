@@ -5,8 +5,10 @@ use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
-    apply_axis_scale, arc_points, constrain_translate_oriented, fitted_blit_rect, gizmo_origin,
-    pick_entity_at_with_catalog_and_layers, pointer_to_scene, quat_z_radians, render_world_ex,
+    apply_axis_scale, arc_points, constrain_translate_oriented, fitted_blit_rect,
+    gizmo_has_selected_ancestor, gizmo_origin,
+    pick_entity_at_with_catalog_and_layers, pointer_angle_delta, pointer_to_scene, quat_z_radians,
+    render_world_ex,
     rotate_point_about, rotation_after_drag, scale_factors, scale_point_about, scene_blit_rect,
     screen_axis_dirs, set_entity_rotation_z, set_entity_scale, set_entity_world_xy,
     sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell, union_aabbs, GameViewAspect,
@@ -631,6 +633,7 @@ impl EditorApp {
                         axis_angle: self.handle_axis_angle(),
                         screen_pointer_start: [screen.x, screen.y],
                         scene_pointer_start: pos,
+                        rot_sweep_delta: 0.0,
                     });
                 } else {
                     self.select(None);
@@ -702,6 +705,13 @@ impl EditorApp {
                             );
                             let mut ok = true;
                             for snap in &drag.snaps {
+                                if gizmo_has_selected_ancestor(
+                                    &self.scene,
+                                    &snap.name,
+                                    &self.selected,
+                                ) {
+                                    continue;
+                                }
                                 let p = scale_point_about(
                                     drag.handle_origin,
                                     snap.world_xy,
@@ -726,13 +736,22 @@ impl EditorApp {
                         EditTool::Rotate => {
                             let screen_origin =
                                 scene_to_screen(rect, drag.handle_origin[0], drag.handle_origin[1]);
+                            let origin = [screen_origin.x, screen_origin.y];
                             let snap_rot = self.prefs.scene_view.snap
                                 || response
                                     .ctx
                                     .input(|i| i.modifiers.ctrl || i.modifiers.command);
+                            let sweep = pointer_angle_delta(
+                                origin,
+                                drag.screen_pointer_start,
+                                [screen.x, screen.y],
+                            );
+                            if let Some(d) = &mut self.viewport_drag {
+                                d.rot_sweep_delta = sweep;
+                            }
                             let new_rot = rotation_after_drag(
                                 drag.rot_z_start,
-                                [screen_origin.x, screen_origin.y],
+                                origin,
                                 drag.screen_pointer_start,
                                 [screen.x, screen.y],
                                 snap_rot,
@@ -740,6 +759,13 @@ impl EditorApp {
                             let delta = new_rot - drag.rot_z_start;
                             let mut ok = true;
                             for snap in &drag.snaps {
+                                if gizmo_has_selected_ancestor(
+                                    &self.scene,
+                                    &snap.name,
+                                    &self.selected,
+                                ) {
+                                    continue;
+                                }
                                 let p =
                                     rotate_point_about(drag.handle_origin, snap.world_xy, delta);
                                 if set_entity_world_xy(&mut self.scene, &snap.name, p[0], p[1])
@@ -832,12 +858,7 @@ impl EditorApp {
             if self.edit_tool != EditTool::Rotate {
                 return None;
             }
-            let cur = self
-                .scene
-                .find_entity(&drag.entity)
-                .map(|e| quat_z_radians(e.transform.rotation))
-                .unwrap_or(drag.rot_z_start);
-            return Some((drag.angle_start, cur - drag.rot_z_start));
+            return Some((drag.angle_start, drag.rot_sweep_delta));
         }
         self.gizmo_demo_sweep.map(|deg| (0.0, deg.to_radians()))
     }

@@ -5,11 +5,11 @@
 //! metadata. Editor GUI and CLI both call [`load_editor_prefs`] /
 //! [`save_editor_prefs`].
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use wiimaker_assets::atomic_write;
 
 /// Relative path under the game dir.
 pub const EDITOR_PREFS_REL: &str = ".wiimaker/prefs.toml";
@@ -292,18 +292,16 @@ pub fn load_editor_prefs(game_dir: &Path) -> Result<EditorPrefs> {
     if !path.is_file() {
         return Ok(EditorPrefs::default());
     }
-    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let text = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let prefs: EditorPrefs = toml::from_str(&text).context("parse .wiimaker/prefs.toml")?;
     Ok(prefs)
 }
 
 pub fn save_editor_prefs(game_dir: &Path, prefs: &EditorPrefs) -> Result<()> {
     let path = editor_prefs_path(game_dir);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let text = toml::to_string_pretty(prefs).context("serialize editor prefs")?;
-    fs::write(&path, text)?;
+    atomic_write(&path, (text + "\n").as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -642,6 +640,8 @@ pub fn set_project_view(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn tmp(label: &str) -> PathBuf {

@@ -37,7 +37,8 @@ pub use controller_param::{
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use gizmo::{
     apply_axis_scale, arc_points, axis_dirs, bounds_center, constrain_translate,
-    constrain_translate_oriented, gizmo_origin, pointer_angle_delta, quat_z_radians,
+    clamp_entity_scale_axis, constrain_translate_oriented, gizmo_has_selected_ancestor,
+    gizmo_origin, gizmo_rotate_scale_targets, pointer_angle_delta, quat_z_radians,
     rotate_point_about, rotation_after_drag, scale_factors, scale_point_about, screen_axis_dirs,
     snap_angle, union_aabbs, wrap_pi, MoveHandleLayout, RotateHandle, RotateHandleLayout,
     ScaleHandle, ScaleHandleLayout, TranslateHandle, ROTATE_SNAP_DEG, ROTATE_SNAP_RAD, SCALE_MAX,

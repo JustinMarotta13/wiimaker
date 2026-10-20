@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Result};
 
+use crate::gizmo::clamp_entity_scale_axis;
 use crate::scene::{EntityData, Scene, SceneComponents, SceneDisc, SceneSprite, SceneTransform};
 
 #[derive(Clone, Debug, Default)]
@@ -617,11 +618,11 @@ pub fn set_component_enabled(
     Ok(())
 }
 
-/// Set local XY scale (preserves Z scale).
+/// Set local XY scale (preserves Z scale). Magnitude clamped like the Scale gizmo.
 pub fn set_entity_scale(scene: &mut Scene, name: &str, sx: f32, sy: f32) -> Result<()> {
     let ent = find_mut(scene, name)?;
-    ent.transform.scale[0] = sx;
-    ent.transform.scale[1] = sy;
+    ent.transform.scale[0] = clamp_entity_scale_axis(sx);
+    ent.transform.scale[1] = clamp_entity_scale_axis(sy);
     Ok(())
 }
 
