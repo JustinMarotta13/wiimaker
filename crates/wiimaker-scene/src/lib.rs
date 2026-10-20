@@ -49,7 +49,8 @@ pub use hydrate::{
     hydrate_into_with_catalogs, hydrate_lenient, hydrate_lenient_with_all_catalogs,
     hydrate_lenient_with_catalog, hydrate_lenient_with_catalogs,
     hydrate_lenient_with_sorting_layers, hydrate_with_all_catalogs, hydrate_with_catalog,
-    hydrate_with_catalogs, load_scene_into_world, sprite_effective_pivot, TextureMap,
+    hydrate_with_catalogs, load_scene_into_world, sprite_effective_pivot, texture_map_from_wpack,
+    TextureMap,
 };
 pub use mutate::{
     add_component_animation, add_component_animator, add_component_audio_source,
@@ -84,7 +85,8 @@ pub use prefab::{
     PrefabVariantChrome, SceneInheritSlot,
 };
 pub use prefs::{
-    apply_game_view, apply_project_view, apply_scene_view, editor_prefs_path, fitted_blit_rect,
+    apply_game_view, apply_project_view, apply_scene_view, clamp_viewport_well_size,
+    editor_prefs_path, fitted_blit_rect, game_view_blit_rect,
     folder_is_collapsed, infer_game_view_preset, load_editor_prefs, normalize_project_rel,
     project_rel_hidden_by_collapse, save_editor_prefs, scene_blit_rect, set_game_view,
     set_project_view, set_scene_view, toggle_project_collapsed, EditorPrefs, GamePlayMode,

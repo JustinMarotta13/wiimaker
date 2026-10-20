@@ -10,7 +10,7 @@ use wiimaker_assets::{AnimClipCatalog, SpriteCatalog};
 use wiimaker_core::draw::DrawStats;
 use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
-use wiimaker_scene::{load_project, load_scene, render_world, TextureMap};
+use wiimaker_scene::{load_project, load_scene, render_world, texture_map_from_wpack};
 
 use crate::scene_tick::hydrate_play_world;
 use crate::session::{PlayKind, PlaySession, PlayStart};
@@ -116,7 +116,7 @@ pub fn headless_play_steps(
         let catalog =
             SpriteCatalog::load_dir(&assets, |_| None).unwrap_or_else(|_| SpriteCatalog::empty());
         let anims = AnimClipCatalog::load_dir(&assets).unwrap_or_else(|_| AnimClipCatalog::empty());
-        let textures = TextureMap::new();
+        let textures = texture_map_from_wpack(opts.game_dir, &project)?;
         hydrate_play_world(
             &mut fallback_world,
             opts.game_dir,
@@ -269,5 +269,94 @@ mod tests {
         );
         assert!((player.y - 80.0).abs() < 1e-3);
         assert!(headless_fallback_steps(&dir, 0, &input).is_err());
+    }
+
+    #[test]
+    fn headless_fallback_steps_sprite_missing_from_wpack() {
+        let dir = std::env::temp_dir().join(format!(
+            "wiimaker-play-step-sprite-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("scenes")).unwrap();
+        fs::create_dir_all(dir.join("assets")).unwrap();
+        let mut project = GameProject::new("step-sprite-miss");
+        project.default_scene = "scenes/main.scene.json".into();
+        save_project(&dir, &project).unwrap();
+        let mut scene = Scene::new("main");
+        wiimaker_scene::add_entity(
+            &mut scene,
+            "Player",
+            &wiimaker_scene::MutateOpts {
+                x: Some(12.0),
+                y: Some(34.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        wiimaker_scene::add_component_sprite(
+            &mut scene,
+            "Player",
+            "basic_space_suit",
+            [32.0, 32.0],
+        )
+        .unwrap();
+        save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+
+        let input = Input::new();
+        let report = headless_fallback_steps(&dir, 1, &input).unwrap();
+        assert_eq!(report.backend, "fallback");
+        assert_eq!(report.frames, 1);
+        assert_eq!(report.entities, 1);
+        assert!(report.draw.commands >= 1);
+        assert_eq!(report.draw.sprites, 0);
+    }
+
+    #[test]
+    fn headless_fallback_steps_loads_sprite_from_wpack() {
+        use wiimaker_assets::WPack;
+
+        let dir = std::env::temp_dir().join(format!(
+            "wiimaker-play-step-wpack-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("scenes")).unwrap();
+        fs::create_dir_all(dir.join("assets")).unwrap();
+        let mut project = GameProject::new("step-wpack");
+        project.default_scene = "scenes/main.scene.json".into();
+        save_project(&dir, &project).unwrap();
+        let mut scene = Scene::new("main");
+        wiimaker_scene::add_entity(
+            &mut scene,
+            "Hero",
+            &wiimaker_scene::MutateOpts {
+                x: Some(50.0),
+                y: Some(60.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        wiimaker_scene::add_component_sprite(&mut scene, "Hero", "hero_tex", [16.0, 16.0])
+            .unwrap();
+        save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+
+        let mut pack = WPack::new();
+        pack.textures.push(wiimaker_assets::PackedTexture {
+            name: "hero_tex".into(),
+            width: 8,
+            height: 8,
+            rgba16: vec![0; 128],
+        });
+        pack.write_to(&project.wpack_path(&dir)).unwrap();
+
+        let input = Input::new();
+        let report = headless_fallback_steps(&dir, 1, &input).unwrap();
+        assert_eq!(report.backend, "fallback");
+        assert_eq!(report.frames, 1);
+        assert_eq!(report.entities, 1);
+        assert!(report.draw.sprites >= 1, "sprites={}", report.draw.sprites);
     }
 }

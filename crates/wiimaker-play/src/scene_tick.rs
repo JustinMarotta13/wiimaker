@@ -10,8 +10,8 @@ use wiimaker_core::input::Input;
 use wiimaker_core::math::Vec2;
 use wiimaker_core::world::{World, SCREEN_H, SCREEN_W};
 use wiimaker_scene::{
-    animate_world, hydrate_lenient_with_all_catalogs, load_project, load_scene_into_world, Scene,
-    TextureMap,
+    animate_world, hydrate_lenient_with_all_catalogs, load_project, load_scene, resolve_scene_rel,
+    Scene, TextureMap,
 };
 
 /// Pixels per second for free (non-GridMover) `Player` WASD.
@@ -117,15 +117,19 @@ pub fn hydrate_play_world(
         );
         Ok(scene.clear_rgba())
     } else {
-        Ok(load_scene_into_world(
-            world,
-            game_dir,
-            &project,
-            "",
+        let rel = resolve_scene_rel(game_dir, project.default_scene.as_str())?;
+        let scene = load_scene(&game_dir.join(&rel))?;
+        let layers = project.effective_sorting_layers();
+        *world = hydrate_lenient_with_all_catalogs(
+            &scene,
             textures,
             Some(catalog),
             Some(anims),
-        )?)
+            Some(&controllers),
+            Some(&layers),
+            Some(&timelines),
+        );
+        Ok(scene.clear_rgba())
     }
 }
 
