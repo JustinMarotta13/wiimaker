@@ -76,7 +76,7 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                 let kind = if path.is_file() { "file" } else { "defaults" };
                 println!("{} ({kind})", path.display());
                 println!(
-                    "scene: zoom={:.2} pan=({:.1},{:.1}) grid={} gizmos={} snap={} snap_size={:.0} 2d={}",
+                    "scene: zoom={:.2} pan=({:.1},{:.1}) grid={} gizmos={} snap={} snap_size={:.0} 2d={} tool={} handles={}/{}",
                     prefs.scene_view.zoom,
                     prefs.scene_view.pan_x,
                     prefs.scene_view.pan_y,
@@ -85,6 +85,9 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                     prefs.scene_view.snap,
                     prefs.scene_view.snap_size,
                     prefs.scene_view.mode_2d,
+                    prefs.scene_view.tool.as_str(),
+                    prefs.scene_view.handle_position.as_str(),
+                    prefs.scene_view.handle_rotation.as_str(),
                 );
                 println!(
                     "game: preset={} aspect={:?} {}x{} scale={:.2}",
@@ -115,6 +118,9 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
             snap,
             snap_size,
             mode_2d,
+            handle_position,
+            handle_rotation,
+            tool,
         } => {
             let game_dir = find_game_dir(root, &game)?;
             if zoom.is_none()
@@ -125,11 +131,27 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                 && snap.is_none()
                 && snap_size.is_none()
                 && mode_2d.is_none()
+                && handle_position.is_none()
+                && handle_rotation.is_none()
+                && tool.is_none()
             {
-                anyhow::bail!("set-scene-view needs at least one flag (--zoom, --grid, …)");
+                anyhow::bail!(
+                    "set-scene-view needs at least one flag (--zoom, --grid, --handle-position, --tool, …)"
+                );
             }
             let prefs = set_scene_view(
-                &game_dir, zoom, pan_x, pan_y, grid, gizmos, snap, snap_size, mode_2d,
+                &game_dir,
+                zoom,
+                pan_x,
+                pan_y,
+                grid,
+                gizmos,
+                snap,
+                snap_size,
+                mode_2d,
+                handle_position.as_deref(),
+                handle_rotation.as_deref(),
+                tool.as_deref(),
             )?;
             if json {
                 println!(

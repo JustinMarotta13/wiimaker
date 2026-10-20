@@ -5,11 +5,11 @@
 //! metadata. Editor GUI and CLI both call [`load_editor_prefs`] /
 //! [`save_editor_prefs`].
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use wiimaker_assets::atomic_write;
 
 /// Relative path under the game dir.
 pub const EDITOR_PREFS_REL: &str = ".wiimaker/prefs.toml";
@@ -38,6 +38,101 @@ pub enum GameViewPreset {
     #[serde(rename = "4:3")]
     Ratio4x3,
     Custom,
+}
+
+/// Where the Scene tool handle sits. Unity default is Pivot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HandlePosition {
+    #[default]
+    Pivot,
+    Center,
+}
+
+impl HandlePosition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pivot => "pivot",
+            Self::Center => "center",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "pivot" => Ok(Self::Pivot),
+            "center" => Ok(Self::Center),
+            other => bail!("handle position must be pivot|center, got '{other}'"),
+        }
+    }
+}
+
+/// How Move / Scale handles are oriented. Unity default is Local.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HandleRotation {
+    #[default]
+    Local,
+    Global,
+}
+
+impl HandleRotation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Global => "global",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "local" => Ok(Self::Local),
+            "global" => Ok(Self::Global),
+            other => bail!("handle rotation must be local|global, got '{other}'"),
+        }
+    }
+}
+
+/// Active Scene toolbar tool. Persisted so the editor reopens on the same tool.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SceneTool {
+    #[default]
+    Move,
+    Rotate,
+    Scale,
+    Hand,
+    Paint,
+    Erase,
+    Pick,
+}
+
+impl SceneTool {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Move => "move",
+            Self::Rotate => "rotate",
+            Self::Scale => "scale",
+            Self::Hand => "hand",
+            Self::Paint => "paint",
+            Self::Erase => "erase",
+            Self::Pick => "pick",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "move" | "translate" => Ok(Self::Move),
+            "rotate" => Ok(Self::Rotate),
+            "scale" => Ok(Self::Scale),
+            "hand" | "pan" => Ok(Self::Hand),
+            "paint" => Ok(Self::Paint),
+            "erase" => Ok(Self::Erase),
+            "pick" => Ok(Self::Pick),
+            other => {
+                bail!("scene tool must be move|rotate|scale|hand|paint|erase|pick, got '{other}'")
+            }
+        }
+    }
 }
 
 impl GameViewPreset {
@@ -83,6 +178,15 @@ pub struct SceneViewPrefs {
     pub snap: bool,
     #[serde(default = "default_snap_size")]
     pub snap_size: f32,
+    /// Tool handle position. Missing key → Pivot (Unity default).
+    #[serde(default)]
+    pub handle_position: HandlePosition,
+    /// Tool handle orientation. Missing key → Local (Unity default).
+    #[serde(default)]
+    pub handle_rotation: HandleRotation,
+    /// Active Scene tool. Missing key → Move.
+    #[serde(default)]
+    pub tool: SceneTool,
 }
 
 fn default_zoom() -> f32 {
@@ -106,6 +210,9 @@ impl Default for SceneViewPrefs {
             mode_2d: true,
             snap: false,
             snap_size: default_snap_size(),
+            handle_position: HandlePosition::Pivot,
+            handle_rotation: HandleRotation::Local,
+            tool: SceneTool::Move,
         }
     }
 }
@@ -185,18 +292,16 @@ pub fn load_editor_prefs(game_dir: &Path) -> Result<EditorPrefs> {
     if !path.is_file() {
         return Ok(EditorPrefs::default());
     }
-    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let text = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let prefs: EditorPrefs = toml::from_str(&text).context("parse .wiimaker/prefs.toml")?;
     Ok(prefs)
 }
 
 pub fn save_editor_prefs(game_dir: &Path, prefs: &EditorPrefs) -> Result<()> {
     let path = editor_prefs_path(game_dir);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let text = toml::to_string_pretty(prefs).context("serialize editor prefs")?;
-    fs::write(&path, text)?;
+    atomic_write(&path, (text + "\n").as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -317,6 +422,9 @@ pub fn set_scene_view(
     snap: Option<bool>,
     snap_size: Option<f32>,
     mode_2d: Option<bool>,
+    handle_position: Option<&str>,
+    handle_rotation: Option<&str>,
+    tool: Option<&str>,
 ) -> Result<EditorPrefs> {
     let mut prefs = load_editor_prefs(game_dir)?;
     apply_scene_view(
@@ -329,6 +437,9 @@ pub fn set_scene_view(
         snap,
         snap_size,
         mode_2d,
+        handle_position,
+        handle_rotation,
+        tool,
     )?;
     save_editor_prefs(game_dir, &prefs)?;
     Ok(prefs)
@@ -345,6 +456,9 @@ pub fn apply_scene_view(
     snap: Option<bool>,
     snap_size: Option<f32>,
     mode_2d: Option<bool>,
+    handle_position: Option<&str>,
+    handle_rotation: Option<&str>,
+    tool: Option<&str>,
 ) -> Result<()> {
     if let Some(z) = zoom {
         sv.zoom = z.clamp(0.1, 16.0);
@@ -372,6 +486,15 @@ pub fn apply_scene_view(
             bail!("3D Scene view is not available (engine is 2D-only)");
         }
         sv.mode_2d = true;
+    }
+    if let Some(p) = handle_position {
+        sv.handle_position = HandlePosition::parse(p)?;
+    }
+    if let Some(r) = handle_rotation {
+        sv.handle_rotation = HandleRotation::parse(r)?;
+    }
+    if let Some(t) = tool {
+        sv.tool = SceneTool::parse(t)?;
     }
     Ok(())
 }
@@ -517,6 +640,8 @@ pub fn set_project_view(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn tmp(label: &str) -> PathBuf {
@@ -585,6 +710,9 @@ mod tests {
             Some(true),
             Some(32.0),
             Some(true),
+            None,
+            None,
+            None,
         )
         .unwrap();
         let p = load_editor_prefs(&dir).unwrap();
@@ -593,9 +721,78 @@ mod tests {
         assert!(!p.scene_view.gizmos);
         assert!(p.scene_view.snap);
         assert!((p.scene_view.snap_size - 32.0).abs() < 1e-4);
-        assert!(
-            set_scene_view(&dir, None, None, None, None, None, None, None, Some(false)).is_err()
-        );
+        assert_eq!(p.scene_view.handle_position, HandlePosition::Pivot);
+        assert_eq!(p.scene_view.handle_rotation, HandleRotation::Local);
+        assert_eq!(p.scene_view.tool, SceneTool::Move);
+        assert!(set_scene_view(
+            &dir,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(false),
+            None,
+            None,
+            None,
+        )
+        .is_err());
+
+        set_scene_view(
+            &dir,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("center"),
+            Some("global"),
+            Some("rotate"),
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert_eq!(p.scene_view.handle_position, HandlePosition::Center);
+        assert_eq!(p.scene_view.handle_rotation, HandleRotation::Global);
+        assert_eq!(p.scene_view.tool, SceneTool::Rotate);
+        assert!((p.scene_view.zoom - 2.0).abs() < 1e-4);
+        assert!(set_scene_view(
+            &dir,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("nope"),
+            None,
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn old_scene_prefs_default_pivot_local_move() {
+        let dir = tmp("old-scene-prefs");
+        fs::create_dir_all(dir.join(".wiimaker")).unwrap();
+        fs::write(
+            editor_prefs_path(&dir),
+            "[scene_view]\nzoom = 1.25\ngrid_overlay = true\n",
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert!((p.scene_view.zoom - 1.25).abs() < 1e-4);
+        assert!(p.scene_view.grid_overlay);
+        assert_eq!(p.scene_view.handle_position, HandlePosition::Pivot);
+        assert_eq!(p.scene_view.handle_rotation, HandleRotation::Local);
+        assert_eq!(p.scene_view.tool, SceneTool::Move);
+        assert!(p.scene_view.gizmos);
     }
 
     #[test]

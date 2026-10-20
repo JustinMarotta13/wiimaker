@@ -35,7 +35,15 @@ pub use controller_param::{
     remove_entity_animator_param, remove_scene_animator_param, rename_controller_param_for_game,
 };
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
-pub use gizmo::{constrain_translate, MoveHandleLayout, TranslateHandle};
+pub use gizmo::{
+    apply_axis_scale, arc_points, axis_dirs, bounds_center, constrain_translate,
+    clamp_entity_scale_axis, constrain_translate_oriented, gizmo_has_selected_ancestor,
+    gizmo_origin, gizmo_rotate_scale_targets, pointer_angle_delta, quat_z_radians,
+    rotate_point_about, rotation_after_drag, scale_factors, scale_point_about, screen_axis_dirs,
+    snap_angle, union_aabbs, wrap_pi, MoveHandleLayout, RotateHandle, RotateHandleLayout,
+    ScaleHandle, ScaleHandleLayout, TranslateHandle, ROTATE_SNAP_DEG, ROTATE_SNAP_RAD, SCALE_MAX,
+    SCALE_MIN,
+};
 pub use hydrate::{
     hydrate, hydrate_into, hydrate_into_with_all_catalogs, hydrate_into_with_catalog,
     hydrate_into_with_catalogs, hydrate_lenient, hydrate_lenient_with_all_catalogs,
@@ -80,7 +88,8 @@ pub use prefs::{
     folder_is_collapsed, infer_game_view_preset, load_editor_prefs, normalize_project_rel,
     project_rel_hidden_by_collapse, save_editor_prefs, scene_blit_rect, set_game_view,
     set_project_view, set_scene_view, toggle_project_collapsed, EditorPrefs, GameViewAspect,
-    GameViewPrefs, GameViewPreset, ProjectViewPrefs, SceneViewPrefs, EDITOR_PREFS_REL,
+    GameViewPrefs, GameViewPreset, HandlePosition, HandleRotation, ProjectViewPrefs, SceneTool,
+    SceneViewPrefs, EDITOR_PREFS_REL,
 };
 pub use project::{
     add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,

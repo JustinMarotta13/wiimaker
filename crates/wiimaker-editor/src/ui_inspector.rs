@@ -1844,7 +1844,7 @@ impl EditorApp {
         if add_tilemap {
             self.push_undo();
             let _ = add_component_tilemap(&mut self.scene, &sel, 32, 18, 16.0);
-            self.edit_tool = crate::app::EditTool::Paint;
+            self.set_edit_tool(crate::app::EditTool::Paint);
             self.sync_baseline();
             self.mark_dirty();
         }
@@ -2169,7 +2169,7 @@ impl EditorApp {
         if let Some((id, solid)) = use_brush {
             self.tile_brush_id = id;
             self.tile_brush_solid = solid;
-            self.edit_tool = crate::app::EditTool::Paint;
+            self.set_edit_tool(crate::app::EditTool::Paint);
             self.status = format!("brush {id}");
         }
         if let Some(rel) = pending_ascii_import {

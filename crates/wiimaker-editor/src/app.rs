@@ -16,8 +16,8 @@ use wiimaker_scene::{
     add_build_scene, add_component_sprite, create_named_scene, diagnose, duplicate_entity,
     find_game_dir, hydrate_lenient_with_all_catalogs, insert_entity_clone, list_scenes,
     load_editor_prefs, load_project, load_scene, remove_build_scene, rename_entity,
-    save_editor_prefs, save_scene, set_default_scene, EditorPrefs, EntityData, GameProject, Scene,
-    Severity, TranslateHandle, UndoStack,
+    save_editor_prefs, save_scene, set_default_scene, EditorPrefs, EntityData, GameProject,
+    HandlePosition, HandleRotation, Scene, SceneTool, Severity, TranslateHandle, UndoStack,
 };
 
 use crate::dock::{self, EditorTab};
@@ -27,6 +27,16 @@ use crate::ui_animator::AnimatorView;
 use crate::ui_project;
 use crate::viewport::{VIEW_H, VIEW_W};
 
+/// One selected entity's pose at the start of a gizmo drag.
+#[derive(Clone)]
+pub(crate) struct XformSnap {
+    pub(crate) name: String,
+    pub(crate) world_xy: [f32; 2],
+    pub(crate) scale: [f32; 2],
+    /// Local Z rotation (radians) at drag start.
+    pub(crate) rot_z: f32,
+}
+
 /// Active viewport transform drag.
 #[derive(Clone)]
 pub(crate) struct ViewportDrag {
@@ -35,17 +45,26 @@ pub(crate) struct ViewportDrag {
     pub(crate) grab_offset: [f32; 2],
     /// Primary entity world XY at drag start.
     pub(crate) primary_start: [f32; 2],
-    /// Other selected entities' world XY at drag start (for bulk translate).
-    pub(crate) others_start: Vec<(String, [f32; 2])>,
-    /// Scale tool: local XY scale at drag start (primary).
-    pub(crate) scale_start: [f32; 2],
-    /// Scale tool: pointer distance from entity at drag start.
-    pub(crate) dist_start: f32,
-    /// Rotate tool: atan2 angle at drag start + entity Z angle at start.
+    /// Every selected entity (including the primary) at drag start.
+    pub(crate) snaps: Vec<XformSnap>,
+    /// Rotate: screen-space atan2 of the pointer around the handle at drag start.
     pub(crate) angle_start: f32,
+    /// Primary local Z at drag start.
     pub(crate) rot_z_start: f32,
     /// Move tool: axis constraint (`Free` for body drag / XY square).
     pub(crate) translate_handle: TranslateHandle,
+    /// Scale tool: axis (`Uniform` for body drag / center square).
+    pub(crate) scale_handle: wiimaker_scene::ScaleHandle,
+    /// Scene-space handle origin, frozen for the drag (Pivot or Center).
+    pub(crate) handle_origin: [f32; 2],
+    /// Handle axis angle at drag start (0 in Global).
+    pub(crate) axis_angle: f32,
+    /// Screen pointer at drag start (rotate sweep).
+    pub(crate) screen_pointer_start: [f32; 2],
+    /// Scene pointer at drag start (scale projection).
+    pub(crate) scene_pointer_start: [f32; 2],
+    /// Unwrapped pointer sweep (radians) for rotate wedge/readout during this drag.
+    pub(crate) rot_sweep_delta: f32,
 }
 
 #[derive(Clone)]
@@ -68,6 +87,30 @@ pub(crate) enum EditTool {
 impl EditTool {
     pub(crate) fn is_tile_tool(self) -> bool {
         matches!(self, Self::Paint | Self::Erase | Self::Pick)
+    }
+
+    pub(crate) fn to_scene(self) -> SceneTool {
+        match self {
+            Self::Translate => SceneTool::Move,
+            Self::Scale => SceneTool::Scale,
+            Self::Rotate => SceneTool::Rotate,
+            Self::Paint => SceneTool::Paint,
+            Self::Erase => SceneTool::Erase,
+            Self::Pick => SceneTool::Pick,
+            Self::Hand => SceneTool::Hand,
+        }
+    }
+
+    pub(crate) fn from_scene(tool: SceneTool) -> Self {
+        match tool {
+            SceneTool::Move => Self::Translate,
+            SceneTool::Scale => Self::Scale,
+            SceneTool::Rotate => Self::Rotate,
+            SceneTool::Paint => Self::Paint,
+            SceneTool::Erase => Self::Erase,
+            SceneTool::Pick => Self::Pick,
+            SceneTool::Hand => Self::Hand,
+        }
     }
 }
 
@@ -211,6 +254,10 @@ pub(crate) struct EditorApp {
     pub(crate) tl_curve_key: Option<TlCurveKeySel>,
     /// Animator window pan / zoom / selection (session-only; positions live in the controller).
     pub(crate) animator_view: AnimatorView,
+    /// Frames since open (screenshot helper).
+    pub(crate) frame_i: u32,
+    /// When set, the Rotate gizmo draws a swept wedge of this many degrees (screenshot helper).
+    pub(crate) gizmo_demo_sweep: Option<f32>,
 }
 
 /// Selected key on a timeline curve (asset edit, not scene undo).
@@ -312,13 +359,18 @@ impl EditorApp {
             tl_curve_open: Vec::new(),
             tl_curve_key: None,
             animator_view: AnimatorView::default(),
+            frame_i: 0,
+            gizmo_demo_sweep: None,
         };
         app.reload_assets()?;
         app.refresh_scenes();
         app.refresh_project_tree();
         app.rehydrate();
         match load_editor_prefs(&app.game_dir) {
-            Ok(p) => app.prefs = p,
+            Ok(p) => {
+                app.edit_tool = EditTool::from_scene(p.scene_view.tool);
+                app.prefs = p;
+            }
             Err(e) => app.status = format!("prefs: {e}"),
         }
         app.status = format!("opened {}", app.project.name);
@@ -343,6 +395,7 @@ impl EditorApp {
         if std::env::var("WIIMAKER_EDITOR_TAB").ok().as_deref() == Some("Animator") {
             app.pending_focus = Some(EditorTab::Animator);
         }
+        app.apply_gizmo_demo();
         Ok(app)
     }
 
@@ -697,6 +750,50 @@ impl EditorApp {
 
     pub(crate) fn persist_prefs(&mut self) {
         self.prefs_dirty = true;
+    }
+
+    pub(crate) fn set_edit_tool(&mut self, tool: EditTool) {
+        self.edit_tool = tool;
+        self.prefs.scene_view.tool = tool.to_scene();
+        self.persist_prefs();
+    }
+
+    /// `WIIMAKER_EDITOR_GIZMO=rotate|scale|toolbar` poses the Scene view for proof shots.
+    /// Does not write prefs.
+    fn apply_gizmo_demo(&mut self) {
+        let Ok(mode) = std::env::var("WIIMAKER_EDITOR_GIZMO") else {
+            return;
+        };
+        match mode.trim().to_ascii_lowercase().as_str() {
+            "rotate" => {
+                self.edit_tool = EditTool::Rotate;
+                self.prefs.scene_view.tool = SceneTool::Rotate;
+                let sweep = std::env::var("WIIMAKER_EDITOR_SWEEP")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(68.0);
+                self.gizmo_demo_sweep = Some(sweep);
+                if let Some(name) = self.selected.last().cloned() {
+                    let _ = wiimaker_scene::set_entity_rotation_z(
+                        &mut self.scene,
+                        &name,
+                        sweep.to_radians(),
+                    );
+                    self.rehydrate();
+                }
+            }
+            "scale" => {
+                self.edit_tool = EditTool::Scale;
+                self.prefs.scene_view.tool = SceneTool::Scale;
+            }
+            "toolbar" => {
+                self.edit_tool = EditTool::Translate;
+                self.prefs.scene_view.tool = SceneTool::Move;
+                self.prefs.scene_view.handle_position = HandlePosition::Center;
+                self.prefs.scene_view.handle_rotation = HandleRotation::Global;
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn flush_prefs(&mut self) {
@@ -1890,6 +1987,66 @@ impl eframe::App for EditorApp {
 
         self.flush_prefs();
 
+        self.frame_i = self.frame_i.saturating_add(1);
+        self.maybe_capture_shot(ctx);
+        if let Ok(n) = std::env::var("WIIMAKER_EDITOR_EXIT_FRAMES") {
+            if let Ok(n) = n.parse::<u32>() {
+                if self.frame_i > n {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+
         ctx.request_repaint();
     }
+}
+
+impl EditorApp {
+    /// `WIIMAKER_EDITOR_SHOT=path.png` grabs the window after layout and exits.
+    fn maybe_capture_shot(&mut self, ctx: &egui::Context) {
+        let Ok(path) = std::env::var("WIIMAKER_EDITOR_SHOT") else {
+            return;
+        };
+        if path.is_empty() {
+            return;
+        }
+        if self.frame_i == 24 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        }
+        let image = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        if let Some(image) = image {
+            match save_screenshot(&path, &image) {
+                Ok(()) => eprintln!("screenshot wrote {path}"),
+                Err(e) => eprintln!("screenshot failed: {e:#}"),
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if self.frame_i > 90 {
+            eprintln!("screenshot timed out");
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+}
+
+fn save_screenshot(path: &str, image: &egui::ColorImage) -> Result<()> {
+    let mut bytes = Vec::with_capacity(image.pixels.len() * 4);
+    for p in &image.pixels {
+        bytes.push(p.r());
+        bytes.push(p.g());
+        bytes.push(p.b());
+        bytes.push(p.a());
+    }
+    let img = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, bytes)
+        .context("screenshot buffer size")?;
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    img.save(path).with_context(|| format!("write {path}"))?;
+    Ok(())
 }
