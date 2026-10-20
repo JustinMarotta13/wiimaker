@@ -56,6 +56,22 @@ impl TextureMap {
     }
 }
 
+/// Texture ids from the cooked `.wpack`, in pack order (same as the host atlas).
+/// A missing pack yields an empty map so lenient hydrate skips unknown sprites.
+pub fn texture_map_from_wpack(
+    game_dir: &Path,
+    project: &crate::project::GameProject,
+) -> Result<TextureMap> {
+    let path = project.wpack_path(game_dir);
+    if !path.is_file() {
+        return Ok(TextureMap::new());
+    }
+    let pack = wiimaker_assets::WPack::read_from(&path)?;
+    Ok(TextureMap::from_names(
+        pack.textures.iter().map(|tex| tex.name.as_str()),
+    ))
+}
+
 pub fn hydrate(scene: &Scene, textures: &TextureMap) -> Result<World> {
     hydrate_with_catalog(scene, textures, None)
 }

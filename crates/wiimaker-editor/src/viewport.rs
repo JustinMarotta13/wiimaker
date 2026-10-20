@@ -5,7 +5,7 @@ use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
-    apply_axis_scale, arc_points, constrain_translate_oriented, fitted_blit_rect,
+    apply_axis_scale, arc_points, constrain_translate_oriented, game_view_blit_rect,
     gizmo_has_selected_ancestor, gizmo_origin,
     pick_entity_at_with_catalog_and_layers, pointer_angle_delta, pointer_to_scene, quat_z_radians,
     render_world_ex,
@@ -32,6 +32,21 @@ enum ToolHit {
 
 pub(crate) const VIEW_W: usize = 640;
 pub(crate) const VIEW_H: usize = 480;
+
+/// Clamp egui's sometimes-infinite `available_size` to the tab body's real bounds.
+fn viewport_well_size(ui: &egui::Ui) -> egui::Vec2 {
+    let max = ui.max_rect().size();
+    let mut size = ui.available_size();
+    if !size.x.is_finite() || size.x <= 0.0 {
+        size.x = max.x;
+    }
+    if !size.y.is_finite() || size.y <= 0.0 {
+        size.y = max.y;
+    }
+    size.x = size.x.min(max.x).max(1.0);
+    size.y = size.y.min(max.y).max(1.0);
+    size
+}
 
 impl EditorApp {
     pub(crate) fn ui_viewport(&mut self, ui: &mut egui::Ui, tab: CenterTab) {
@@ -422,7 +437,7 @@ impl EditorApp {
             .get_or_insert_with(|| ctx.load_texture("viewport", color_image.clone(), tex_filter));
         tex.set(color_image, tex_filter);
 
-        let well_size = ui.available_size();
+        let well_size = viewport_well_size(ui);
         let (well, _) = ui.allocate_exact_size(well_size, egui::Sense::hover());
         ui.set_clip_rect(ui.clip_rect().intersect(well));
 
@@ -435,9 +450,8 @@ impl EditorApp {
                 scene_blit_rect(well.width(), well.height(), sv.zoom, sv.pan_x, sv.pan_y);
             egui::Rect::from_min_size(well.min + egui::vec2(x, y), egui::vec2(w, h))
         } else {
-            let gv = &self.prefs.game_view;
-            let (aw, ah) = gv.aspect_wh(well.width(), well.height());
-            let (x, y, w, h) = fitted_blit_rect(well.width(), well.height(), aw, ah, gv.scale);
+            let (x, y, w, h) =
+                game_view_blit_rect(&self.prefs.game_view, well.width(), well.height());
             egui::Rect::from_min_size(well.min + egui::vec2(x, y), egui::vec2(w, h))
         };
 

@@ -4,16 +4,21 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use wiimaker_scene::{save_project, save_scene, GameProject, Scene};
+use wiimaker_scene::{
+    add_component_sprite, add_entity, save_project, save_scene, GameProject, MutateOpts, Scene,
+};
 
 fn wiimaker() -> Command {
     Command::new(env!("CARGO_BIN_EXE_wiimaker"))
 }
 
 fn tmp_game() -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "wiimaker-cli-play-step-prefs-{}",
-        std::process::id()
+        "wiimaker-cli-play-step-prefs-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("scenes")).unwrap();
@@ -174,6 +179,40 @@ fn play_step_cli_on_ci_scaffold() {
     assert!(stdout.contains("backend:"), "{stdout}");
     assert!(stdout.contains("draw_commands:"), "{stdout}");
     assert!(!stdout.contains("\"positions\""), "{stdout}");
+}
+
+#[test]
+fn play_step_cli_sprite_missing_from_wpack() {
+    let dir = tmp_game();
+    let mut scene = Scene::new("main");
+    add_entity(
+        &mut scene,
+        "Hero",
+        &MutateOpts {
+            x: Some(100.0),
+            y: Some(50.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    add_component_sprite(&mut scene, "Hero", "basic_space_suit", [32.0, 32.0]).unwrap();
+    save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+
+    let out = wiimaker()
+        .args(["editor", "play-step", dir.to_str().unwrap(), "--frames", "2", "--json"])
+        .env("WIIMAKER_AUDIO", "0")
+        .output()
+        .expect("play-step sprite");
+    assert!(
+        out.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["frames"], 2);
+    assert!(v["entities"].as_u64().unwrap() >= 1);
 }
 
 #[test]

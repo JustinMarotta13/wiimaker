@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use wiimaker_assets::atomic_write;
+use wiimaker_core::world::{SCREEN_H, SCREEN_W};
 
 /// Relative path under the game dir.
 pub const EDITOR_PREFS_REL: &str = ".wiimaker/prefs.toml";
@@ -300,10 +301,11 @@ impl Default for GameViewPrefs {
 }
 
 impl GameViewPrefs {
-    /// Aspect numerator/denominator for letterbox. Free uses the well size.
+    /// Aspect numerator/denominator for letterbox. Free uses the 640×480 game frame.
     pub fn aspect_wh(&self, well_w: f32, well_h: f32) -> (f32, f32) {
+        let _ = (well_w, well_h);
         match self.preset {
-            GameViewPreset::Free => (well_w.max(1.0), well_h.max(1.0)),
+            GameViewPreset::Free => (SCREEN_W, SCREEN_H),
             GameViewPreset::Res640x480 => (640.0, 480.0),
             GameViewPreset::Ratio16x9 => (16.0, 9.0),
             GameViewPreset::Ratio4x3 => (4.0, 3.0),
@@ -588,6 +590,12 @@ pub fn apply_scene_view(
         sv.tool = SceneTool::parse(t)?;
     }
     Ok(())
+}
+
+/// Game view image rect inside the tab well (aspect prefs + [`fitted_blit_rect`]).
+pub fn game_view_blit_rect(gv: &GameViewPrefs, well_w: f32, well_h: f32) -> (f32, f32, f32, f32) {
+    let (aw, ah) = gv.aspect_wh(well_w, well_h);
+    fitted_blit_rect(well_w, well_h, aw, ah, gv.scale)
 }
 
 /// Largest `aw:ah` rectangle that fits in `well_w × well_h`, then scaled about center.
@@ -943,6 +951,23 @@ mod tests {
         assert!(y > 50.0); // letterbox
         assert!(x.abs() < 0.01);
         let _ = h;
+    }
+
+    #[test]
+    fn free_preset_uses_game_resolution_aspect() {
+        let gv = GameViewPrefs::default();
+        let (aw, ah) = gv.aspect_wh(1920.0, 1080.0);
+        assert!((aw - 640.0).abs() < 1e-3 && (ah - 480.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn free_game_view_letterboxes_ultrawide_well() {
+        let gv = GameViewPrefs::default();
+        let (x, y, w, h) = game_view_blit_rect(&gv, 1920.0, 1080.0);
+        assert!((h - 1080.0).abs() < 0.01);
+        assert!((w - 1440.0).abs() < 0.01);
+        assert!((x - 240.0).abs() < 0.01);
+        assert!(y.abs() < 0.01);
     }
 
     #[test]
