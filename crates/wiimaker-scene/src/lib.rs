@@ -85,8 +85,8 @@ pub use prefab::{
     PrefabVariantChrome, SceneInheritSlot,
 };
 pub use prefs::{
-    apply_game_view, apply_project_view, apply_scene_view, editor_prefs_path, fitted_blit_rect,
-    game_view_blit_rect,
+    apply_game_view, apply_project_view, apply_scene_view, clamp_viewport_well_size,
+    editor_prefs_path, fitted_blit_rect, game_view_blit_rect,
     folder_is_collapsed, infer_game_view_preset, load_editor_prefs, normalize_project_rel,
     project_rel_hidden_by_collapse, save_editor_prefs, scene_blit_rect, set_game_view,
     set_project_view, set_scene_view, toggle_project_collapsed, EditorPrefs, GamePlayMode,

@@ -5,7 +5,8 @@ use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
-    apply_axis_scale, arc_points, constrain_translate_oriented, game_view_blit_rect,
+    apply_axis_scale, arc_points, clamp_viewport_well_size, constrain_translate_oriented,
+    game_view_blit_rect,
     gizmo_has_selected_ancestor, gizmo_origin,
     pick_entity_at_with_catalog_and_layers, pointer_angle_delta, pointer_to_scene, quat_z_radians,
     render_world_ex,
@@ -33,19 +34,11 @@ enum ToolHit {
 pub(crate) const VIEW_W: usize = 640;
 pub(crate) const VIEW_H: usize = 480;
 
-/// Clamp egui's sometimes-infinite `available_size` to the tab body's real bounds.
 fn viewport_well_size(ui: &egui::Ui) -> egui::Vec2 {
     let max = ui.max_rect().size();
-    let mut size = ui.available_size();
-    if !size.x.is_finite() || size.x <= 0.0 {
-        size.x = max.x;
-    }
-    if !size.y.is_finite() || size.y <= 0.0 {
-        size.y = max.y;
-    }
-    size.x = size.x.min(max.x).max(1.0);
-    size.y = size.y.min(max.y).max(1.0);
-    size
+    let avail = ui.available_size();
+    let (w, h) = clamp_viewport_well_size(avail.x, avail.y, max.x, max.y);
+    egui::vec2(w, h)
 }
 
 impl EditorApp {
@@ -450,8 +443,14 @@ impl EditorApp {
                 scene_blit_rect(well.width(), well.height(), sv.zoom, sv.pan_x, sv.pan_y);
             egui::Rect::from_min_size(well.min + egui::vec2(x, y), egui::vec2(w, h))
         } else {
-            let (x, y, w, h) =
-                game_view_blit_rect(&self.prefs.game_view, well.width(), well.height());
+            let play_maximized = self.play_mode != PlayMode::Edit
+                && self.prefs.game_view.play_mode == GamePlayMode::Maximized;
+            let (x, y, w, h) = game_view_blit_rect(
+                &self.prefs.game_view,
+                well.width(),
+                well.height(),
+                play_maximized,
+            );
             egui::Rect::from_min_size(well.min + egui::vec2(x, y), egui::vec2(w, h))
         };
 

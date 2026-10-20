@@ -301,11 +301,10 @@ impl Default for GameViewPrefs {
 }
 
 impl GameViewPrefs {
-    /// Aspect numerator/denominator for letterbox. Free uses the 640×480 game frame.
+    /// Aspect numerator/denominator for letterbox. Free uses the well size (Unity Free Aspect).
     pub fn aspect_wh(&self, well_w: f32, well_h: f32) -> (f32, f32) {
-        let _ = (well_w, well_h);
         match self.preset {
-            GameViewPreset::Free => (SCREEN_W, SCREEN_H),
+            GameViewPreset::Free => (well_w.max(1.0), well_h.max(1.0)),
             GameViewPreset::Res640x480 => (640.0, 480.0),
             GameViewPreset::Ratio16x9 => (16.0, 9.0),
             GameViewPreset::Ratio4x3 => (4.0, 3.0),
@@ -592,9 +591,41 @@ pub fn apply_scene_view(
     Ok(())
 }
 
+/// Clamp egui-style well sizing (Play Maximized can report infinite `available_size`).
+pub fn clamp_viewport_well_size(
+    available_w: f32,
+    available_h: f32,
+    max_w: f32,
+    max_h: f32,
+) -> (f32, f32) {
+    let mut w = available_w;
+    let mut h = available_h;
+    if !w.is_finite() || w <= 0.0 {
+        w = max_w;
+    }
+    if !h.is_finite() || h <= 0.0 {
+        h = max_h;
+    }
+    w = w.min(max_w).max(1.0);
+    h = h.min(max_h).max(1.0);
+    (w, h)
+}
+
 /// Game view image rect inside the tab well (aspect prefs + [`fitted_blit_rect`]).
-pub fn game_view_blit_rect(gv: &GameViewPrefs, well_w: f32, well_h: f32) -> (f32, f32, f32, f32) {
-    let (aw, ah) = gv.aspect_wh(well_w, well_h);
+///
+/// When `play_maximized` and the preset is Free, letterbox to the 640×480 game frame
+/// instead of stretching to the maximized panel aspect.
+pub fn game_view_blit_rect(
+    gv: &GameViewPrefs,
+    well_w: f32,
+    well_h: f32,
+    play_maximized: bool,
+) -> (f32, f32, f32, f32) {
+    let (aw, ah) = if play_maximized && gv.is_free() {
+        (SCREEN_W, SCREEN_H)
+    } else {
+        gv.aspect_wh(well_w, well_h)
+    };
     fitted_blit_rect(well_w, well_h, aw, ah, gv.scale)
 }
 
@@ -954,16 +985,21 @@ mod tests {
     }
 
     #[test]
-    fn free_preset_uses_game_resolution_aspect() {
+    fn docked_free_fills_well_aspect() {
         let gv = GameViewPrefs::default();
         let (aw, ah) = gv.aspect_wh(1920.0, 1080.0);
-        assert!((aw - 640.0).abs() < 1e-3 && (ah - 480.0).abs() < 1e-3);
+        assert!((aw - 1920.0).abs() < 1e-3 && (ah - 1080.0).abs() < 1e-3);
+        let (x, y, w, h) = game_view_blit_rect(&gv, 1920.0, 1080.0, false);
+        assert!((w - 1920.0).abs() < 0.01 && (h - 1080.0).abs() < 0.01);
+        assert!(x.abs() < 0.01 && y.abs() < 0.01);
     }
 
     #[test]
-    fn free_game_view_letterboxes_ultrawide_well() {
+    fn maximized_free_letterboxes_ultrawide_well() {
         let gv = GameViewPrefs::default();
-        let (x, y, w, h) = game_view_blit_rect(&gv, 1920.0, 1080.0);
+        let (well_w, well_h) = clamp_viewport_well_size(f32::INFINITY, 1080.0, 1920.0, 1080.0);
+        assert!((well_w - 1920.0).abs() < 0.01 && (well_h - 1080.0).abs() < 0.01);
+        let (x, y, w, h) = game_view_blit_rect(&gv, well_w, well_h, true);
         assert!((h - 1080.0).abs() < 0.01);
         assert!((w - 1440.0).abs() < 0.01);
         assert!((x - 240.0).abs() < 0.01);

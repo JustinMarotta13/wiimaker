@@ -310,5 +310,53 @@ mod tests {
         assert_eq!(report.frames, 1);
         assert_eq!(report.entities, 1);
         assert!(report.draw.commands >= 1);
+        assert_eq!(report.draw.sprites, 0);
+    }
+
+    #[test]
+    fn headless_fallback_steps_loads_sprite_from_wpack() {
+        use wiimaker_assets::WPack;
+
+        let dir = std::env::temp_dir().join(format!(
+            "wiimaker-play-step-wpack-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("scenes")).unwrap();
+        fs::create_dir_all(dir.join("assets")).unwrap();
+        let mut project = GameProject::new("step-wpack");
+        project.default_scene = "scenes/main.scene.json".into();
+        save_project(&dir, &project).unwrap();
+        let mut scene = Scene::new("main");
+        wiimaker_scene::add_entity(
+            &mut scene,
+            "Hero",
+            &wiimaker_scene::MutateOpts {
+                x: Some(50.0),
+                y: Some(60.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        wiimaker_scene::add_component_sprite(&mut scene, "Hero", "hero_tex", [16.0, 16.0])
+            .unwrap();
+        save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
+
+        let mut pack = WPack::new();
+        pack.textures.push(wiimaker_assets::PackedTexture {
+            name: "hero_tex".into(),
+            width: 8,
+            height: 8,
+            rgba16: vec![0; 128],
+        });
+        pack.write_to(&project.wpack_path(&dir)).unwrap();
+
+        let input = Input::new();
+        let report = headless_fallback_steps(&dir, 1, &input).unwrap();
+        assert_eq!(report.backend, "fallback");
+        assert_eq!(report.frames, 1);
+        assert_eq!(report.entities, 1);
+        assert!(report.draw.sprites >= 1, "sprites={}", report.draw.sprites);
     }
 }
