@@ -148,6 +148,16 @@ fn clear_drop_arrow(ui: &mut egui::Ui, open: bool) -> egui::Response {
     resp
 }
 
+/// Message column width after the level tag, reserving space for the count badge.
+pub(crate) fn collapsed_message_max_width(
+    row_right: f32,
+    text_start_x: f32,
+    show_badge: bool,
+) -> f32 {
+    let badge_reserve = if show_badge { 36.0 } else { 0.0 };
+    (row_right - text_start_x - badge_reserve).max(1.0)
+}
+
 fn paint_count_badge(ui: &egui::Ui, row: egui::Rect, count: usize) {
     let brect = egui::Rect::from_center_size(
         egui::pos2(row.right() - 16.0, row.center().y),
@@ -345,11 +355,11 @@ impl EditorApp {
                                 .color(color)
                                 .monospace(),
                         );
-                        if show_badge {
-                            let limit = full.right() - 36.0;
-                            ui.set_max_width((limit - ui.cursor().left()).max(1.0));
-                        }
-                        ui.add(
+                        let text_start = ui.cursor().left();
+                        let text_w =
+                            collapsed_message_max_width(full.right(), text_start, show_badge);
+                        ui.add_sized(
+                            egui::vec2(text_w, 0.0),
                             egui::Label::new(
                                 RichText::new(&line.text).size(12.0).color(theme::TEXT),
                             )
@@ -493,5 +503,17 @@ mod tests {
         let groups = console_collapse_groups(&lines, true);
         assert_eq!(groups.len(), 2);
         assert!(groups.iter().all(|g| g.count == 1));
+    }
+
+    #[test]
+    fn collapsed_message_width_reserves_level_tag_and_badge() {
+        let row_left = 10.0;
+        let row_right = 410.0;
+        let tag_w = 36.0;
+        let text_start = row_left + tag_w;
+        let w = collapsed_message_max_width(row_right, text_start, true);
+        assert_eq!(w, row_right - text_start - 36.0);
+        assert_eq!(collapsed_message_max_width(row_right, text_start, false), 364.0);
+        assert_eq!(collapsed_message_max_width(row_right, row_right, true), 1.0);
     }
 }

@@ -37,6 +37,9 @@ impl App for Probe {
     }
 
     fn update(&mut self, ctx: &FrameCtx<'_>) {
+        if std::env::var("WIIMAKER_PLAY_PROBE_FAIL").ok().as_deref() == Some("1") {
+            panic!("intentional play_probe fail tick");
+        }
         self.ticks += 1;
         if let Some(id) = self.world.find_by_name("Marker") {
             if let Some(xf) = self.world.transform_mut(id) {
