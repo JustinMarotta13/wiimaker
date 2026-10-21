@@ -10,7 +10,9 @@ use wiimaker_assets::{AnimClipCatalog, SpriteCatalog};
 use wiimaker_core::draw::DrawStats;
 use wiimaker_core::input::Input;
 use wiimaker_core::world::World;
-use wiimaker_scene::{load_project, load_scene, render_world, texture_map_from_wpack};
+use wiimaker_scene::{
+    console_should_error_pause, load_project, load_scene, render_world, texture_map_from_wpack,
+};
 
 use crate::scene_tick::hydrate_play_world;
 use crate::session::{PlayKind, PlaySession, PlayStart};
@@ -62,6 +64,21 @@ pub struct PlayStepReport {
     pub positions: Vec<PlayStepEntity>,
     /// Why this backend ran (plugin load log, or the fallback reason).
     pub note: String,
+    /// Error Pause stopped the run on a failed tick instead of returning `Err`.
+    /// `frames` counts `step_one` calls that started, including that failed tick.
+    pub paused_on_error: bool,
+    /// The tick error when [`Self::paused_on_error`] is set.
+    pub error: Option<String>,
+}
+
+/// A failed Play tick pauses when Error Pause is on. Otherwise the error propagates
+/// (editor hard-stop / CLI non-zero). `Ok(None)` means the tick succeeded.
+pub(crate) fn settle_tick<T>(result: Result<T>, error_pause: bool) -> Result<Option<String>> {
+    match result {
+        Ok(_) => Ok(None),
+        Err(e) if console_should_error_pause(error_pause, true, true) => Ok(Some(e.to_string())),
+        Err(e) => Err(e),
+    }
 }
 
 fn backend_name(kind: PlayKind) -> &'static str {
@@ -95,6 +112,7 @@ pub fn headless_play_steps(
     opts: PlayStart<'_>,
     frames: u32,
     input: &Input,
+    error_pause: bool,
 ) -> Result<PlayStepReport> {
     if frames == 0 {
         bail!("--frames must be > 0");
@@ -111,6 +129,7 @@ pub fn headless_play_steps(
     let clear = scene.clear_rgba();
 
     let mut fallback_world = World::new();
+    let mut paused_on_error = None;
     if !session.is_plugin() {
         let assets = project.assets_path(opts.game_dir);
         let catalog =
@@ -127,18 +146,26 @@ pub fn headless_play_steps(
         )?;
         fallback_world.queue_awake_audio();
         for _ in 0..frames {
-            session.step_one(
+            let step = session.step_one(
                 input,
                 Some(&mut fallback_world),
                 Some(&catalog),
                 Some(&textures),
                 640,
                 480,
-            )?;
+            );
+            if let Some(err) = settle_tick(step, error_pause)? {
+                paused_on_error = Some(err);
+                break;
+            }
         }
     } else {
         for _ in 0..frames {
-            session.step_one(input, None, None, None, 640, 480)?;
+            let step = session.step_one(input, None, None, None, 640, 480);
+            if let Some(err) = settle_tick(step, error_pause)? {
+                paused_on_error = Some(err);
+                break;
+            }
         }
     }
 
@@ -154,6 +181,8 @@ pub fn headless_play_steps(
         draw: draw.stats(),
         positions,
         note,
+        paused_on_error: paused_on_error.is_some(),
+        error: paused_on_error,
     })
 }
 
@@ -175,6 +204,7 @@ pub fn headless_fallback_steps(
         },
         frames,
         input,
+        false,
     )
 }
 
@@ -268,7 +298,18 @@ mod tests {
             player.x
         );
         assert!((player.y - 80.0).abs() < 1e-3);
+        assert!(!report.paused_on_error);
+        assert!(report.error.is_none());
         assert!(headless_fallback_steps(&dir, 0, &input).is_err());
+    }
+
+    #[test]
+    fn settle_tick_pauses_instead_of_failing_when_error_pause_is_on() {
+        let boom = || Err::<(), anyhow::Error>(anyhow::anyhow!("play plugin update failed (-1)"));
+        let paused = settle_tick(boom(), true).unwrap();
+        assert_eq!(paused.as_deref(), Some("play plugin update failed (-1)"));
+        assert!(settle_tick(boom(), false).is_err());
+        assert!(settle_tick(Ok(()), true).unwrap().is_none());
     }
 
     #[test]
@@ -339,8 +380,7 @@ mod tests {
             },
         )
         .unwrap();
-        wiimaker_scene::add_component_sprite(&mut scene, "Hero", "hero_tex", [16.0, 16.0])
-            .unwrap();
+        wiimaker_scene::add_component_sprite(&mut scene, "Hero", "hero_tex", [16.0, 16.0]).unwrap();
         save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
 
         let mut pack = WPack::new();

@@ -4,8 +4,8 @@ use anyhow::Result;
 use wiimaker_core::input::Input;
 use wiimaker_play::{build_play_plugin, headless_play_steps, inspect_play_plugin, PlayStart};
 use wiimaker_scene::{
-    find_game_dir, load_editor_prefs, load_project, set_project_view, set_scene_view,
-    EDITOR_PREFS_REL,
+    find_game_dir, load_editor_prefs, load_project, set_console, set_project_view, set_scene_view,
+    ConsolePatch, EDITOR_PREFS_REL,
 };
 
 use crate::args::EditorCmd;
@@ -114,8 +114,56 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                         prefs.project_view.collapsed.join(",")
                     );
                 }
+                println!(
+                    "console: clear-on-play={} clear-on-build={} collapse={} error-pause={}",
+                    on_off(prefs.console.clear_on_play),
+                    on_off(prefs.console.clear_on_build),
+                    on_off(prefs.console.collapse),
+                    on_off(prefs.console.error_pause),
+                );
             }
             Ok(())
+        }
+        EditorCmd::SetConsole {
+            game,
+            clear_on_play,
+            clear_on_build,
+            collapse,
+            error_pause,
+        } => {
+            let game_dir = find_game_dir(root, &game)?;
+            let prefs = set_console(
+                &game_dir,
+                ConsolePatch {
+                    clear_on_play: clear_on_play.as_deref(),
+                    clear_on_build: clear_on_build.as_deref(),
+                    collapse: collapse.as_deref(),
+                    error_pause: error_pause.as_deref(),
+                },
+            )?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "message": "console prefs updated",
+                        "path": game_dir.join(EDITOR_PREFS_REL).to_string_lossy(),
+                        "console": prefs.console,
+                        "prefs": prefs,
+                    })
+                );
+                Ok(())
+            } else {
+                emit_ok(json, "console prefs updated")?;
+                println!(
+                    "console: clear-on-play={} clear-on-build={} collapse={} error-pause={}",
+                    on_off(prefs.console.clear_on_play),
+                    on_off(prefs.console.clear_on_build),
+                    on_off(prefs.console.collapse),
+                    on_off(prefs.console.error_pause),
+                );
+                Ok(())
+            }
         }
         EditorCmd::SetSceneView {
             game,
@@ -230,6 +278,7 @@ fn play_step(root: &Path, game: &str, frames: u32, json: bool) -> Result<()> {
     let game_dir = find_game_dir(root, game)?;
     let project = load_project(&game_dir)?;
     let input = Input::new();
+    let prefs = load_editor_prefs(&game_dir)?;
     let report = headless_play_steps(
         PlayStart {
             workspace: root,
@@ -241,6 +290,7 @@ fn play_step(root: &Path, game: &str, frames: u32, json: bool) -> Result<()> {
         },
         frames,
         &input,
+        prefs.console.error_pause,
     )?;
     let positions: Vec<_> = report
         .positions
@@ -268,6 +318,8 @@ fn play_step(root: &Path, game: &str, frames: u32, json: bool) -> Result<()> {
                 "discs": report.draw.discs,
                 "positions": positions,
                 "note": report.note,
+                "paused_on_error": report.paused_on_error,
+                "error": report.error,
             })
         );
     } else {
@@ -286,6 +338,20 @@ fn play_step(root: &Path, game: &str, frames: u32, json: bool) -> Result<()> {
         if !report.note.is_empty() {
             println!("  note: {}", report.note);
         }
+        if report.paused_on_error {
+            println!(
+                "  paused on error: {}",
+                report.error.as_deref().unwrap_or("")
+            );
+        }
     }
     Ok(())
+}
+
+fn on_off(on: bool) -> &'static str {
+    if on {
+        "on"
+    } else {
+        "off"
+    }
 }

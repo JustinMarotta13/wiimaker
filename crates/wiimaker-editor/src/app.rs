@@ -14,11 +14,12 @@ use wiimaker_host::{Framebuffer, HostAudio, PlayOutcome, SuppressAudio, TextureA
 pub(crate) use wiimaker_play::PlayKind;
 use wiimaker_play::{apply_pad_keys, plan_step, PadKeys, PlaySession, PlayStart, Transport};
 use wiimaker_scene::{
-    add_build_scene, add_component_sprite, create_named_scene, diagnose, duplicate_entity,
-    find_game_dir, hydrate_lenient_with_all_catalogs, insert_entity_clone, list_scenes,
-    load_editor_prefs, load_project, load_scene, remove_build_scene, rename_entity,
-    save_editor_prefs, save_scene, set_default_scene, EditorPrefs, EntityData, GameProject,
-    HandlePosition, HandleRotation, Scene, SceneTool, Severity, TranslateHandle, UndoStack,
+    add_build_scene, add_component_sprite, console_should_clear, console_should_error_pause,
+    create_named_scene, diagnose, duplicate_entity, find_game_dir,
+    hydrate_lenient_with_all_catalogs, insert_entity_clone, list_scenes, load_editor_prefs,
+    load_project, load_scene, remove_build_scene, rename_entity, save_editor_prefs, save_scene,
+    set_default_scene, ConsoleClearWhen, EditorPrefs, EntityData, GameProject, HandlePosition,
+    HandleRotation, Scene, SceneTool, Severity, TranslateHandle, UndoStack,
 };
 
 use crate::dock::{self, EditorTab};
@@ -238,6 +239,8 @@ pub(crate) struct EditorApp {
     pub(crate) last_draw: DrawStats,
     /// Screenshot helper: keep the Play Focused / Maximized menu open.
     pub(crate) force_play_layout_menu: bool,
+    /// Screenshot helper: keep the Console Clear dropdown open.
+    pub(crate) force_console_menu: bool,
     shot_frames: u32,
     pub(crate) tile_brush_id: u16,
     pub(crate) tile_brush_solid: bool,
@@ -356,6 +359,7 @@ impl EditorApp {
             stats_dts: Vec::new(),
             last_draw: DrawStats::default(),
             force_play_layout_menu: false,
+            force_console_menu: false,
             shot_frames: 0,
             tile_brush_id: 1,
             tile_brush_solid: true,
@@ -434,6 +438,7 @@ impl EditorApp {
             app.step_play();
         }
         app.apply_gizmo_demo();
+        app.apply_console_demo();
         Ok(app)
     }
 
@@ -515,13 +520,27 @@ impl EditorApp {
     }
 
     pub(crate) fn console_push(&mut self, level: ConsoleLevel, text: impl Into<String>) {
+        let text = text.into();
         self.console.push(ConsoleLine {
             level,
-            text: text.into(),
+            text: text.clone(),
         });
         if self.console.len() > 200 {
             let drain = self.console.len() - 200;
             self.console.drain(0..drain);
+        }
+        // Error Pause: any Error that reaches the Console while Playing.
+        // Sources today are a failed play tick (`play tick: …`) and other editor
+        // Error lines during Play (Doctor, scene commands). `App::update` cannot
+        // log here — there is no game→Console channel.
+        if console_should_error_pause(
+            self.prefs.console.error_pause,
+            self.play_mode == PlayMode::Playing,
+            level == ConsoleLevel::Error,
+        ) {
+            self.step_pending = false;
+            self.play_mode = PlayMode::Paused;
+            self.status = format!("paused on error · {text}");
         }
     }
 
@@ -834,6 +853,64 @@ impl EditorApp {
                 self.prefs.scene_view.handle_rotation = HandleRotation::Global;
             }
             _ => {}
+        }
+    }
+
+    /// `WIIMAKER_EDITOR_CONSOLE=collapse|menu|error-pause` poses the Console.
+    /// Does not write prefs. `error-pause` enters Play (if stopped) and logs one
+    /// Error through the same path as a failed play tick, which pauses.
+    fn apply_console_demo(&mut self) {
+        let Ok(mode) = std::env::var("WIIMAKER_EDITOR_CONSOLE") else {
+            return;
+        };
+        self.activate_editor_tab(EditorTab::Game);
+        self.activate_editor_tab(EditorTab::Console);
+        match mode.trim().to_ascii_lowercase().as_str() {
+            "collapse" | "menu" => {
+                self.prefs.console.collapse = true;
+                self.console.clear();
+                for _ in 0..3 {
+                    self.console.push(ConsoleLine {
+                        level: ConsoleLevel::Error,
+                        text: "play tick: plugin update failed (-1)".into(),
+                    });
+                }
+                self.console.push(ConsoleLine {
+                    level: ConsoleLevel::Info,
+                    text: "Play Mode · game App plugin (hello-orb) · Esc stops".into(),
+                });
+                self.console.push(ConsoleLine {
+                    level: ConsoleLevel::Warn,
+                    text: "doctor: missing png".into(),
+                });
+                self.console.push(ConsoleLine {
+                    level: ConsoleLevel::Warn,
+                    text: "doctor: missing png".into(),
+                });
+                self.console.push(ConsoleLine {
+                    level: ConsoleLevel::Info,
+                    text: "doctor ok".into(),
+                });
+                if mode.trim().eq_ignore_ascii_case("menu") {
+                    self.force_console_menu = true;
+                }
+            }
+            "error-pause" => {
+                self.prefs.console.error_pause = true;
+                if self.play_mode == PlayMode::Edit {
+                    self.begin_play_session();
+                } else if self.play_mode == PlayMode::Paused {
+                    self.play_mode = PlayMode::Playing;
+                }
+                self.log_line(ConsoleLevel::Error, "play tick: plugin update failed (-1)");
+            }
+            _ => {}
+        }
+    }
+
+    fn activate_editor_tab(&mut self, tab: EditorTab) {
+        if let Some(loc) = self.dock_state.find_tab(&tab) {
+            self.dock_state.set_active_tab(loc);
         }
     }
 
@@ -1613,6 +1690,9 @@ impl EditorApp {
     }
 
     fn begin_play_session(&mut self) {
+        if console_should_clear(&self.prefs.console, ConsoleClearWhen::EnterPlayFromStopped) {
+            self.console.clear();
+        }
         self.timeline_preview = false;
         self.step_pending = false;
         self.prepare_assets();
@@ -1656,6 +1736,7 @@ impl EditorApp {
                 self.begin_play_session();
             }
             PlayMode::Paused => {
+                // Unpause does not clear, even when Clear on Play is on.
                 self.step_pending = false;
                 self.play_mode = PlayMode::Playing;
                 self.log_line(ConsoleLevel::Info, "resumed");
@@ -1689,6 +1770,9 @@ impl EditorApp {
             self.begin_play_session();
         }
         self.run_one_play_frame();
+        if self.play_mode == PlayMode::Edit {
+            return;
+        }
         self.play_mode = PlayMode::Paused;
         self.log_line(ConsoleLevel::Info, "step · paused");
     }
@@ -1793,6 +1877,9 @@ impl EditorApp {
         if self.step_pending {
             self.step_pending = false;
             self.run_one_play_frame();
+            if self.play_mode == PlayMode::Edit {
+                return;
+            }
             self.play_mode = PlayMode::Paused;
             self.log_line(ConsoleLevel::Info, "step · paused");
             return;
@@ -1868,7 +1955,11 @@ impl EditorApp {
             }
             Err(e) => {
                 self.log_line(ConsoleLevel::Error, format!("play tick: {e}"));
-                self.stop_play();
+                // Error Pause already switched to Paused and kept the session.
+                // Otherwise a failed tick still hard-stops (the plugin/session is dead).
+                if self.play_mode == PlayMode::Playing {
+                    self.stop_play();
+                }
             }
         }
         let signal_lines = if plugin {
@@ -1918,18 +2009,27 @@ impl EditorApp {
         }
     }
 
+    fn clear_console_for_build(&mut self) {
+        if console_should_clear(&self.prefs.console, ConsoleClearWhen::Build) {
+            self.console.clear();
+        }
+    }
+
     pub(crate) fn build_wii(&mut self) {
+        self.clear_console_for_build();
         self.status = "Building…".into();
         let name = self.project.name.clone();
         self.spawn_wiimaker(&["build", &name], "Build started");
     }
 
     pub(crate) fn play_dolphin(&mut self) {
+        self.clear_console_for_build();
         let name = self.project.name.clone();
         self.spawn_wiimaker(&["dolphin", &name], "Play in Dolphin started");
     }
 
     pub(crate) fn build_and_run_wii(&mut self) {
+        self.clear_console_for_build();
         self.status = "Build & Run…".into();
         let name = self.project.name.clone();
         self.spawn_wiimaker(&["play-wii", &name], "Build & Run started");

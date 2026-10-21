@@ -151,6 +151,8 @@ fn play_step_cli_on_ci_scaffold() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["ok"], true);
     assert_eq!(v["frames"], 4);
+    assert_eq!(v["paused_on_error"], false);
+    assert!(v["error"].is_null());
     let entities = v["entities"].as_u64().unwrap();
     assert!(entities >= 1, "{v}");
     assert!(v["draw_commands"].as_u64().unwrap() >= 1, "{v}");
@@ -199,7 +201,14 @@ fn play_step_cli_sprite_missing_from_wpack() {
     save_scene(&dir.join("scenes/main.scene.json"), &scene).unwrap();
 
     let out = wiimaker()
-        .args(["editor", "play-step", dir.to_str().unwrap(), "--frames", "2", "--json"])
+        .args([
+            "editor",
+            "play-step",
+            dir.to_str().unwrap(),
+            "--frames",
+            "2",
+            "--json",
+        ])
         .env("WIIMAKER_AUDIO", "0")
         .output()
         .expect("play-step sprite");

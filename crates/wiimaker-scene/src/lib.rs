@@ -85,13 +85,14 @@ pub use prefab::{
     PrefabVariantChrome, SceneInheritSlot,
 };
 pub use prefs::{
-    apply_game_view, apply_project_view, apply_scene_view, clamp_viewport_well_size,
-    editor_prefs_path, fitted_blit_rect, game_view_blit_rect,
-    folder_is_collapsed, infer_game_view_preset, load_editor_prefs, normalize_project_rel,
-    project_rel_hidden_by_collapse, save_editor_prefs, scene_blit_rect, set_game_view,
-    set_project_view, set_scene_view, toggle_project_collapsed, EditorPrefs, GamePlayMode,
-    GameViewAspect, GameViewPatch, GameViewPrefs, GameViewPreset, HandlePosition, HandleRotation,
-    ProjectViewPrefs, SceneTool, SceneViewPrefs, EDITOR_PREFS_REL,
+    apply_console_prefs, apply_game_view, apply_project_view, apply_scene_view,
+    clamp_viewport_well_size, console_should_clear, console_should_error_pause, editor_prefs_path,
+    fitted_blit_rect, folder_is_collapsed, game_view_blit_rect, infer_game_view_preset,
+    load_editor_prefs, normalize_project_rel, project_rel_hidden_by_collapse, save_editor_prefs,
+    scene_blit_rect, set_console, set_game_view, set_project_view, set_scene_view,
+    toggle_project_collapsed, ConsoleClearWhen, ConsolePatch, ConsolePrefs, EditorPrefs,
+    GamePlayMode, GameViewAspect, GameViewPatch, GameViewPrefs, GameViewPreset, HandlePosition,
+    HandleRotation, ProjectViewPrefs, SceneTool, SceneViewPrefs, EDITOR_PREFS_REL,
 };
 pub use project::{
     add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,
