@@ -4,12 +4,54 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use wiimaker_play::{dylib_path, example_dylib_path};
 use wiimaker_scene::{
     add_component_sprite, add_entity, save_project, save_scene, GameProject, MutateOpts, Scene,
 };
 
 fn wiimaker() -> Command {
     Command::new(env!("CARGO_BIN_EXE_wiimaker"))
+}
+
+fn build_play_probe_dylib(root: &PathBuf) {
+    let status = Command::new("cargo")
+        .args(["build", "-p", "wiimaker-play", "--example", "play_probe"])
+        .current_dir(root)
+        .status()
+        .expect("spawn cargo build play_probe");
+    assert!(status.success(), "play_probe example failed to build");
+    let src = example_dylib_path(root, "play_probe");
+    assert!(src.is_file(), "missing probe dylib at {}", src.display());
+    let dest = dylib_path(root, "play-probe");
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::copy(&src, &dest).unwrap();
+}
+
+fn tmp_play_probe_game(root: &PathBuf) -> PathBuf {
+    build_play_probe_dylib(root);
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wiimaker-cli-play-probe-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("scenes")).unwrap();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"play-probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\ncrate-type = [\"cdylib\"]\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/lib.rs"), "// probe dylib supplied by test\n").unwrap();
+    let mut project = GameProject::new("play-probe");
+    project.default_scene = "scenes/main.scene.json".into();
+    save_project(&dir, &project).unwrap();
+    save_scene(&dir.join("scenes/main.scene.json"), &Scene::new("main")).unwrap();
+    dir
 }
 
 fn tmp_game() -> PathBuf {
@@ -222,6 +264,93 @@ fn play_step_cli_sprite_missing_from_wpack() {
     assert_eq!(v["ok"], true);
     assert_eq!(v["frames"], 2);
     assert!(v["entities"].as_u64().unwrap() >= 1);
+}
+
+#[test]
+fn play_step_error_pause_pauses_on_failed_plugin_tick() {
+    let root = workspace_root();
+    let dir = tmp_play_probe_game(&root);
+    wiimaker()
+        .args([
+            "editor",
+            "set-console",
+            dir.to_str().unwrap(),
+            "--error-pause",
+            "on",
+        ])
+        .output()
+        .expect("set error-pause");
+
+    let out = wiimaker()
+        .args([
+            "editor",
+            "play-step",
+            dir.to_str().unwrap(),
+            "--frames",
+            "3",
+            "--json",
+        ])
+        .env("WIIMAKER_AUDIO", "0")
+        .env("WIIMAKER_PLAY_PROBE_FAIL", "1")
+        .output()
+        .expect("play-step");
+    assert!(
+        out.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["backend"], "plugin");
+    assert_eq!(v["paused_on_error"], true);
+    assert_eq!(v["frames"], 1);
+    let err = v["error"].as_str().unwrap();
+    assert!(
+        err.contains("play plugin update failed"),
+        "error: {err}"
+    );
+}
+
+#[test]
+fn play_step_fails_plugin_tick_when_error_pause_off() {
+    let root = workspace_root();
+    let dir = tmp_play_probe_game(&root);
+    wiimaker()
+        .args([
+            "editor",
+            "set-console",
+            dir.to_str().unwrap(),
+            "--error-pause",
+            "off",
+        ])
+        .output()
+        .expect("set error-pause off");
+
+    let out = wiimaker()
+        .args([
+            "editor",
+            "play-step",
+            dir.to_str().unwrap(),
+            "--frames",
+            "2",
+            "--json",
+        ])
+        .env("WIIMAKER_AUDIO", "0")
+        .env("WIIMAKER_PLAY_PROBE_FAIL", "1")
+        .output()
+        .expect("play-step");
+    assert!(
+        !out.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("play plugin update failed") || err.contains("update failed"),
+        "stderr: {err}"
+    );
 }
 
 #[test]
