@@ -148,14 +148,75 @@ fn clear_drop_arrow(ui: &mut egui::Ui, open: bool) -> egui::Response {
     resp
 }
 
+pub(crate) const CONSOLE_ROW_ITEM_SPACING: f32 = 8.0;
+pub(crate) const CONSOLE_BADGE_RESERVE: f32 = 36.0;
+
 /// Message column width after the level tag, reserving space for the count badge.
 pub(crate) fn collapsed_message_max_width(
     row_right: f32,
     text_start_x: f32,
     show_badge: bool,
 ) -> f32 {
-    let badge_reserve = if show_badge { 36.0 } else { 0.0 };
+    let badge_reserve = if show_badge { CONSOLE_BADGE_RESERVE } else { 0.0 };
     (row_right - text_start_x - badge_reserve).max(1.0)
+}
+
+pub(crate) fn console_badge_left_edge(row_right: f32) -> f32 {
+    row_right - CONSOLE_BADGE_RESERVE
+}
+
+/// Tag + message geometry from a single Console row (badge is painted separately).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ConsoleRowGeometry {
+    pub tag: egui::Rect,
+    pub message: egui::Rect,
+    pub row: egui::Rect,
+    pub row_right: f32,
+    pub show_badge: bool,
+}
+
+/// Level tag then left/top-aligned wrapping message. Width caps before the badge column.
+pub(crate) fn layout_console_row_content(
+    ui: &mut egui::Ui,
+    row_right: f32,
+    tag: &str,
+    tag_color: Color32,
+    message: &str,
+    show_badge: bool,
+) -> ConsoleRowGeometry {
+    let mut geom = ConsoleRowGeometry {
+        tag: egui::Rect::NOTHING,
+        message: egui::Rect::NOTHING,
+        row: egui::Rect::NOTHING,
+        row_right,
+        show_badge,
+    };
+    let row_resp = ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+        ui.spacing_mut().item_spacing.x = CONSOLE_ROW_ITEM_SPACING;
+        let tag_resp = ui.label(
+            RichText::new(tag)
+                .size(11.0)
+                .strong()
+                .color(tag_color)
+                .monospace(),
+        );
+        geom.tag = tag_resp.rect;
+        let text_start = ui.cursor().left();
+        let text_w = collapsed_message_max_width(row_right, text_start, show_badge);
+        let msg = ui.allocate_ui_with_layout(
+            egui::vec2(text_w, 0.0),
+            egui::Layout::top_down(egui::Align::LEFT),
+            |ui| {
+                ui.add(
+                    egui::Label::new(RichText::new(message).size(12.0).color(theme::TEXT))
+                        .wrap(),
+                );
+            },
+        );
+        geom.message = msg.response.rect;
+    });
+    geom.row = row_resp.response.rect;
+    geom
 }
 
 fn paint_count_badge(ui: &egui::Ui, row: egui::Rect, count: usize) {
@@ -346,30 +407,18 @@ impl EditorApp {
                     };
                     let full = ui.available_rect_before_wrap();
                     let show_badge = collapse && group.count > 1;
-                    let resp = ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        ui.label(
-                            RichText::new(tag)
-                                .size(11.0)
-                                .strong()
-                                .color(color)
-                                .monospace(),
-                        );
-                        let text_start = ui.cursor().left();
-                        let text_w =
-                            collapsed_message_max_width(full.right(), text_start, show_badge);
-                        ui.add_sized(
-                            egui::vec2(text_w, 0.0),
-                            egui::Label::new(
-                                RichText::new(&line.text).size(12.0).color(theme::TEXT),
-                            )
-                            .wrap(),
-                        );
-                    });
+                    let geom = layout_console_row_content(
+                        ui,
+                        full.right(),
+                        tag,
+                        color,
+                        &line.text,
+                        show_badge,
+                    );
                     if show_badge {
                         let row = egui::Rect::from_min_max(
-                            egui::pos2(full.left(), resp.response.rect.top()),
-                            egui::pos2(full.right(), resp.response.rect.bottom()),
+                            egui::pos2(full.left(), geom.row.top()),
+                            egui::pos2(full.right(), geom.row.bottom()),
                         );
                         paint_count_badge(ui, row, group.count);
                     }
@@ -512,8 +561,76 @@ mod tests {
         let tag_w = 36.0;
         let text_start = row_left + tag_w;
         let w = collapsed_message_max_width(row_right, text_start, true);
-        assert_eq!(w, row_right - text_start - 36.0);
+        assert_eq!(w, row_right - text_start - CONSOLE_BADGE_RESERVE);
         assert_eq!(collapsed_message_max_width(row_right, text_start, false), 364.0);
         assert_eq!(collapsed_message_max_width(row_right, row_right, true), 1.0);
+    }
+
+    fn assert_row_geometry(g: &ConsoleRowGeometry, row_right: f32) {
+        assert!(g.message.width() > 4.0, "message width {}", g.message.width());
+        let expected_left = g.tag.right() + CONSOLE_ROW_ITEM_SPACING;
+        assert!(
+            (g.message.left() - expected_left).abs() < 1.0,
+            "message left {} expected ~{} (tag right {})",
+            g.message.left(),
+            expected_left,
+            g.tag.right()
+        );
+        assert!(
+            (g.message.top() - g.tag.top()).abs() < 1.0,
+            "message top {} tag top {}",
+            g.message.top(),
+            g.tag.top()
+        );
+        if g.show_badge {
+            assert!(
+                g.message.right() <= console_badge_left_edge(row_right) + 1.0,
+                "message right {} past badge edge {}",
+                g.message.right(),
+                console_badge_left_edge(row_right)
+            );
+        }
+    }
+
+    #[test]
+    fn console_row_message_left_top_aligned_with_badge() {
+        let ctx = egui::Context::default();
+        let row_right = 480.0f32;
+        let mut geom: Option<ConsoleRowGeometry> = None;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(row_right);
+                geom = Some(layout_console_row_content(
+                    ui,
+                    row_right,
+                    "warn",
+                    theme::DIRTY,
+                    "doctor: timeline 'ghost-bob': track 'Bob' binding not in scene",
+                    true,
+                ));
+            });
+        });
+        assert_row_geometry(&geom.expect("layout"), row_right);
+    }
+
+    #[test]
+    fn console_row_message_left_top_aligned_without_badge() {
+        let ctx = egui::Context::default();
+        let row_right = 480.0f32;
+        let mut geom: Option<ConsoleRowGeometry> = None;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(row_right);
+                geom = Some(layout_console_row_content(
+                    ui,
+                    row_right,
+                    "warn",
+                    theme::DIRTY,
+                    "doctor: missing png",
+                    false,
+                ));
+            });
+        });
+        assert_row_geometry(&geom.expect("layout"), row_right);
     }
 }
