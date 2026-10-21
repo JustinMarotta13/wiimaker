@@ -203,6 +203,22 @@ pub enum EditorCmd {
         #[arg(long)]
         tool: Option<String>,
     },
+    /// Console Clear on Play / Clear on Build / Collapse / Error Pause
+    SetConsole {
+        game: String,
+        /// `on` clears when entering Play from Stopped (Unity default is on)
+        #[arg(long)]
+        clear_on_play: Option<String>,
+        /// `on` clears when Build, Build & Run, or Play in Dolphin starts
+        #[arg(long)]
+        clear_on_build: Option<String>,
+        /// `on` groups identical Console lines (same level + same text)
+        #[arg(long)]
+        collapse: Option<String>,
+        /// `on` pauses Play when an Error is logged while Playing
+        #[arg(long)]
+        error_pause: Option<String>,
+    },
     /// Project explorer collapsed folders (writes `.wiimaker/prefs.toml`)
     SetProjectView {
         game: String,

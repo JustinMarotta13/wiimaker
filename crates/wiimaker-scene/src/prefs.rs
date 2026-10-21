@@ -326,6 +326,86 @@ pub struct ProjectViewPrefs {
     pub collapsed: Vec<String>,
 }
 
+/// Console toolbar prefs. Search text is session-only and is not stored.
+///
+/// Unity 6 dark Console defaults: **Clear on Play** on, Clear on Build /
+/// Collapse / Error Pause off. Missing `[console]` (or a missing key) loads
+/// those defaults.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConsolePrefs {
+    /// Clear the Console when entering Play from Stopped (Play or Step).
+    /// Unpause does not clear.
+    #[serde(default = "default_true")]
+    pub clear_on_play: bool,
+    /// Clear when Build, Build & Run, or Play in Dolphin starts.
+    #[serde(default)]
+    pub clear_on_build: bool,
+    /// Identical lines (same level + same text) show once with a count.
+    #[serde(default)]
+    pub collapse: bool,
+    /// While Playing, an Error-level Console line switches Play to Paused.
+    #[serde(default)]
+    pub error_pause: bool,
+}
+
+impl Default for ConsolePrefs {
+    fn default() -> Self {
+        Self {
+            clear_on_play: true,
+            clear_on_build: false,
+            collapse: false,
+            error_pause: false,
+        }
+    }
+}
+
+/// Why the editor might clear the Console.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConsoleClearWhen {
+    /// Play or Step from Stopped. Not unpause.
+    EnterPlayFromStopped,
+    /// Resume from Paused. Never clears.
+    Unpause,
+    /// Build, Build & Run, or Play in Dolphin.
+    Build,
+}
+
+/// Clear on Play only when entering from Stopped. Clear on Build only for builds.
+pub fn console_should_clear(prefs: &ConsolePrefs, when: ConsoleClearWhen) -> bool {
+    match when {
+        ConsoleClearWhen::EnterPlayFromStopped => prefs.clear_on_play,
+        ConsoleClearWhen::Unpause => false,
+        ConsoleClearWhen::Build => prefs.clear_on_build,
+    }
+}
+
+/// Error Pause pauses only while Play is running and the new line is an Error.
+///
+/// Warn / Info, and errors logged while already Paused or Stopped, do not change
+/// transport. The editor calls this from the Console push path (play-tick
+/// failures and any other Error it routes during Play).
+pub fn console_should_error_pause(error_pause: bool, playing: bool, is_error: bool) -> bool {
+    error_pause && playing && is_error
+}
+
+/// Optional fields for [`set_console`] / [`apply_console_prefs`]. `on` | `off`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ConsolePatch<'a> {
+    pub clear_on_play: Option<&'a str>,
+    pub clear_on_build: Option<&'a str>,
+    pub collapse: Option<&'a str>,
+    pub error_pause: Option<&'a str>,
+}
+
+impl ConsolePatch<'_> {
+    pub fn is_empty(self) -> bool {
+        self.clear_on_play.is_none()
+            && self.clear_on_build.is_none()
+            && self.collapse.is_none()
+            && self.error_pause.is_none()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EditorPrefs {
     #[serde(default)]
@@ -334,6 +414,9 @@ pub struct EditorPrefs {
     pub game_view: GameViewPrefs,
     #[serde(default)]
     pub project_view: ProjectViewPrefs,
+    /// Unity Console toggles. Missing table → Clear on Play on, the rest off.
+    #[serde(default)]
+    pub console: ConsolePrefs,
 }
 
 pub fn load_editor_prefs(game_dir: &Path) -> Result<EditorPrefs> {
@@ -341,7 +424,8 @@ pub fn load_editor_prefs(game_dir: &Path) -> Result<EditorPrefs> {
     if !path.is_file() {
         return Ok(EditorPrefs::default());
     }
-    let text = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let prefs: EditorPrefs = toml::from_str(&text).context("parse .wiimaker/prefs.toml")?;
     Ok(prefs)
 }
@@ -753,6 +837,35 @@ pub fn apply_project_view(
     pv.collapsed.sort();
     pv.collapsed.dedup();
     Ok(())
+}
+
+pub fn apply_console_prefs(console: &mut ConsolePrefs, patch: ConsolePatch<'_>) -> Result<()> {
+    if patch.is_empty() {
+        bail!(
+            "set-console needs at least one flag (--clear-on-play, --clear-on-build, --collapse, --error-pause)"
+        );
+    }
+    if let Some(v) = patch.clear_on_play {
+        console.clear_on_play = parse_on_off(v, "--clear-on-play")?;
+    }
+    if let Some(v) = patch.clear_on_build {
+        console.clear_on_build = parse_on_off(v, "--clear-on-build")?;
+    }
+    if let Some(v) = patch.collapse {
+        console.collapse = parse_on_off(v, "--collapse")?;
+    }
+    if let Some(v) = patch.error_pause {
+        console.error_pause = parse_on_off(v, "--error-pause")?;
+    }
+    Ok(())
+}
+
+/// Mutate Console toolbar prefs and persist.
+pub fn set_console(game_dir: &Path, patch: ConsolePatch<'_>) -> Result<EditorPrefs> {
+    let mut prefs = load_editor_prefs(game_dir)?;
+    apply_console_prefs(&mut prefs.console, patch)?;
+    save_editor_prefs(game_dir, &prefs)?;
+    Ok(prefs)
 }
 
 /// Mutate Project view fields and persist.
@@ -1215,5 +1328,110 @@ mod tests {
         let p = load_editor_prefs(&dir).unwrap();
         assert!((p.scene_view.zoom - 2.0).abs() < 1e-4);
         assert!(p.project_view.collapsed.is_empty());
+        assert!(p.console.clear_on_play);
+        assert!(!p.console.clear_on_build);
+        assert!(!p.console.collapse);
+        assert!(!p.console.error_pause);
+    }
+
+    #[test]
+    fn missing_console_table_uses_unity_defaults() {
+        let dir = tmp("console-default");
+        fs::create_dir_all(dir.join(".wiimaker")).unwrap();
+        fs::write(
+            editor_prefs_path(&dir),
+            "[game_view]\npreset = \"free\"\nscale = 1.0\n",
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert!(p.console.clear_on_play);
+        assert!(!p.console.clear_on_build);
+        assert!(!p.console.collapse);
+        assert!(!p.console.error_pause);
+    }
+
+    #[test]
+    fn set_console_partial_roundtrip() {
+        let dir = tmp("console-set");
+        set_console(
+            &dir,
+            ConsolePatch {
+                clear_on_play: Some("off"),
+                error_pause: Some("on"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert!(!p.console.clear_on_play);
+        assert!(!p.console.clear_on_build);
+        assert!(!p.console.collapse);
+        assert!(p.console.error_pause);
+        let text = fs::read_to_string(editor_prefs_path(&dir)).unwrap();
+        assert!(text.contains("[console]"), "{text}");
+        assert!(text.contains("clear_on_play = false"), "{text}");
+        assert!(text.contains("error_pause = true"), "{text}");
+
+        set_console(
+            &dir,
+            ConsolePatch {
+                collapse: Some("on"),
+                clear_on_build: Some("true"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let p = load_editor_prefs(&dir).unwrap();
+        assert!(!p.console.clear_on_play);
+        assert!(p.console.clear_on_build);
+        assert!(p.console.collapse);
+        assert!(p.console.error_pause);
+    }
+
+    #[test]
+    fn set_console_rejects_empty_and_bad_flags() {
+        let dir = tmp("console-bad");
+        let err = set_console(&dir, ConsolePatch::default())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("set-console"), "{err}");
+        let err = set_console(
+            &dir,
+            ConsolePatch {
+                collapse: Some("maybe"),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("on|off"), "{err}");
+    }
+
+    #[test]
+    fn clear_on_play_is_enter_from_stopped_only() {
+        let mut prefs = ConsolePrefs::default();
+        assert!(console_should_clear(
+            &prefs,
+            ConsoleClearWhen::EnterPlayFromStopped
+        ));
+        assert!(!console_should_clear(&prefs, ConsoleClearWhen::Unpause));
+        assert!(!console_should_clear(&prefs, ConsoleClearWhen::Build));
+        prefs.clear_on_play = false;
+        prefs.clear_on_build = true;
+        assert!(!console_should_clear(
+            &prefs,
+            ConsoleClearWhen::EnterPlayFromStopped
+        ));
+        assert!(!console_should_clear(&prefs, ConsoleClearWhen::Unpause));
+        assert!(console_should_clear(&prefs, ConsoleClearWhen::Build));
+    }
+
+    #[test]
+    fn error_pause_only_while_playing_on_error() {
+        assert!(console_should_error_pause(true, true, true));
+        assert!(!console_should_error_pause(false, true, true));
+        assert!(!console_should_error_pause(true, false, true));
+        assert!(!console_should_error_pause(true, true, false));
+        assert!(!console_should_error_pause(true, false, false));
     }
 }
