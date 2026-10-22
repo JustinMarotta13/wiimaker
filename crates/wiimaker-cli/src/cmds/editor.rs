@@ -4,8 +4,9 @@ use anyhow::Result;
 use wiimaker_core::input::Input;
 use wiimaker_play::{build_play_plugin, headless_play_steps, inspect_play_plugin, PlayStart};
 use wiimaker_scene::{
-    find_game_dir, load_editor_prefs, load_project, set_console, set_project_view, set_scene_view,
-    ConsolePatch, EDITOR_PREFS_REL,
+    apply_entity_visibility, find_game_dir, load_editor_prefs, load_project, load_scene,
+    resolve_scene_rel, save_editor_prefs, scene_visibility_key, set_console, set_project_view,
+    set_scene_view, set_scene_visibility_enabled, ConsolePatch, EDITOR_PREFS_REL,
 };
 
 use crate::args::EditorCmd;
@@ -121,6 +122,21 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                     on_off(prefs.console.collapse),
                     on_off(prefs.console.error_pause),
                 );
+                println!(
+                    "scene-visibility: enabled={}",
+                    on_off(prefs.scene_visibility.enabled)
+                );
+                if prefs.scene_visibility.scenes.is_empty() {
+                    println!("  (all visible and pickable)");
+                }
+                for scene in &prefs.scene_visibility.scenes {
+                    println!(
+                        "  {}: hidden={} unpickable={}",
+                        scene.scene,
+                        list_or_none(&scene.hidden),
+                        list_or_none(&scene.unpickable),
+                    );
+                }
             }
             Ok(())
         }
@@ -178,6 +194,7 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
             handle_position,
             handle_rotation,
             tool,
+            scene_visibility,
         } => {
             let game_dir = find_game_dir(root, &game)?;
             if zoom.is_none()
@@ -191,25 +208,44 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                 && handle_position.is_none()
                 && handle_rotation.is_none()
                 && tool.is_none()
+                && scene_visibility.is_none()
             {
                 anyhow::bail!(
-                    "set-scene-view needs at least one flag (--zoom, --grid, --handle-position, --tool, …)"
+                    "set-scene-view needs at least one flag (--zoom, --grid, --handle-position, --tool, --scene-visibility, …)"
                 );
             }
-            let prefs = set_scene_view(
-                &game_dir,
-                zoom,
-                pan_x,
-                pan_y,
-                grid,
-                gizmos,
-                snap,
-                snap_size,
-                mode_2d,
-                handle_position.as_deref(),
-                handle_rotation.as_deref(),
-                tool.as_deref(),
-            )?;
+            let other = zoom.is_some()
+                || pan_x.is_some()
+                || pan_y.is_some()
+                || grid.is_some()
+                || gizmos.is_some()
+                || snap.is_some()
+                || snap_size.is_some()
+                || mode_2d.is_some()
+                || handle_position.is_some()
+                || handle_rotation.is_some()
+                || tool.is_some();
+            let mut prefs = if other {
+                set_scene_view(
+                    &game_dir,
+                    zoom,
+                    pan_x,
+                    pan_y,
+                    grid,
+                    gizmos,
+                    snap,
+                    snap_size,
+                    mode_2d,
+                    handle_position.as_deref(),
+                    handle_rotation.as_deref(),
+                    tool.as_deref(),
+                )?
+            } else {
+                load_editor_prefs(&game_dir)?
+            };
+            if let Some(flag) = scene_visibility.as_deref() {
+                prefs = set_scene_visibility_enabled(&game_dir, flag)?;
+            }
             if json {
                 println!(
                     "{}",
@@ -217,14 +253,41 @@ pub fn editor_cmd(root: &Path, cmd: EditorCmd, json: bool) -> Result<()> {
                         "ok": true,
                         "message": "scene view prefs updated",
                         "path": game_dir.join(EDITOR_PREFS_REL).to_string_lossy(),
+                        "scene_visibility": prefs.scene_visibility.enabled,
                         "prefs": prefs,
                     })
                 );
                 Ok(())
             } else {
-                emit_ok(json, "scene view prefs updated")
+                emit_ok(json, "scene view prefs updated")?;
+                if scene_visibility.is_some() {
+                    println!(
+                        "scene-visibility={}",
+                        on_off(prefs.scene_visibility.enabled)
+                    );
+                }
+                Ok(())
             }
         }
+        EditorCmd::SetVisibility {
+            game,
+            scene,
+            entity,
+            hidden,
+            pickable,
+            recursive,
+        } => set_visibility(
+            root,
+            &game,
+            scene.as_deref(),
+            &entity,
+            VisFlags {
+                hidden: hidden.as_deref(),
+                pickable: pickable.as_deref(),
+                recursive: recursive.as_deref(),
+                json,
+            },
+        ),
         EditorCmd::SetProjectView {
             game,
             collapse,
@@ -354,4 +417,98 @@ fn on_off(on: bool) -> &'static str {
     } else {
         "off"
     }
+}
+
+fn list_or_none(names: &[String]) -> String {
+    if names.is_empty() {
+        "-".into()
+    } else {
+        names.join(",")
+    }
+}
+
+fn parse_on_off_flag(value: Option<&str>, flag: &str) -> Result<Option<bool>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" | "true" => Ok(Some(true)),
+        "off" | "false" => Ok(Some(false)),
+        other => anyhow::bail!("{flag} must be on|off, got '{other}'"),
+    }
+}
+
+struct VisFlags<'a> {
+    hidden: Option<&'a str>,
+    pickable: Option<&'a str>,
+    recursive: Option<&'a str>,
+    json: bool,
+}
+
+fn set_visibility(
+    root: &Path,
+    game: &str,
+    scene: Option<&str>,
+    entity: &str,
+    flags: VisFlags<'_>,
+) -> Result<()> {
+    let game_dir = find_game_dir(root, game)?;
+    let project = load_project(&game_dir)?;
+    let rel = match scene {
+        Some(scene) => resolve_scene_rel(&game_dir, scene)?,
+        None => std::path::PathBuf::from(&project.default_scene),
+    };
+    let scene_path = game_dir.join(&rel);
+    let scene_data = load_scene(&scene_path)?;
+    let key = scene_visibility_key(&game_dir, &scene_path);
+    let hidden = parse_on_off_flag(flags.hidden, "--hidden")?;
+    let pickable = parse_on_off_flag(flags.pickable, "--pickable")?;
+    let recursive = parse_on_off_flag(flags.recursive, "--recursive")?.unwrap_or(true);
+    let mut prefs = load_editor_prefs(&game_dir)?;
+    let affected = apply_entity_visibility(
+        &mut prefs.scene_visibility,
+        &key,
+        &scene_data,
+        entity,
+        hidden,
+        pickable,
+        recursive,
+    )?;
+    save_editor_prefs(&game_dir, &prefs)?;
+    let entry_hidden = prefs
+        .scene_visibility
+        .scene(&key)
+        .map(|s| s.hidden.clone())
+        .unwrap_or_default();
+    let entry_unpickable = prefs
+        .scene_visibility
+        .scene(&key)
+        .map(|s| s.unpickable.clone())
+        .unwrap_or_default();
+    if flags.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "message": "scene visibility updated",
+                "path": game_dir.join(EDITOR_PREFS_REL).to_string_lossy(),
+                "scene": key,
+                "entity": entity,
+                "recursive": recursive,
+                "affected": affected,
+                "hidden": entry_hidden,
+                "unpickable": entry_unpickable,
+                "scene_visibility": prefs.scene_visibility.enabled,
+                "prefs": prefs,
+            })
+        );
+    } else {
+        println!(
+            "scene visibility updated {} entity={entity} recursive={} affected={}",
+            rel.display(),
+            on_off(recursive),
+            affected.join(",")
+        );
+    }
+    Ok(())
 }

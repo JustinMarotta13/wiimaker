@@ -722,6 +722,8 @@ pub enum ToolGlyph {
     Global,
     Mute,
     Stats,
+    /// Eye with a slash — Scene visibility toolbar toggle.
+    EyeOff,
 }
 
 pub fn tool_toggle(
@@ -919,6 +921,9 @@ fn paint_tool_glyph(painter: &egui::Painter, r: egui::Rect, glyph: ToolGlyph, co
                 Stroke::new(1.5_f32, AXIS_Y),
             );
         }
+        ToolGlyph::EyeOff => {
+            paint_eye(painter, r, color, true);
+        }
         ToolGlyph::Mute => {
             // Speaker: body + cone. A slash means muted (selected).
             painter.rect_filled(
@@ -989,4 +994,102 @@ pub fn mode_button(
         TEXT,
     );
     resp
+}
+
+/// Hierarchy gutter icon. `slashed` is hidden or unpickable. `dim` is the
+/// mixed parent state (some descendants differ).
+pub fn gutter_icon(
+    ui: &mut egui::Ui,
+    eye: bool,
+    slashed: bool,
+    dim: bool,
+    show: bool,
+    tip: &str,
+) -> egui::Response {
+    let (rect, mut resp) = ui.allocate_exact_size(egui::vec2(15.0, 16.0), Sense::click());
+    resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if !tip.is_empty() {
+        resp = resp.on_hover_text(tip);
+    }
+    if show {
+        let color = if dim {
+            Color32::from_rgba_unmultiplied(190, 190, 190, 120)
+        } else if resp.hovered() {
+            Color32::WHITE
+        } else {
+            TEXT
+        };
+        let glyph = rect.shrink(1.5);
+        if eye {
+            paint_eye(ui.painter(), glyph, color, slashed);
+        } else {
+            paint_hand(ui.painter(), glyph, color, slashed);
+        }
+        if dim {
+            ui.painter().circle_filled(
+                egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0),
+                1.6,
+                Color32::from_rgb(190, 190, 190),
+            );
+        }
+    }
+    resp
+}
+
+fn paint_eye(painter: &egui::Painter, r: egui::Rect, color: Color32, slashed: bool) {
+    let c = r.center();
+    let rx = (r.width() * 0.46).max(3.0);
+    let ry = (r.height() * 0.28).max(2.0);
+    let stroke = Stroke::new(1.15_f32, color);
+    let mut upper = Vec::new();
+    let mut lower = Vec::new();
+    for i in 0..=8 {
+        let t = i as f32 / 8.0;
+        let x = r.left() + r.width() * t;
+        let u = (t - 0.5) * 2.0;
+        let y = ry * (1.0 - u * u).max(0.0).sqrt();
+        upper.push(egui::pos2(x, c.y - y));
+        lower.push(egui::pos2(x, c.y + y));
+    }
+    painter.add(Shape::line(upper, stroke));
+    painter.add(Shape::line(lower, stroke));
+    painter.circle_filled(c, (rx * 0.28).max(1.4), color);
+    if slashed {
+        painter.line_segment(
+            [
+                egui::pos2(r.left() + 1.0, r.bottom() - 1.0),
+                egui::pos2(r.right() - 1.0, r.top() + 1.0),
+            ],
+            Stroke::new(1.3_f32, color),
+        );
+    }
+}
+
+fn paint_hand(painter: &egui::Painter, r: egui::Rect, color: Color32, slashed: bool) {
+    let c = r.center();
+    painter.rect_filled(
+        egui::Rect::from_center_size(egui::pos2(c.x, c.y + 2.2), egui::vec2(7.0, 5.0)),
+        Rounding::same(1.2),
+        color,
+    );
+    for i in 0..3 {
+        let x = c.x - 2.4 + i as f32 * 2.4;
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(x - 0.7, c.y - 5.2),
+                egui::pos2(x + 0.7, c.y + 1.0),
+            ),
+            Rounding::same(0.7),
+            color,
+        );
+    }
+    if slashed {
+        painter.line_segment(
+            [
+                egui::pos2(r.left() + 1.0, r.bottom() - 1.0),
+                egui::pos2(r.right() - 1.0, r.top() + 1.0),
+            ],
+            Stroke::new(1.3_f32, color),
+        );
+    }
 }

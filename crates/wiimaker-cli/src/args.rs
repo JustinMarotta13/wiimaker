@@ -202,6 +202,27 @@ pub enum EditorCmd {
         /// Active Scene tool: `move` | `rotate` | `scale` | `hand` | `paint` | `erase` | `pick`
         #[arg(long)]
         tool: Option<String>,
+        /// `on` applies per-entity Scene hides; `off` draws every entity and keeps the lists
+        #[arg(long)]
+        scene_visibility: Option<String>,
+    },
+    /// Hide or unpick an entity in the Scene view (writes `.wiimaker/prefs.toml`)
+    SetVisibility {
+        game: String,
+        /// Scene stem or path. Defaults to the project's default scene.
+        #[arg(long)]
+        scene: Option<String>,
+        #[arg(long)]
+        entity: String,
+        /// `on` hides the entity in the Scene view; `off` shows it
+        #[arg(long)]
+        hidden: Option<String>,
+        /// `on` allows Scene-view picking; `off` blocks click and box select
+        #[arg(long)]
+        pickable: Option<String>,
+        /// `on` (default) writes the same flags onto descendants. `off` is Alt-click.
+        #[arg(long)]
+        recursive: Option<String>,
     },
     /// Console Clear on Play / Clear on Build / Collapse / Error Pause
     SetConsole {

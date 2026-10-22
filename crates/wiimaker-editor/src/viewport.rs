@@ -6,15 +6,14 @@ use wiimaker_core::world::World;
 use wiimaker_host::{flush_with_atlas, Framebuffer};
 use wiimaker_scene::{
     apply_axis_scale, arc_points, clamp_viewport_well_size, constrain_translate_oriented,
-    game_view_blit_rect,
-    gizmo_has_selected_ancestor, gizmo_origin,
-    pick_entity_at_with_catalog_and_layers, pointer_angle_delta, pointer_to_scene, quat_z_radians,
-    render_world_ex,
-    rotate_point_about, rotation_after_drag, scale_factors, scale_point_about, scene_blit_rect,
-    screen_axis_dirs, set_entity_rotation_z, set_entity_scale, set_entity_world_xy,
-    sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell, union_aabbs, GamePlayMode,
-    GameViewAspect, GameViewPatch, GameViewPreset, HandlePosition, HandleRotation,
-    MoveHandleLayout, RotateHandleLayout, ScaleHandle, ScaleHandleLayout, Scene, TranslateHandle,
+    game_view_blit_rect, gizmo_has_selected_ancestor, gizmo_origin, hide_entities_for_scene_view,
+    pick_entity_at_filtered, pointer_angle_delta, pointer_to_scene, quat_z_radians,
+    render_world_ex, rotate_point_about, rotation_after_drag, scale_factors, scale_point_about,
+    scene_blit_rect, screen_axis_dirs, set_entity_rotation_z, set_entity_scale,
+    set_entity_world_xy, sprite_effective_pivot, tilemap_autotile_mask, tilemap_set_cell,
+    union_aabbs, GamePlayMode, GameViewAspect, GameViewPatch, GameViewPreset, HandlePosition,
+    HandleRotation, MoveHandleLayout, RotateHandleLayout, ScaleHandle, ScaleHandleLayout, Scene,
+    TranslateHandle,
 };
 
 use crate::app::{
@@ -144,6 +143,22 @@ impl EditorApp {
             .clicked()
             {
                 self.prefs.scene_view.gizmos = !self.prefs.scene_view.gizmos;
+                self.persist_prefs();
+            }
+            let vis_on = self.prefs.scene_visibility.enabled;
+            if theme::tool_toggle(
+                ui,
+                vis_on,
+                if vis_on {
+                    "Scene visibility on — hidden entities are omitted from the Scene view"
+                } else {
+                    "Scene visibility off — Scene view draws every entity (hide flags kept)"
+                },
+                theme::ToolGlyph::EyeOff,
+            )
+            .clicked()
+            {
+                self.prefs.scene_visibility.enabled = !vis_on;
                 self.persist_prefs();
             }
             if self.edit_tool.is_tile_tool() {
@@ -411,10 +426,24 @@ impl EditorApp {
         // Scene tab stays world-space (camera rect gizmo). Game tab applies the active camera.
         // Plugin Play owns a live World; fallback mutates the editor World.
         let clear = self.scene.clear_rgba();
-        if let Some(world) = self.play_session.as_ref().and_then(|s| s.world()) {
-            render_world_ex(world, &mut draw, clear, !is_scene);
+        let hidden = if is_scene {
+            self.scene_hidden_names()
         } else {
-            render_world_ex(&self.world, &mut draw, clear, !is_scene);
+            std::collections::HashSet::new()
+        };
+        let render_one = |world: &World, draw: &mut DrawList| {
+            if is_scene && !hidden.is_empty() {
+                let mut clone = world.clone();
+                hide_entities_for_scene_view(&mut clone, &hidden);
+                render_world_ex(&clone, draw, clear, false);
+            } else {
+                render_world_ex(world, draw, clear, !is_scene);
+            }
+        };
+        if let Some(world) = self.play_session.as_ref().and_then(|s| s.world()) {
+            render_one(world, &mut draw);
+        } else {
+            render_one(&self.world, &mut draw);
         }
         self.last_draw = draw.stats();
         flush_with_atlas(&draw, &mut self.fb, Some(&self.atlas));
@@ -480,10 +509,16 @@ impl EditorApp {
                 paint_grid_overlay(ui, image_rect, self.prefs.scene_view.snap_size.max(1.0));
             }
             if self.prefs.scene_view.gizmos {
-                paint_selection_outline(ui, image_rect, &self.scene, &self.selected, &self.catalog);
-                paint_collider_gizmos(ui, image_rect, &self.scene, &self.selected);
-                paint_tilemap_gizmos(ui, image_rect, &self.scene, &self.selected);
-                paint_camera_gizmos(ui, image_rect, &self.world);
+                let visible: Vec<String> = self
+                    .selected
+                    .iter()
+                    .filter(|n| !hidden.contains(*n))
+                    .cloned()
+                    .collect();
+                paint_selection_outline(ui, image_rect, &self.scene, &visible, &self.catalog);
+                paint_collider_gizmos(ui, image_rect, &self.scene, &self.selected, &hidden);
+                paint_tilemap_gizmos(ui, image_rect, &self.scene, &self.selected, &hidden);
+                paint_camera_gizmos(ui, image_rect, &self.world, &hidden);
             }
             if self.edit_tool.is_tile_tool() && !self.prefs.scene_view.gizmos {
                 if let Some(name) = self.tilemap_target() {
@@ -613,12 +648,14 @@ impl EditorApp {
 
         let pick_at = |app: &Self, pos: [f32; 2]| -> Option<(String, [f32; 2])> {
             let layers = app.project.effective_sorting_layers();
-            let name = pick_entity_at_with_catalog_and_layers(
+            let skip = app.scene_pick_blocklist();
+            let name = pick_entity_at_filtered(
                 &app.scene,
                 pos[0],
                 pos[1],
                 Some(&app.catalog),
                 &layers,
+                Some(&skip),
             )?;
             let world = app.scene.world_transform(&name)?;
             let grab_offset = [pos[0] - world.translation[0], pos[1] - world.translation[1]];
@@ -1036,12 +1073,13 @@ impl EditorApp {
                     }
                 }
             }
-            pick_entity_at_with_catalog_and_layers(
+            pick_entity_at_filtered(
                 &app.scene,
                 pos[0],
                 pos[1],
                 Some(&app.catalog),
                 &app.project.effective_sorting_layers(),
+                Some(&app.scene_pick_blocklist()),
             )
             .and_then(|name| {
                 app.scene
@@ -1245,9 +1283,18 @@ fn paint_tilemap_overlay(ui: &egui::Ui, image_rect: egui::Rect, scene: &Scene, n
         .rect_stroke(r, 0.0, egui::Stroke::new(1.0, theme::ACCENT));
 }
 
-fn paint_tilemap_gizmos(ui: &egui::Ui, image_rect: egui::Rect, scene: &Scene, selected: &[String]) {
+fn paint_tilemap_gizmos(
+    ui: &egui::Ui,
+    image_rect: egui::Rect,
+    scene: &Scene,
+    selected: &[String],
+    hidden: &std::collections::HashSet<String>,
+) {
     let painter = ui.painter();
     for ent in &scene.entities {
+        if hidden.contains(&ent.name) {
+            continue;
+        }
         let Some(tm) = &ent.components.tilemap else {
             continue;
         };
@@ -1634,6 +1681,7 @@ fn paint_collider_gizmos(
     image_rect: egui::Rect,
     scene: &Scene,
     selected: &[String],
+    hidden: &std::collections::HashSet<String>,
 ) {
     let to_screen = |sx: f32, sy: f32| -> egui::Pos2 {
         egui::pos2(
@@ -1643,6 +1691,9 @@ fn paint_collider_gizmos(
     };
     let painter = ui.painter();
     for ent in &scene.entities {
+        if hidden.contains(&ent.name) {
+            continue;
+        }
         let Some(c) = &ent.components.collider else {
             continue;
         };
@@ -1740,7 +1791,12 @@ fn paint_collider_gizmos(
 }
 
 /// Unity-ish camera frustum: 640×480 rect centered on an active Camera's world pose.
-fn paint_camera_gizmos(ui: &egui::Ui, image_rect: egui::Rect, world: &World) {
+fn paint_camera_gizmos(
+    ui: &egui::Ui,
+    image_rect: egui::Rect,
+    world: &World,
+    hidden: &std::collections::HashSet<String>,
+) {
     let to_screen = |sx: f32, sy: f32| -> egui::Pos2 {
         egui::pos2(
             image_rect.min.x + sx / VIEW_W as f32 * image_rect.width(),
@@ -1750,7 +1806,10 @@ fn paint_camera_gizmos(ui: &egui::Ui, image_rect: egui::Rect, world: &World) {
     let painter = ui.painter();
     let color = egui::Color32::from_rgb(140, 210, 230);
     let stroke = egui::Stroke::new(1.5_f32, color);
-    let Some((_id, xf, _cam)) = world.active_camera() else {
+    let Some((id, xf, _cam)) = world.active_camera() else {
+        return;
+    };
+    if world.name(id).is_some_and(|n| hidden.contains(n)) {
         return;
     };
     let cx = xf.translation.x;

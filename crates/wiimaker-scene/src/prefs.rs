@@ -406,6 +406,53 @@ impl ConsolePatch<'_> {
     }
 }
 
+/// One scene's hidden / unpickable entity names.
+///
+/// Names that no longer exist in the scene are ignored by the Scene view and
+/// dropped on rename/delete. They must not change draw or pick.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneVisibilityScene {
+    /// Path relative to the game dir, e.g. `scenes/main.scene.json`.
+    pub scene: String,
+    #[serde(default)]
+    pub hidden: Vec<String>,
+    #[serde(default)]
+    pub unpickable: Vec<String>,
+}
+
+/// Scene-view visibility and pickability. Editor-only; not written into scene JSON.
+///
+/// `enabled` is the toolbar eye-with-slash toggle. When it is off, Scene view
+/// draws every entity and the per-entity lists stay stored. Missing table on
+/// old prefs files loads as enabled, with nothing hidden or unpickable.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneVisibilityPrefs {
+    /// `true` applies per-entity hides in the Scene view. Default on.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub scenes: Vec<SceneVisibilityScene>,
+}
+
+impl Default for SceneVisibilityPrefs {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            scenes: Vec::new(),
+        }
+    }
+}
+
+impl SceneVisibilityPrefs {
+    pub fn scene(&self, key: &str) -> Option<&SceneVisibilityScene> {
+        self.scenes.iter().find(|s| s.scene == key)
+    }
+
+    pub fn scene_mut(&mut self, key: &str) -> Option<&mut SceneVisibilityScene> {
+        self.scenes.iter_mut().find(|s| s.scene == key)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EditorPrefs {
     #[serde(default)]
@@ -417,6 +464,10 @@ pub struct EditorPrefs {
     /// Unity Console toggles. Missing table → Clear on Play on, the rest off.
     #[serde(default)]
     pub console: ConsolePrefs,
+    /// Hierarchy Scene visibility / pickability. Missing table → everything
+    /// visible and pickable, toolbar toggle on.
+    #[serde(default)]
+    pub scene_visibility: SceneVisibilityPrefs,
 }
 
 pub fn load_editor_prefs(game_dir: &Path) -> Result<EditorPrefs> {
@@ -868,6 +919,15 @@ pub fn set_console(game_dir: &Path, patch: ConsolePatch<'_>) -> Result<EditorPre
     Ok(prefs)
 }
 
+/// Toolbar Scene visibility toggle. `on` applies per-entity hides; `off` draws
+/// every entity and keeps the lists. Persists `[scene_visibility].enabled`.
+pub fn set_scene_visibility_enabled(game_dir: &Path, on_off: &str) -> Result<EditorPrefs> {
+    let mut prefs = load_editor_prefs(game_dir)?;
+    prefs.scene_visibility.enabled = parse_on_off(on_off, "--scene-visibility")?;
+    save_editor_prefs(game_dir, &prefs)?;
+    Ok(prefs)
+}
+
 /// Mutate Project view fields and persist.
 pub fn set_project_view(
     game_dir: &Path,
@@ -1076,6 +1136,8 @@ mod tests {
         assert_eq!(p.scene_view.handle_rotation, HandleRotation::Local);
         assert_eq!(p.scene_view.tool, SceneTool::Move);
         assert!(p.scene_view.gizmos);
+        assert!(p.scene_visibility.enabled);
+        assert!(p.scene_visibility.scenes.is_empty());
     }
 
     #[test]

@@ -812,6 +812,65 @@ impl EditorApp {
         self.prefs_dirty = true;
     }
 
+    pub(crate) fn scene_visibility_key(&self) -> String {
+        wiimaker_scene::scene_visibility_key(&self.game_dir, &self.scene_path)
+    }
+
+    pub(crate) fn scene_hidden_names(&self) -> std::collections::HashSet<String> {
+        wiimaker_scene::scene_view_hidden_names(
+            &self.prefs.scene_visibility,
+            &self.scene_visibility_key(),
+            &self.scene,
+        )
+    }
+
+    pub(crate) fn scene_pick_blocklist(&self) -> std::collections::HashSet<String> {
+        wiimaker_scene::scene_view_pick_blocklist(
+            &self.prefs.scene_visibility,
+            &self.scene_visibility_key(),
+            &self.scene,
+        )
+    }
+
+    /// Hierarchy eye. `isolate` is Alt-click (this entity only).
+    pub(crate) fn toggle_scene_hidden(&mut self, name: &str, isolate: bool) {
+        let key = self.scene_visibility_key();
+        let hidden_now = wiimaker_scene::entity_is_hidden(&self.prefs.scene_visibility, &key, name);
+        if let Err(e) = wiimaker_scene::apply_entity_visibility(
+            &mut self.prefs.scene_visibility,
+            &key,
+            &self.scene,
+            name,
+            Some(!hidden_now),
+            None,
+            !isolate,
+        ) {
+            self.status = format!("visibility: {e}");
+            return;
+        }
+        self.persist_prefs();
+    }
+
+    /// Hierarchy hand. `isolate` is Alt-click (this entity only).
+    pub(crate) fn toggle_scene_pickable(&mut self, name: &str, isolate: bool) {
+        let key = self.scene_visibility_key();
+        let pickable_now =
+            !wiimaker_scene::entity_is_unpickable(&self.prefs.scene_visibility, &key, name);
+        if let Err(e) = wiimaker_scene::apply_entity_visibility(
+            &mut self.prefs.scene_visibility,
+            &key,
+            &self.scene,
+            name,
+            None,
+            Some(!pickable_now),
+            !isolate,
+        ) {
+            self.status = format!("pickability: {e}");
+            return;
+        }
+        self.persist_prefs();
+    }
+
     pub(crate) fn set_edit_tool(&mut self, tool: EditTool) {
         self.edit_tool = tool;
         self.prefs.scene_view.tool = tool.to_scene();
@@ -1124,6 +1183,17 @@ impl EditorApp {
         self.push_undo();
         match rename_entity(&mut self.scene, &old, &new) {
             Ok(()) => {
+                let key = self.scene_visibility_key();
+                let before = self.prefs.scene_visibility.clone();
+                wiimaker_scene::rename_scene_visibility(
+                    &mut self.prefs.scene_visibility,
+                    &key,
+                    &old,
+                    &new,
+                );
+                if self.prefs.scene_visibility != before {
+                    self.persist_prefs();
+                }
                 self.select(Some(new.clone()));
                 self.sync_baseline();
                 self.mark_dirty();
