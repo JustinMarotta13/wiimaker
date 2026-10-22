@@ -23,9 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Scaffold games/hello-orb (gitignored workspace member)
-        run: ./tools/ci-scaffold-hello-orb.sh
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
@@ -40,9 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Scaffold games/hello-orb (workspace member path)
-        run: ./tools/ci-scaffold-hello-orb.sh
 
       - name: Install Rust nightly + rust-src
         uses: dtolnay/rust-toolchain@nightly

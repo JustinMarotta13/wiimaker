@@ -77,11 +77,11 @@ Visual 1:1: [unity-chrome.md](./unity-chrome.md) (crops from Unity 6000.5 dark).
 
 ## Open follow-ups
 
-- Optional: shorten window title when `game.toml` `title` already includes `wiimaker ·` (today: `wiimaker · wiimaker · hello-orb`).
+- Optional: shorten window title when `game.toml` `title` already includes `wiimaker ·` (e.g. `wiimaker · wiimaker · pac-man`).
 
 ## computer-control MCP (2026-07-24)
 
-- `list_windows` does **not** see `wiimaker-editor`; `activate_window("wiimaker"|"hello-orb")` fuzzy-hits Cursor/Chrome. Use System Events `frontmost` + `screencapture -l` / OCR.
+- `list_windows` does **not** see `wiimaker-editor`; `activate_window("wiimaker"|"pac-man")` fuzzy-hits Cursor/Chrome. Use System Events `frontmost` + `screencapture -l` / OCR.
 - Launch editor from **Terminal.app** with the same `CARGO_TARGET_DIR` as the agent build (or invoke the debug binary path directly) — otherwise Terminal may run a stale `target/debug` binary.
 - `screencapture -l` images include shadow padding (~56px); map OCR with `pad=(img-win)/2` (mapB) for toolbar Y. Mid-window Hierarchy mapA≈mapB; toolbar mapA is ~46px too low.
 - MCP `click_screen` / CGEvent / System Events clicks can silently stop affecting the editor mid-session (TCC/focus). Prefer CLI `--json` + OCR status proofs; editor Prefab Instantate has **Cmd+I** as a non-click path.

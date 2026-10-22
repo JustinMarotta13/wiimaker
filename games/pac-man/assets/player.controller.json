@@ -1,0 +1,157 @@
+{
+  "default": "Idle",
+  "parameters": [
+    {
+      "name": "Moving",
+      "type": "Bool",
+      "default": false
+    },
+    {
+      "name": "Speed",
+      "type": "Float",
+      "default": 0.0
+    },
+    {
+      "name": "Heading",
+      "type": "Float",
+      "default": 0.0
+    }
+  ],
+  "states": [
+    {
+      "name": "Idle",
+      "clip": "idle",
+      "speed": 1.0,
+      "position": [
+        140.0,
+        40.0
+      ]
+    },
+    {
+      "name": "Chomp",
+      "speed": 1.0,
+      "blend_tree": {
+        "type": "1D",
+        "params": [
+          "Speed"
+        ],
+        "motions": [
+          {
+            "clip": "chomp",
+            "threshold": 0.0
+          },
+          {
+            "clip": "dash",
+            "threshold": 1.0
+          }
+        ]
+      },
+      "position": [
+        280.0,
+        40.0
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from": "Idle",
+      "to": "Chomp",
+      "conditions": [
+        {
+          "param": "Moving",
+          "equals": true
+        }
+      ],
+      "has_exit_time": false
+    },
+    {
+      "from": "Chomp",
+      "to": "Idle",
+      "conditions": [
+        {
+          "param": "Moving",
+          "equals": false
+        }
+      ],
+      "has_exit_time": false
+    }
+  ],
+  "layers": [
+    {
+      "name": "Power",
+      "weight": 0.0,
+      "default": "Rest",
+      "states": [
+        {
+          "name": "Powered",
+          "clip": "power",
+          "speed": 1.0,
+          "position": [
+            280.0,
+            40.0
+          ]
+        },
+        {
+          "name": "Rest",
+          "speed": 1.0,
+          "position": [
+            140.0,
+            40.0
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from": "Rest",
+          "to": "Powered",
+          "conditions": [
+            {
+              "param": "Moving",
+              "equals": true
+            }
+          ],
+          "has_exit_time": false
+        },
+        {
+          "from": "Powered",
+          "to": "Rest",
+          "conditions": [
+            {
+              "param": "Moving",
+              "equals": false
+            }
+          ],
+          "has_exit_time": false
+        }
+      ],
+      "graph": {
+        "entry": [
+          0.0,
+          40.0
+        ],
+        "any": [
+          0.0,
+          120.0
+        ],
+        "exit": [
+          400.0,
+          40.0
+        ]
+      }
+    }
+  ],
+  "graph": {
+    "entry": [
+      0.0,
+      40.0
+    ],
+    "any": [
+      0.0,
+      120.0
+    ],
+    "exit": [
+      400.0,
+      40.0
+    ]
+  }
+}

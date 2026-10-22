@@ -1,0 +1,140 @@
+{
+  "name": "win",
+  "clear_color": [
+    0,
+    0,
+    0,
+    255
+  ],
+  "entities": [
+    {
+      "name": "Trophy",
+      "transform": {
+        "translation": [
+          320,
+          220,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 48,
+          "color": [
+            255,
+            220,
+            0,
+            255
+          ],
+          "z": 1
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "SparkA",
+      "transform": {
+        "translation": [
+          240,
+          180,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 10,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "z": 2
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "SparkB",
+      "transform": {
+        "translation": [
+          400,
+          260,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 10,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "z": 2
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "MainCamera",
+      "transform": {
+        "translation": [
+          320,
+          240,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Camera": {
+          "active": true
+        }
+      },
+      "tag": 0
+    }
+  ]
+}

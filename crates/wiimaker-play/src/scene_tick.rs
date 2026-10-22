@@ -19,7 +19,7 @@ pub const PLAYER_WASD_SPEED: f32 = 220.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SceneTickOpts {
-    /// Keep hello-orb `OrbShadow` glued to `Player` (harmless if missing).
+    /// Keep the basic-game template `OrbShadow` glued to `Player` (harmless if missing).
     pub sync_orb_shadow: bool,
 }
 

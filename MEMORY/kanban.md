@@ -2,7 +2,7 @@
 
 Living engine board (not the local Pac-Man game). Ranked by what a maze-chomper actually needs next. Almost every item is **GUI + CLI** — files stay truth (`wiimaker-scene` mutate helpers, then twin the editor panel). Each Now/Next card is one morning.
 
-Pac-Man probe (local, gitignored): `games/pac-man/` — maze is Disc entities + game-side grid. Use it as the acceptance test for Now items.
+Pac-Man sample (committed since 2026-10-22): `games/pac-man/` — maze is Disc entities + game-side grid. Use it as the acceptance test for Now items.
 
 ## Already have (do not rebuild)
 
@@ -92,7 +92,7 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Sprite animation clips** (2026-08-31) — `AnimClipMeta` / `assets/<name>.anim.json`, runtime `Animation`, `animate_world`, Inspector Animation foldout (clip combo + fps/loop), CLI `asset anim` / `asset list-anims` / `entity set-anim` / `add-component Animation`; doctor warns missing clip cells. Host-first (not in WSCN bake).
 
-- Workspace + host hello-orb + Wii C bootstrap stubs
+- Workspace + host template game + Wii C bootstrap stubs
 - Sprites + Disc + DrawList IR + host software raster + texture atlas
 - Fixed 60 Hz tick, GCN-layout input (keyboard → stick/D-pad/A/B/Start)
 - `.wpack` cook (PNG → tiled RGB5A3) · sprite sheet sidecar + catalog + pivot
@@ -133,15 +133,15 @@ Shipped. Keep here so we do not rebuild them.
 
 - **Wii `World` + `render_world`** (2026-09-28) — `render_world` / `render_world_ex` moved to `wiimaker-core` (`no_std` + alloc); `wiimaker-scene` re-exports. `wiimaker-wii` parses WSCN0002/0003 into a core `World` (named entities, Transform, Sprite/Disc/Tilemap/Text/AudioSource; Default sorting layer + baked `z`). Frame: `render_world` → `DrawList` → GX. Player/OrbShadow via `find_by_name`. Play-on-awake still ASND. C `stub_game` fallback unchanged. Do not bump WSCN magic.
 
-- **Green PowerPC CI** (2026-09-27) — `.github/workflows/ci.yml`: host `cargo test --workspace` (scaffolds `games/hello-orb` via `tools/ci-scaffold-hello-orb.sh`) + strict PowerPC rustlib (`WIIMAKER_RUSTLIB_STRICT=1` / `./tools/wii-rustlib.sh --strict`, asserts `libwiimaker_wii.a`). Local rustlib stays best-effort for stub_game fallback. Unblocked Wii World + render_world.
+- **Green PowerPC CI** (2026-09-27) — `.github/workflows/ci.yml`: host `cargo test --workspace` (originally scaffolded a template game into `games/`; since 2026-10-22 tests scaffold `templates/basic-game` into temp/`target/` dirs and `games/pac-man` is committed) + strict PowerPC rustlib (`WIIMAKER_RUSTLIB_STRICT=1` / `./tools/wii-rustlib.sh --strict`, asserts `libwiimaker_wii.a`). Local rustlib stays best-effort for stub_game fallback. Unblocked Wii World + render_world.
 
-- **Rust staticlib (WSCN player)** (2026-09-24) — `crates/wiimaker-wii` (`rlib` + `staticlib`): `wiimaker_game_init/frame/shutdown`, WSCN0002/0003 parse, GX/ASND FFI, `WiimakerInput` → core `Input`, hello-orb Player/OrbShadow tick. Superseded for draw by **Wii World + render_world** (2026-09-28). Makefile always links `EMBED_OBJ`; `USE_STUB=0` when `libwiimaker_wii.a` present. Stub_game remains fallback.
+- **Rust staticlib (WSCN player)** (2026-09-24) — `crates/wiimaker-wii` (`rlib` + `staticlib`): `wiimaker_game_init/frame/shutdown`, WSCN0002/0003 parse, GX/ASND FFI, `WiimakerInput` → core `Input`, template Player/OrbShadow tick. Superseded for draw by **Wii World + render_world** (2026-09-28). Makefile always links `EMBED_OBJ`; `USE_STUB=0` when `libwiimaker_wii.a` present. Stub_game remains fallback.
 
 - **Sorting layers** (2026-09-11) — Unity Sorting Layer + Order in Layer. `game.toml` `sorting_layers` (default Background / Default / Foreground). Sprite/Disc/Tilemap `sorting_layer` name + `z` as order-in-layer. `render_world` sorts (layer, then z) across kinds; missing/unknown → Default. Inspector combo + Order in Layer; Project `game.toml` list (↑↓ – Add Rename). CLI `sorting-layer list|add|rename|move|remove` (`--json`); `entity set --sorting-layer --order-in-layer` (alias `--z`). Doctor warns unknown names. Host-first; WSCN0003 unchanged (C still sorts by raw z).
 
 - **Prefab instance links + overrides** (2026-09-12) — scene `EntityData.prefab` (relative `*.prefab.json` / stem; missing = not an instance). `instantiate_prefab` records the link; `unpack_prefab_instance` clears it (values stay). Override detect vs loaded asset (`transform.position`, `Disc.radius`, …). Inspector dark Pro: orange-bold labels + **Apply** / **Revert** / **Unpack Completely**. Apply writes the `.prefab.json` asset; Revert resets the instance. CLI twins: `create-prefab` (also links source) · `instantiate-prefab` · `apply-prefab` · `revert-prefab` · `unpack-prefab` · `prefab-status` (`--json`). One-entity prefabs only — no nested children / variants / per-property Apply. Host-first; WSCN unchanged.
 
-- **Play-in-editor runs `App`** (2026-09-13) — `wiimaker-play` shared host/editor tick (`step_app`, `apply_pad_keys`, 60 Hz). Games export `cdylib` via `export_play_app!` (template + hello-orb). Editor Play loads the plugin and calls `App::update` / live World blit; Stop drops the plugin and rehydrates the authored scene; Pause skips ticks. No plugin → previous WASD/`Player` + OrbShadow fallback. No new prefs. CLI: `editor play-status [--build] [--json]`; `run` stays the external host twin. Tests: in-process `App` tick + `play_probe` cdylib (Marker moves; fallback would not). Host-first; WSCN unchanged.
+- **Play-in-editor runs `App`** (2026-09-13) — `wiimaker-play` shared host/editor tick (`step_app`, `apply_pad_keys`, 60 Hz). Games export `cdylib` via `export_play_app!` (template games). Editor Play loads the plugin and calls `App::update` / live World blit; Stop drops the plugin and rehydrates the authored scene; Pause skips ticks. No plugin → previous WASD/`Player` + OrbShadow fallback. No new prefs. CLI: `editor play-status [--build] [--json]`; `run` stays the external host twin. Tests: in-process `App` tick + `play_probe` cdylib (Marker moves; fallback would not). Host-first; WSCN unchanged.
 
 - **Text / HUD** (2026-09-14) — `DrawCmd::DrawText` + scene `Text` (string, size, color, align, sorting layer / order-in-layer). Host raster samples a built-in 8×8 ASCII atlas (`wiimaker-assets` bits + `fixtures/hud_font.png`); **not** cooked into `.wpack`. `render_world` emits DrawText (camera offset + layer sort like Sprite/Disc). Inspector Text foldout + Add Component. CLI `entity add-component … Text --text --size --color --align` · `entity set --text --size --color --align` (`--json`). Missing glyphs → `?`.
 

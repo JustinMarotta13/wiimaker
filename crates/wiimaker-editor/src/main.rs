@@ -37,7 +37,7 @@ fn editor_window_size() -> (f32, f32) {
 fn main() -> eframe::Result<()> {
     let game = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "hello-orb".into());
+        .unwrap_or_else(|| "pac-man".into());
     let root = find_root().expect("wiimaker workspace root");
     let state = EditorApp::open(&root, &game).unwrap_or_else(|e| {
         eprintln!("editor error: {e:#}");

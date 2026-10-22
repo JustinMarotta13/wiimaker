@@ -34,8 +34,15 @@ compile_commands.json
 
 .cursor/plans/
 
-# User game projects (local only)
-games/
+# Game projects: only the Pac-Man sample is committed; other games/ (pm-scratch, `wiimaker new`
+# output) stay local. Cooked .wpack/.wscn, .dol and target/ are ignored by the rules above.
+/games/*
+!/games/pac-man/
+# Per-machine editor prefs (Scene/Game view, Console, visibility)
+/games/**/.wiimaker/
+# Pac-Man: stand-in Player sheet from another project (not MIT here) + local probe scripts
+/games/pac-man/assets/basic_space_suit.*
+/games/pac-man/probe-*.sh
 
 # Agent session scratch (durable memory is committed)
 MEMORY/sessions/*

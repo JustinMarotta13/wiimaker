@@ -1499,7 +1499,7 @@ mod tests {
     }
 
     #[test]
-    fn world_transform_rotparent_hello_orb() {
+    fn world_transform_rotparent_template_scene() {
         let mut scene = Scene::new("hello");
         scene.entities.push(EntityData {
             name: "RotParent".into(),

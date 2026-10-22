@@ -1,0 +1,15 @@
+[package]
+name = "pac-man"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pac-man"
+path = "src/main.rs"
+
+[dependencies]
+wiimaker-core = { workspace = true }
+wiimaker-host = { workspace = true }
+wiimaker-scene = { workspace = true }
+wiimaker-assets = { workspace = true }

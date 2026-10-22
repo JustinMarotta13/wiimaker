@@ -29,7 +29,7 @@ type RenderFn = unsafe extern "C" fn(
 ) -> i32;
 type WorldFn = unsafe extern "C" fn(*mut std::os::raw::c_void) -> *mut World;
 
-/// `libhello_orb.so` / `libhello_orb.dylib` / `hello_orb.dll`
+/// `libpac_man.so` / `libpac_man.dylib` / `pac_man.dll`
 pub fn dylib_name(package: &str) -> String {
     format!(
         "{}{}{}",

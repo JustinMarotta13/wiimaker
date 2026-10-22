@@ -1600,17 +1600,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "hello-orb"
-version = "0.1.0"
-dependencies = [
- "wiimaker-assets",
- "wiimaker-core",
- "wiimaker-host",
- "wiimaker-play",
- "wiimaker-scene",
-]
-
-[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2507,6 +2496,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
 dependencies = [
  "ttf-parser",
+]
+
+[[package]]
+name = "pac-man"
+version = "0.1.0"
+dependencies = [
+ "wiimaker-assets",
+ "wiimaker-core",
+ "wiimaker-host",
+ "wiimaker-scene",
 ]
 
 [[package]]
