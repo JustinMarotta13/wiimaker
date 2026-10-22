@@ -1,4 +1,4 @@
-//! Scene player state — WSCN → World + hello-orb-ish Player / OrbShadow tick.
+//! Scene player state — WSCN → World + basic-game template Player / OrbShadow tick.
 
 #[cfg(feature = "std")]
 use std::vec::Vec;

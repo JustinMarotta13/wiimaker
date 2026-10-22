@@ -42,14 +42,16 @@ Gameplay scripts stay as Rust `App` (like MonoBehaviour code): `load_scene_into_
 ## Quick start (host)
 
 ```bash
-cd /Users/justin/wiimaker
-cargo run -p wiimaker-cli -- cook hello-orb   # advanced; Play/Build also prepare assets
-cargo run -p hello-orb
+cd wiimaker
+cargo run -p wiimaker-cli -- cook pac-man   # advanced; Play/Build also prepare assets
+cargo run -p pac-man
 # or open the editor:
-cargo run -p wiimaker-cli -- edit hello-orb
+cargo run -p wiimaker-cli -- edit pac-man
+# start your own game from templates/basic-game:
+cargo run -p wiimaker-cli -- new my-game
 ```
 
-Arrow keys / WASD move the orb. Esc quits.
+Pac-Man: Enter / Z / Space starts, arrow keys / WASD steer, Esc quits. See `games/pac-man/README.md`.
 
 ## Agent-friendly CLI
 
@@ -125,10 +127,10 @@ AudioSource bakes under the same `WSCN0003` magic: `KIND_AUDIO=5` for audio-only
 Requires [devkitPro](https://devkitpro.org/) `wii-dev` **or** Docker:
 
 ```bash
-wiimaker build hello-orb       # prepare + bake + Docker → target/wii/hello-orb/boot.dol
-wiimaker dolphin hello-orb     # or: ./tools/run-dolphin.sh target/wii/hello-orb/boot.dol
+wiimaker build pac-man         # prepare + bake + Docker → target/wii/pac-man/boot.dol
+wiimaker dolphin pac-man       # or: ./tools/run-dolphin.sh target/wii/pac-man/boot.dol
 # one shot:
-wiimaker play-wii hello-orb
+wiimaker play-wii pac-man
 ```
 
 `build` prepares `.wpack` (PNG + PCM16 WAV TOC), bakes `scene.wscn` (WSCN0003 with UV + pivot + Tilemap palette + `KIND_TEXT` + `KIND_AUDIO` / audio table), and embeds both into the `.dol`. Editor toolbar: **Build** · **Play in Dolphin** · **Build & Run** (Cook is under ⋯).
@@ -139,7 +141,7 @@ wiimaker play-wii hello-orb
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
 
-1. **Host tests** — scaffolds `games/hello-orb` from `templates/basic-game` (workspace member; `games/` is gitignored locally), then `cargo test --workspace`.
+1. **Host tests** — `cargo test --workspace` (includes the committed `games/pac-man` sample; tests that need a fresh `templates/basic-game` scaffold create it in a temp / `target/` dir).
 2. **PowerPC rustlib** — nightly + `rust-src`, `WIIMAKER_RUSTLIB_STRICT=1 ./tools/wii-rustlib.sh --strict`, asserts `target/powerpc-unknown-eabi/release/libwiimaker_wii.a` exists and is non-trivial.
 
 Local builds stay best-effort (`./tools/wii-rustlib.sh` exits 0 on toolchain failure so the Makefile can fall back to C `stub_game`). CI is strict so a broken `powerpc-unknown-eabi` / `build-std` path fails the PR.
@@ -158,8 +160,8 @@ wiimaker/
 │   ├── wiimaker-editor/   # egui Hierarchy / Inspector / Scene / Project
 │   └── wiimaker-wii/      # Wii Rust staticlib (WSCN player; PowerPC CI)
 ├── runtime/wii/           # C Broadway bootstrap (VI/GX/PAD/ASND) + target JSON
-├── games/hello-orb/       # reference game (local / CI-scaffolded; games/ gitignored)
-├── templates/basic-game/  # scaffold for `wiimaker new` + CI hello-orb
+├── games/pac-man/         # committed sample game (other games/ stay local, gitignored)
+├── templates/basic-game/  # scaffold for `wiimaker new` (+ template plugin tests)
 ├── docker/                # reproducible PowerPC .dol builds (devkitPPC)
 ├── .github/workflows/     # host tests + strict PowerPC rustlib
 └── tools/                 # wii-rustlib, wii-build, HBC, Dolphin

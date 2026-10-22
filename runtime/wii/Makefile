@@ -7,7 +7,7 @@ endif
 
 include $(DEVKITPPC)/wii_rules
 
-GAME      ?= hello-orb
+GAME      ?= pac-man
 TARGET    := boot
 BUILD     := build
 GAME_DIR  := ../../games/$(GAME)

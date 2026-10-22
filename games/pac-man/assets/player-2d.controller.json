@@ -1,0 +1,92 @@
+{
+  "default": "Idle",
+  "parameters": [
+    {
+      "name": "Moving",
+      "type": "Bool",
+      "default": false
+    },
+    {
+      "name": "Speed",
+      "type": "Float",
+      "default": 0.0
+    },
+    {
+      "name": "Heading",
+      "type": "Float",
+      "default": 0.0
+    }
+  ],
+  "states": [
+    {
+      "name": "Idle",
+      "clip": "idle",
+      "speed": 1.0
+    },
+    {
+      "name": "Chomp",
+      "speed": 1.0,
+      "blend_tree": {
+        "type": "2D",
+        "params": [
+          "Speed",
+          "Heading"
+        ],
+        "motions": [
+          {
+            "clip": "chomp",
+            "position": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "clip": "chomp-v",
+            "position": [
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "clip": "dash",
+            "position": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "clip": "dash-v",
+            "position": [
+              1.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": "Idle",
+      "to": "Chomp",
+      "conditions": [
+        {
+          "param": "Moving",
+          "equals": true
+        }
+      ],
+      "has_exit_time": false
+    },
+    {
+      "from": "Chomp",
+      "to": "Idle",
+      "conditions": [
+        {
+          "param": "Moving",
+          "equals": false
+        }
+      ],
+      "has_exit_time": false
+    }
+  ]
+}

@@ -9,9 +9,8 @@ members = [
     "crates/wiimaker-cli",
     "crates/wiimaker-editor",
     "crates/wiimaker-wii",
-    "games/hello-orb",
+    "games/pac-man",
 ]
-default-members = ["games/hello-orb"]
 
 [workspace.package]
 version = "0.1.0"

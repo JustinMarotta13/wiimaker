@@ -37,10 +37,13 @@ pub fn new_game(root: &Path, name: &str, json: bool) -> Result<()> {
     let mut ws_toml = fs::read_to_string(&ws)?;
     let entry = format!("    \"games/{name}\",\n");
     if !ws_toml.contains(&format!("games/{name}")) {
-        if let Some(idx) = ws_toml.find("games/hello-orb\",\n]") {
-            let insert_at = idx + "games/hello-orb\",\n".len();
-            ws_toml.insert_str(insert_at, &entry);
-            fs::write(ws, ws_toml)?;
+        // Append to the end of `[workspace] members = [ ... ]`.
+        if let Some(start) = ws_toml.find("\nmembers = [") {
+            if let Some(rel_end) = ws_toml[start..].find("\n]") {
+                let insert_at = start + rel_end + 1;
+                ws_toml.insert_str(insert_at, &entry);
+                fs::write(ws, ws_toml)?;
+            }
         }
     }
 

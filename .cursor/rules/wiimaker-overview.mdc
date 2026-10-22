@@ -13,7 +13,8 @@ Agent continuity lives in `MEMORY/` — read/write per `.cursor/rules/wiimaker-m
 
 | Crate / path | Role |
 |---|---|
-| `games/*` | Local game projects only (gitignored — never commit) |
+| `games/pac-man` | Committed sample game (workspace member) |
+| `games/*` (other) | Local game projects (gitignored — never commit) |
 | `wiimaker-scene` | `game.toml` / `.scene.json` + shared mutate API |
 | `wiimaker-editor` | egui Hierarchy · Inspector · Viewport · Project |
 | `wiimaker-cli` | Agent twin of every editor mutation (`--json`) |
@@ -29,12 +30,12 @@ Agent continuity lives in `MEMORY/` — read/write per `.cursor/rules/wiimaker-m
 3. **One IR.** Games emit `DrawCmd` / `DrawList`. Never call GX, OpenGL, or host window APIs from `wiimaker-core` or game crates.
 4. **Core stays lean.** Serde / JSON / project I/O live in `wiimaker-scene` (std). Keep `wiimaker-core` `no_std`-ready.
 5. **C owns the metal.** Do not reintroduce pure-Rust VI/GX init in `runtime/wii`.
-6. **`games/` is local-only.** Listed in `.gitignore`. Never `git add` / commit game projects, assets, or scenes under `games/`. Framework crates ship; user games stay on the machine.
+6. **`games/` is local-only, except `games/pac-man`.** The Pac-Man sample is committed (no cooked `.wpack`/`.wscn`, no `.wiimaker/` prefs, no third-party assets such as `basic_space_suit`). Never `git add` other game projects under `games/` (e.g. `pm-scratch`). Framework crates ship; user games stay on the machine.
 
 ## Unity → WiiMaker
 
 Project → `game.toml` · Scene → `.scene.json` · GameObject → named entity · SpriteRenderer → `Sprite` · Prefab → `.prefab.json` · Play → `wiimaker run`.
 
-## Prove changes on hello-orb
+## Prove changes on pac-man
 
-Prefer validating host loops with `games/hello-orb` (`cook` → `run` / `edit`).
+Prefer validating host loops with `games/pac-man` (`cook` → `run` / `edit`), or a fresh `wiimaker new` scaffold of `templates/basic-game`.

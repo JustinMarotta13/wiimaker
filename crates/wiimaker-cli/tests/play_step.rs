@@ -1,7 +1,8 @@
-//! `scene set-game-view` play chrome + `editor play-step` against the CI scaffold.
+//! `scene set-game-view` play chrome + `editor play-step` against a `templates/basic-game`
+//! scaffold and the committed `games/pac-man` sample.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use wiimaker_play::{dylib_path, example_dylib_path};
@@ -76,6 +77,66 @@ fn workspace_root() -> PathBuf {
         .join("../..")
         .canonicalize()
         .unwrap()
+}
+
+fn copy_tree(src: &Path, dest: &Path, skip: &[&str]) {
+    fs::create_dir_all(dest).unwrap();
+    for entry in fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        if skip.iter().any(|s| name == std::ffi::OsStr::new(s)) {
+            continue;
+        }
+        let from = entry.path();
+        let to = dest.join(&name);
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&from, &to, skip);
+        } else {
+            fs::copy(&from, &to).unwrap();
+        }
+    }
+}
+
+fn unique_tmp(tag: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wiimaker-cli-{tag}-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    dir
+}
+
+/// Same scaffold `wiimaker new` produces (`templates/basic-game`, `{{name}}` filled in),
+/// written to a temp dir so the test never touches the workspace.
+fn tmp_template_game(root: &Path) -> PathBuf {
+    let dir = unique_tmp("template-game");
+    copy_tree(&root.join("templates/basic-game"), &dir, &[]);
+    for rel in [
+        "Cargo.toml",
+        "src/main.rs",
+        "src/lib.rs",
+        "src/game.rs",
+        "game.toml",
+        "scenes/main.scene.json",
+    ] {
+        let path = dir.join(rel);
+        if path.is_file() {
+            let text = fs::read_to_string(&path).unwrap().replace("{{name}}", "template-game");
+            fs::write(&path, text).unwrap();
+        }
+    }
+    fs::create_dir_all(dir.join("assets")).unwrap();
+    dir
+}
+
+/// Copy of the committed Pac-Man sample (no build output / local prefs).
+fn tmp_pac_man(root: &Path) -> PathBuf {
+    let dir = unique_tmp("pac-man");
+    copy_tree(&root.join("games/pac-man"), &dir, &["target", ".wiimaker"]);
+    dir
 }
 
 #[test]
@@ -164,19 +225,16 @@ fn set_game_view_play_chrome_roundtrip_and_old_defaults() {
 }
 
 #[test]
-fn play_step_cli_on_ci_scaffold() {
+fn play_step_cli_on_template_scaffold() {
     let root = workspace_root();
-    let status = Command::new("bash")
-        .arg(root.join("tools/ci-scaffold-hello-orb.sh"))
-        .status()
-        .expect("scaffold");
-    assert!(status.success());
+    let dir = tmp_template_game(&root);
+    let game = dir.to_str().unwrap();
 
     let out = wiimaker()
         .args([
             "editor",
             "play-step",
-            "hello-orb",
+            game,
             "--frames",
             "4",
             "--json",
@@ -209,7 +267,7 @@ fn play_step_cli_on_ci_scaffold() {
     }));
 
     let text = wiimaker()
-        .args(["editor", "play-step", "hello-orb", "--frames", "1"])
+        .args(["editor", "play-step", game, "--frames", "1"])
         .env("WIIMAKER_AUDIO", "0")
         .output()
         .expect("play-step text");
@@ -356,15 +414,12 @@ fn play_step_fails_plugin_tick_when_error_pause_off() {
 #[test]
 fn play_step_rejects_invalid_frame_counts() {
     let root = workspace_root();
-    let status = Command::new("bash")
-        .arg(root.join("tools/ci-scaffold-hello-orb.sh"))
-        .status()
-        .expect("scaffold");
-    assert!(status.success());
+    let dir = tmp_template_game(&root);
+    let game = dir.to_str().unwrap();
 
     for frames in ["0", "10001"] {
         let out = wiimaker()
-            .args(["editor", "play-step", "hello-orb", "--frames", frames])
+            .args(["editor", "play-step", game, "--frames", frames])
             .env("WIIMAKER_AUDIO", "0")
             .output()
             .expect("play-step");
@@ -375,4 +430,39 @@ fn play_step_rejects_invalid_frame_counts() {
             "frames={frames} stderr: {err}"
         );
     }
+}
+
+#[test]
+fn play_step_cli_on_pac_man_sample() {
+    // games/pac-man is committed without its stand-in Player sheet or cooked .wpack;
+    // play-step must still run (missing textures skip sprites, like the editor).
+    let root = workspace_root();
+    let dir = tmp_pac_man(&root);
+    let out = wiimaker()
+        .args([
+            "editor",
+            "play-step",
+            dir.to_str().unwrap(),
+            "--frames",
+            "60",
+            "--json",
+        ])
+        .env("WIIMAKER_AUDIO", "0")
+        .output()
+        .expect("play-step pac-man");
+    assert!(
+        out.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["frames"], 60);
+    assert_eq!(v["paused_on_error"], false);
+    let entities = v["entities"].as_u64().unwrap();
+    assert!(entities >= 100, "maze + pellets + actors expected, got {v}");
+    assert!(v["draw_commands"].as_u64().unwrap() >= 100, "{v}");
+    let positions = v["positions"].as_array().unwrap();
+    assert!(positions.iter().any(|p| p["name"] == "Player"), "{v}");
 }

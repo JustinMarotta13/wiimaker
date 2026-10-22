@@ -1,0 +1,391 @@
+{
+  "name": "menu",
+  "clear_color": [
+    0,
+    0,
+    0,
+    255
+  ],
+  "entities": [
+    {
+      "name": "TitlePac",
+      "transform": {
+        "translation": [
+          260.0,
+          200.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 36.0,
+          "color": [
+            255,
+            255,
+            0,
+            255
+          ],
+          "z": 1.0
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "TitleMan",
+      "transform": {
+        "translation": [
+          330.0,
+          200.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 22.0,
+          "color": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "z": 1.0
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "TitleDot",
+      "transform": {
+        "translation": [
+          380.0,
+          200.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 6.0,
+          "color": [
+            255,
+            183,
+            174,
+            255
+          ],
+          "z": 1.0
+        }
+      },
+      "tag": 0,
+      "prefab": "assets/prefabs/power-pellet.prefab.json"
+    },
+    {
+      "name": "Hint",
+      "transform": {
+        "translation": [
+          320.0,
+          320.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 22.0,
+          "color": [
+            0,
+            255,
+            255,
+            255
+          ],
+          "z": 1.0
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "MainCamera",
+      "transform": {
+        "translation": [
+          320.0,
+          240.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Camera": {
+          "active": true
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "Director",
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "PlayableDirector": {
+          "timeline": "intro"
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "IntroGhost",
+      "transform": {
+        "translation": [
+          470.0,
+          200.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 22.0,
+          "color": [
+            255,
+            184,
+            255,
+            255
+          ],
+          "z": 2.0
+        },
+        "PlayableDirector": {
+          "timeline": "ghost-bob",
+          "play_on_awake": false
+        }
+      },
+      "tag": 0,
+      "prefab": "assets/prefabs/ghost-pink.prefab.json"
+    },
+    {
+      "name": "IntroGhostEye",
+      "parent": "IntroGhost",
+      "transform": {
+        "translation": [
+          5.0,
+          -4.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 4.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "z": 3.0
+        }
+      },
+      "tag": 0
+    },
+    {
+      "name": "Player",
+      "transform": {
+        "translation": [
+          320.0,
+          120.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          3.0,
+          3.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Sprite": {
+          "texture": "basic_space_suit_0",
+          "size": [
+            16.0,
+            16.0
+          ],
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "z": 3.0
+        },
+        "Animation": {
+          "clip": "idle",
+          "fps": 10.0
+        },
+        "Animator": {
+          "controller": "player"
+        }
+      },
+      "tag": 5
+    },
+    {
+      "name": "GhostBaseDemo",
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 22.0,
+          "color": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "z": 2.0
+        }
+      },
+      "tag": 0,
+      "prefab": "assets/prefabs/ghost.prefab.json"
+    },
+    {
+      "name": "Eye",
+      "parent": "GhostBaseDemo",
+      "transform": {
+        "translation": [
+          5.0,
+          -4.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 4.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "z": 3.0
+        }
+      },
+      "tag": 0
+    }
+  ]
+}

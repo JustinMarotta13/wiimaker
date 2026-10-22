@@ -1,0 +1,71 @@
+{
+  "name": "Ghost",
+  "transform": {
+    "translation": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rotation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "scale": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "components": {
+    "Disc": {
+      "radius": 22.0,
+      "color": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "z": 2.0
+    }
+  },
+  "tag": 0,
+  "children": [
+    {
+      "name": "Eye",
+      "parent": "Ghost",
+      "transform": {
+        "translation": [
+          5.0,
+          -4.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": {
+        "Disc": {
+          "radius": 4.0,
+          "color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "z": 3.0
+        }
+      },
+      "tag": 0
+    }
+  ]
+}

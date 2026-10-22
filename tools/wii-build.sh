@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-GAME="${1:-hello-orb}"
+GAME="${1:-pac-man}"
 IMAGE="wiimaker-devkit"
 OUT="$ROOT/target/wii/$GAME"
 

@@ -1,0 +1,17 @@
+name = "pac-man"
+title = "pac-man"
+default_scene = "scenes/main.scene.json"
+assets_dir = "assets"
+wpack = "assets.wpack"
+wscn = "scene.wscn"
+scenes = [
+    "scenes/menu.scene.json",
+    "scenes/main.scene.json",
+    "scenes/win.scene.json",
+]
+sorting_layers = [
+    "Background",
+    "Default",
+    "Foreground",
+    "FX",
+]

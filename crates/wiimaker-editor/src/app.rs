@@ -936,7 +936,7 @@ impl EditorApp {
                 }
                 self.console.push(ConsoleLine {
                     level: ConsoleLevel::Info,
-                    text: "Play Mode · game App plugin (hello-orb) · Esc stops".into(),
+                    text: "Play Mode · game App plugin (pac-man) · Esc stops".into(),
                 });
                 self.console.push(ConsoleLine {
                     level: ConsoleLevel::Warn,

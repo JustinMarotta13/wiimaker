@@ -128,7 +128,7 @@ target/wii/<game>/
 ## Roadmap
 
 ### Milestone 0 — Scaffold (this commit)
-- Workspace + host hello-orb
+- Workspace + host template game
 - Wii C bootstrap + Makefile stubs
 - CLI skeleton, Docker file, docs
 
