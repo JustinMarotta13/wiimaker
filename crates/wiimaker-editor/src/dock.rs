@@ -44,13 +44,14 @@ fn bottom_top_share() -> f32 {
 }
 
 /// Default Unity layout:
-/// left Hierarchy (~0.18), center Scene+Game tabs, right Inspector (~0.22 of remaining),
+/// left Hierarchy (~0.22, visibility gutter), center Scene+Game tabs, right Inspector (~0.22 of remaining),
 /// bottom Project+Console (~0.22 of remaining center).
 pub(crate) fn default_unity_layout() -> DockState<EditorTab> {
     let mut dock = DockState::new(vec![EditorTab::Scene, EditorTab::Game]);
     let surface = dock.main_surface_mut();
     // split_left fraction = left (new) child share (Horizontal::fraction).
-    let [center, _hier] = surface.split_left(NodeIndex::root(), 0.18, vec![EditorTab::Hierarchy]);
+    // 0.22 leaves room for the visibility / pickability gutter.
+    let [center, _hier] = surface.split_left(NodeIndex::root(), 0.22, vec![EditorTab::Hierarchy]);
     // split_right fraction = left (old) child share → inspector ~0.22 of remaining.
     let [center, _insp] = surface.split_right(center, 0.78, vec![EditorTab::Inspector]);
     // split_below fraction = top (old) child share → bottom ~0.22 of remaining center.

@@ -1,5 +1,8 @@
 use eframe::egui::{self, RichText};
-use wiimaker_scene::{add_entity, remove_entity, set_entity_parent, unique_entity_name, MutateOpts};
+use wiimaker_scene::{
+    add_entity, collect_descendants, forget_scene_visibility, pickability_tri, remove_entity,
+    set_entity_parent, unique_entity_name, visibility_tri, MutateOpts, TriState,
+};
 
 use crate::app::EditorApp;
 use crate::theme;
@@ -110,9 +113,20 @@ impl EditorApp {
             };
             kill.sort();
             kill.dedup();
+            let mut gone = Vec::new();
+            for n in &kill {
+                gone.push(n.clone());
+                gone.extend(collect_descendants(&self.scene, n));
+            }
             self.push_undo();
             for n in &kill {
                 let _ = remove_entity(&mut self.scene, n);
+            }
+            let key = self.scene_visibility_key();
+            let before = self.prefs.scene_visibility.clone();
+            forget_scene_visibility(&mut self.prefs.scene_visibility, &key, &gone);
+            if self.prefs.scene_visibility != before {
+                self.persist_prefs();
             }
             self.prune_selection();
             self.sync_baseline();
@@ -176,7 +190,13 @@ impl EditorApp {
         let selected = self.is_selected(name);
         let children = self.scene.child_names(name);
         let has_kids = !children.is_empty();
-        let indent = 6.0 + depth as f32 * 14.0;
+        let indent = 4.0 + depth as f32 * 14.0;
+        let vis_key = self.scene_visibility_key();
+        let eye_state = visibility_tri(&self.prefs.scene_visibility, &vis_key, &self.scene, name);
+        let hand_state = pickability_tri(&self.prefs.scene_visibility, &vis_key, &self.scene, name);
+        let forced_hover = std::env::var("WIIMAKER_EDITOR_HIER_HOVER")
+            .ok()
+            .is_some_and(|n| n.trim() == name);
 
         let fold_id = Self::hierarchy_fold_id(name);
         let mut folded_open = ui.ctx().data_mut(|d| *d.get_temp_mut_or(fold_id, false));
@@ -190,14 +210,67 @@ impl EditorApp {
             .fill(fill)
             .rounding(egui::Rounding::ZERO)
             .inner_margin(egui::Margin {
-                left: indent,
+                left: 2.0,
                 right: 4.0,
-                top: 2.0,
-                bottom: 2.0,
+                top: 1.0,
+                bottom: 1.0,
             });
 
         let (inner, dropped) = ui.dnd_drop_zone(row_frame, |ui| {
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let pointer = ui.input(|i| i.pointer.hover_pos());
+                let row_rect = egui::Rect::from_min_size(
+                    ui.cursor().min,
+                    egui::vec2(ui.available_width(), 18.0),
+                );
+                let hovered = forced_hover || pointer.is_some_and(|p| row_rect.contains(p));
+                let alt = ui.input(|i| i.modifiers.alt);
+                if theme::gutter_icon(
+                    ui,
+                    true,
+                    matches!(eye_state, TriState::Off)
+                        || (matches!(eye_state, TriState::Mixed)
+                            && wiimaker_scene::entity_is_hidden(
+                                &self.prefs.scene_visibility,
+                                &vis_key,
+                                name,
+                            )),
+                    eye_state == TriState::Mixed,
+                    hovered || eye_state != TriState::On,
+                    if alt {
+                        "Toggle visibility — this object only"
+                    } else {
+                        "Toggle visibility — this object and its children"
+                    },
+                )
+                .clicked()
+                {
+                    self.toggle_scene_hidden(name, alt);
+                }
+                if theme::gutter_icon(
+                    ui,
+                    false,
+                    matches!(hand_state, TriState::Off)
+                        || (matches!(hand_state, TriState::Mixed)
+                            && wiimaker_scene::entity_is_unpickable(
+                                &self.prefs.scene_visibility,
+                                &vis_key,
+                                name,
+                            )),
+                    hand_state == TriState::Mixed,
+                    hovered || hand_state != TriState::On,
+                    if alt {
+                        "Toggle pickability — this object only"
+                    } else {
+                        "Toggle pickability — this object and its children"
+                    },
+                )
+                .clicked()
+                {
+                    self.toggle_scene_pickable(name, alt);
+                }
+                ui.add_space(indent);
                 ui.spacing_mut().item_spacing.x = 4.0;
                 if has_kids {
                     if theme::foldout_button(ui, folded_open).clicked() {
@@ -216,8 +289,12 @@ impl EditorApp {
                 theme::cube_icon(ui, 11.0, cube_color);
 
                 let drag_id = egui::Id::new(("hier-drag", name));
+                let self_hidden =
+                    wiimaker_scene::entity_is_hidden(&self.prefs.scene_visibility, &vis_key, name);
                 let name_color = if selected {
                     egui::Color32::from_rgb(235, 235, 235)
+                } else if self_hidden {
+                    theme::TEXT_DIM
                 } else {
                     theme::TEXT
                 };
@@ -270,7 +347,11 @@ impl EditorApp {
                             *to_duplicate = Some(name.to_string());
                             ui.close_menu();
                         }
-                        if self.scene.find_entity(name).and_then(|e| e.parent.clone()).is_some()
+                        if self
+                            .scene
+                            .find_entity(name)
+                            .and_then(|e| e.parent.clone())
+                            .is_some()
                             && ui.button("Unparent").clicked()
                         {
                             *reparent = Some((name.to_string(), None));
@@ -278,7 +359,9 @@ impl EditorApp {
                         }
                         ui.separator();
                         if ui
-                            .add(egui::Button::new(RichText::new("Delete").color(theme::DANGER)))
+                            .add(egui::Button::new(
+                                RichText::new("Delete").color(theme::DANGER),
+                            ))
                             .clicked()
                         {
                             *to_remove = Some(name.to_string());

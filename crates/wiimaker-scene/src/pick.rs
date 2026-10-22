@@ -2,6 +2,12 @@
 //!
 //! Geometry matches `render_world`: sprite AABB uses pivot (default center);
 //! disc is a circle centered on transform XY with radius scaled by max(sx, sy).
+//!
+//! Scene-view pick passes a skip set (hidden while the toolbar toggle is on,
+//! plus unpickable). [`pick_entities_in_rect`] is the box-select twin and uses
+//! the same skip set.
+
+use std::collections::HashSet;
 
 use wiimaker_assets::SpriteCatalog;
 use wiimaker_core::{cmp_sorting, default_sorting_layers, sorting_layer_index};
@@ -56,8 +62,24 @@ pub fn pick_entity_at_with_catalog_and_layers(
     catalog: Option<&SpriteCatalog>,
     layers: &[String],
 ) -> Option<String> {
+    pick_entity_at_filtered(scene, sx, sy, catalog, layers, None)
+}
+
+/// Scene-view pick. `skip` names (hidden / unpickable) are not returned.
+/// The next entity under the pointer is returned instead.
+pub fn pick_entity_at_filtered(
+    scene: &Scene,
+    sx: f32,
+    sy: f32,
+    catalog: Option<&SpriteCatalog>,
+    layers: &[String],
+    skip: Option<&HashSet<String>>,
+) -> Option<String> {
     let mut best: Option<(usize, u16, f32, String)> = None;
     for (idx, ent) in scene.entities.iter().enumerate() {
+        if skip.is_some_and(|set| set.contains(&ent.name)) {
+            continue;
+        }
         if let Some((layer, z)) = entity_hit_key(scene, ent, sx, sy, catalog, layers) {
             let better = match &best {
                 None => true,
@@ -170,6 +192,168 @@ fn point_in_disc(world: &crate::scene::SceneTransform, radius: f32, sx: f32, sy:
     let r = radius * world.scale[0].max(world.scale[1]);
     let dx = sx - cx;
     let dy = sy - cy;
+    dx * dx + dy * dy <= r * r
+}
+
+/// Entities whose Scene-view shape overlaps the axis-aligned rect.
+///
+/// This is the box-select hit test. `skip` drops hidden and unpickable names
+/// the same way [`pick_entity_at_filtered`] does. Order follows the scene.
+pub fn pick_entities_in_rect(
+    scene: &Scene,
+    rect: [f32; 4],
+    catalog: Option<&SpriteCatalog>,
+    skip: Option<&HashSet<String>>,
+) -> Vec<String> {
+    let (min_x, max_x) = if rect[0] <= rect[2] {
+        (rect[0], rect[2])
+    } else {
+        (rect[2], rect[0])
+    };
+    let (min_y, max_y) = if rect[1] <= rect[3] {
+        (rect[1], rect[3])
+    } else {
+        (rect[3], rect[1])
+    };
+    let mut out = Vec::new();
+    for ent in &scene.entities {
+        if skip.is_some_and(|set| set.contains(&ent.name)) {
+            continue;
+        }
+        if entity_overlaps_rect(scene, ent, min_x, min_y, max_x, max_y, catalog) {
+            out.push(ent.name.clone());
+        }
+    }
+    out
+}
+
+fn entity_overlaps_rect(
+    scene: &Scene,
+    ent: &EntityData,
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+    catalog: Option<&SpriteCatalog>,
+) -> bool {
+    let world = scene
+        .world_transform(&ent.name)
+        .unwrap_or_else(|| ent.transform.clone());
+    if let Some(sp) = &ent.components.sprite {
+        if sp.enabled {
+            let catalog_pivot = catalog
+                .and_then(|c| c.lookup(&sp.texture))
+                .map(|r| r.pivot)
+                .unwrap_or([0.5, 0.5]);
+            let pivot = sp.effective_pivot(catalog_pivot);
+            let (left, top, right, bottom) = sprite_bounds(&world, sp.size, pivot);
+            if rects_overlap([left, top, right, bottom], [min_x, min_y, max_x, max_y]) {
+                return true;
+            }
+        }
+    }
+    if let Some(d) = &ent.components.disc {
+        if d.enabled {
+            let r = d.radius * world.scale[0].abs().max(world.scale[1].abs());
+            if circle_hits_rect(
+                world.translation[0],
+                world.translation[1],
+                r,
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+            ) {
+                return true;
+            }
+        }
+    }
+    if let Some(tm) = &ent.components.tilemap {
+        if tm.enabled {
+            let (origin, size) = tm.world_rect(&world);
+            if rects_overlap(
+                [
+                    origin[0],
+                    origin[1],
+                    origin[0] + size[0],
+                    origin[1] + size[1],
+                ],
+                [min_x, min_y, max_x, max_y],
+            ) {
+                return true;
+            }
+        }
+    }
+    if let Some(t) = &ent.components.text {
+        if t.enabled {
+            let size = t.size * world.scale[0].abs().max(world.scale[1].abs());
+            let r = wiimaker_core::text_aabb(
+                &t.text,
+                wiimaker_core::math::Vec2::new(world.translation[0], world.translation[1]),
+                size,
+                wiimaker_core::math::Vec2::ONE,
+                t.align_runtime(),
+            );
+            if rects_overlap(
+                [r.x, r.y, r.x + r.w, r.y + r.h],
+                [min_x, min_y, max_x, max_y],
+            ) {
+                return true;
+            }
+        }
+    }
+    if let Some(c) = &ent.components.collider {
+        if c.enabled {
+            match c.kind {
+                crate::scene::SceneColliderKind::Aabb => {
+                    let (mn, mx) = c.world_aabb(&world);
+                    if rects_overlap([mn[0], mn[1], mx[0], mx[1]], [min_x, min_y, max_x, max_y]) {
+                        return true;
+                    }
+                }
+                crate::scene::SceneColliderKind::Circle => {
+                    let center = c.world_center(&world);
+                    let r = c.world_radius(&world).unwrap_or(0.0);
+                    if circle_hits_rect(center[0], center[1], r, min_x, min_y, max_x, max_y) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn sprite_bounds(
+    world: &crate::scene::SceneTransform,
+    size: [f32; 2],
+    pivot: [f32; 2],
+) -> (f32, f32, f32, f32) {
+    let w = size[0] * world.scale[0];
+    let h = size[1] * world.scale[1];
+    let left = world.translation[0] - w * pivot[0];
+    let top = world.translation[1] - h * pivot[1];
+    (left, top, left + w, top + h)
+}
+
+/// `[min_x, min_y, max_x, max_y]` for both rects.
+fn rects_overlap(a: [f32; 4], b: [f32; 4]) -> bool {
+    a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1]
+}
+
+fn circle_hits_rect(
+    cx: f32,
+    cy: f32,
+    r: f32,
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+) -> bool {
+    let x = cx.clamp(min_x, max_x);
+    let y = cy.clamp(min_y, max_y);
+    let dx = cx - x;
+    let dy = cy - y;
     dx * dx + dy * dy <= r * r
 }
 

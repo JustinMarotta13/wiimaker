@@ -18,6 +18,7 @@ mod scene;
 mod sorting;
 mod tilemap;
 mod undo;
+mod visibility;
 mod wscn;
 mod wscn_anim;
 
@@ -36,13 +37,12 @@ pub use controller_param::{
 };
 pub use doctor::{diagnose, Diagnosis, Issue, Severity};
 pub use gizmo::{
-    apply_axis_scale, arc_points, axis_dirs, bounds_center, constrain_translate,
-    clamp_entity_scale_axis, constrain_translate_oriented, gizmo_has_selected_ancestor,
-    gizmo_origin, gizmo_rotate_scale_targets, pointer_angle_delta, quat_z_radians,
-    rotate_point_about, rotation_after_drag, scale_factors, scale_point_about, screen_axis_dirs,
-    snap_angle, union_aabbs, wrap_pi, MoveHandleLayout, RotateHandle, RotateHandleLayout,
-    ScaleHandle, ScaleHandleLayout, TranslateHandle, ROTATE_SNAP_DEG, ROTATE_SNAP_RAD, SCALE_MAX,
-    SCALE_MIN,
+    apply_axis_scale, arc_points, axis_dirs, bounds_center, clamp_entity_scale_axis,
+    constrain_translate, constrain_translate_oriented, gizmo_has_selected_ancestor, gizmo_origin,
+    gizmo_rotate_scale_targets, pointer_angle_delta, quat_z_radians, rotate_point_about,
+    rotation_after_drag, scale_factors, scale_point_about, screen_axis_dirs, snap_angle,
+    union_aabbs, wrap_pi, MoveHandleLayout, RotateHandle, RotateHandleLayout, ScaleHandle,
+    ScaleHandleLayout, TranslateHandle, ROTATE_SNAP_DEG, ROTATE_SNAP_RAD, SCALE_MAX, SCALE_MIN,
 };
 pub use hydrate::{
     hydrate, hydrate_into, hydrate_into_with_all_catalogs, hydrate_into_with_catalog,
@@ -69,8 +69,8 @@ pub use mutate::{
     unique_entity_name, unpack_prefab_instance, MutateOpts,
 };
 pub use pick::{
-    pick_entity_at, pick_entity_at_with_catalog, pick_entity_at_with_catalog_and_layers,
-    pointer_to_scene,
+    pick_entities_in_rect, pick_entity_at, pick_entity_at_filtered, pick_entity_at_with_catalog,
+    pick_entity_at_with_catalog_and_layers, pointer_to_scene,
 };
 pub use prefab::{
     apply_instance_fields_to_prefab, apply_instance_to_base, apply_prefab_scene_inherit,
@@ -90,9 +90,10 @@ pub use prefs::{
     fitted_blit_rect, folder_is_collapsed, game_view_blit_rect, infer_game_view_preset,
     load_editor_prefs, normalize_project_rel, project_rel_hidden_by_collapse, save_editor_prefs,
     scene_blit_rect, set_console, set_game_view, set_project_view, set_scene_view,
-    toggle_project_collapsed, ConsoleClearWhen, ConsolePatch, ConsolePrefs, EditorPrefs,
-    GamePlayMode, GameViewAspect, GameViewPatch, GameViewPrefs, GameViewPreset, HandlePosition,
-    HandleRotation, ProjectViewPrefs, SceneTool, SceneViewPrefs, EDITOR_PREFS_REL,
+    set_scene_visibility_enabled, toggle_project_collapsed, ConsoleClearWhen, ConsolePatch,
+    ConsolePrefs, EditorPrefs, GamePlayMode, GameViewAspect, GameViewPatch, GameViewPrefs,
+    GameViewPreset, HandlePosition, HandleRotation, ProjectViewPrefs, SceneTool, SceneViewPrefs,
+    SceneVisibilityPrefs, SceneVisibilityScene, EDITOR_PREFS_REL,
 };
 pub use project::{
     add_build_scene, create_named_scene, find_game_dir, list_build_scenes, list_scenes,
@@ -120,6 +121,12 @@ pub use tilemap::{
     AsciiTileMap, TilePaletteOpts, TilemapFromAscii,
 };
 pub use undo::UndoStack;
+pub use visibility::{
+    apply_entity_visibility, entity_is_hidden, entity_is_unpickable, forget_scene_visibility,
+    hide_entities_for_scene_view, pickability_tri, rename_scene_visibility, render_scene_view,
+    scene_view_hidden_names, scene_view_pick_blocklist, scene_visibility_key, visibility_tri,
+    TriState,
+};
 pub use wiimaker_core::{DEFAULT_SORTING_LAYER, DEFAULT_SORTING_LAYERS};
 pub use wscn::{
     bake_scene_wscn, bake_scene_wscn_with_all_catalogs, bake_scene_wscn_with_catalog,

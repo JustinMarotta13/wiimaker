@@ -18,7 +18,7 @@ Scene viewport | Hierarchy | Inspector
 Project: file explorer (assets / scenes / game.toml)
 ```
 
-- Hierarchy: tree / create / rename / delete / select / drag-drop reparent
+- Hierarchy: tree / create / rename / delete / select / drag-drop reparent / Scene visibility (eye) + pickability (hand)
 - Inspector: entity (Local Transform + parent + components) **or** selected project file (meta + actions)
 - Viewport: live `render_world` blit; pick/drag uses world transforms
 - Project: browse game files (Search + collapsible folders); PNG → Edit Sprites / assign; `.scene.json` → open / set default

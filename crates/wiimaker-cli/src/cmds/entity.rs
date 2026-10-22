@@ -9,22 +9,23 @@ use wiimaker_scene::{
     add_component_text, add_component_tilemap, add_entity, apply_instance_fields_to_prefab,
     apply_instance_to_base, apply_prefab, apply_prefab_scene_inherit,
     apply_variant_override_to_base, apply_variant_override_to_base_in_scene,
-    attach_prefab_instance, create_prefab_variant, duplicate_entity, entities_overlap,
-    entity_overlaps, entity_to_prefab, entity_triggers_entered, find_game_dir, instantiate_prefab,
-    load_prefab, load_prefab_for_instance, normalize_prefab_source, plan_prefab_scene_inherit,
+    attach_prefab_instance, collect_descendants, create_prefab_variant, duplicate_entity,
+    entities_overlap, entity_overlaps, entity_to_prefab, entity_triggers_entered, find_game_dir,
+    forget_scene_visibility, instantiate_prefab, load_editor_prefs, load_prefab,
+    load_prefab_for_instance, normalize_prefab_source, plan_prefab_scene_inherit,
     prefab_chain_status, prefab_tree_overrides, refresh_variant_overrides,
     remove_component_animation, remove_component_animator, remove_component_audio_source,
     remove_component_camera, remove_component_collider, remove_component_disc,
     remove_component_follow, remove_component_grid_mover, remove_component_playable_director,
     remove_component_sprite, remove_component_text, remove_component_tilemap, remove_entity,
-    rename_entity, resolve_prefab, resolve_prefab_asset, revert_prefab_instance, save_prefab,
-    save_scene, set_component_enabled, set_entity_anim, set_entity_animator_bool,
-    set_entity_animator_float, set_entity_animator_layer_weight, set_entity_audio_source,
-    set_entity_controller, set_entity_follow, set_entity_grid_mover, set_entity_parent,
-    set_entity_playable_director, set_entity_rotation_z, set_entity_scale, set_entity_sorting,
-    set_entity_sprite_pivot, set_entity_text, set_entity_transform, unpack_prefab_instance,
-    variant_from_instance, ApplyBaseTarget, MutateOpts, Scene, SceneColliderKind, SceneDir,
-    SceneTextAlign,
+    rename_entity, rename_scene_visibility, resolve_prefab, resolve_prefab_asset,
+    revert_prefab_instance, save_editor_prefs, save_prefab, save_scene, scene_visibility_key,
+    set_component_enabled, set_entity_anim, set_entity_animator_bool, set_entity_animator_float,
+    set_entity_animator_layer_weight, set_entity_audio_source, set_entity_controller,
+    set_entity_follow, set_entity_grid_mover, set_entity_parent, set_entity_playable_director,
+    set_entity_rotation_z, set_entity_scale, set_entity_sorting, set_entity_sprite_pivot,
+    set_entity_text, set_entity_transform, unpack_prefab_instance, variant_from_instance,
+    ApplyBaseTarget, MutateOpts, Scene, SceneColliderKind, SceneDir, SceneTextAlign,
 };
 
 use crate::args::EntityCmd;
@@ -575,9 +576,12 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             emit_ok(json, &format!("added {kind} to {name}"))
         }
         EntityCmd::Remove { game, name, scene } => {
-            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            let mut gone = vec![name.clone()];
+            gone.extend(collect_descendants(&sc, &name));
             remove_entity(&mut sc, &name)?;
             save_scene(&path, &sc)?;
+            sync_visibility_forget(&gd, &path, &gone)?;
             emit_ok(json, &format!("removed entity {name}"))
         }
         EntityCmd::Duplicate { game, name, scene } => {
@@ -611,9 +615,10 @@ pub fn entity_cmd(root: &Path, cmd: EntityCmd, json: bool) -> Result<()> {
             new,
             scene,
         } => {
-            let (_gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
+            let (gd, _p, path, mut sc) = open_scene(root, &game, scene.as_deref())?;
             rename_entity(&mut sc, &old, &new)?;
             save_scene(&path, &sc)?;
+            sync_visibility_rename(&gd, &path, &old, &new)?;
             if json {
                 #[derive(Serialize)]
                 struct Out<'a> {
@@ -1757,13 +1762,29 @@ fn hydrate_animator_world(
     let anims = wiimaker_assets::AnimClipCatalog::load_dir(&assets)?;
     let controllers = wiimaker_assets::AnimatorControllerCatalog::load_dir(&assets)?;
     let textures = project_texture_map(game_dir, project)?;
-    wiimaker_scene::hydrate_with_all_catalogs(
-        sc,
-        &textures,
-        None,
-        Some(&anims),
-        Some(&controllers),
-    )
+    wiimaker_scene::hydrate_with_all_catalogs(sc, &textures, None, Some(&anims), Some(&controllers))
+}
+
+fn sync_visibility_rename(game_dir: &Path, scene_path: &Path, old: &str, new: &str) -> Result<()> {
+    let mut prefs = load_editor_prefs(game_dir)?;
+    let before = prefs.scene_visibility.clone();
+    let key = scene_visibility_key(game_dir, scene_path);
+    rename_scene_visibility(&mut prefs.scene_visibility, &key, old, new);
+    if prefs.scene_visibility != before {
+        save_editor_prefs(game_dir, &prefs)?;
+    }
+    Ok(())
+}
+
+fn sync_visibility_forget(game_dir: &Path, scene_path: &Path, names: &[String]) -> Result<()> {
+    let mut prefs = load_editor_prefs(game_dir)?;
+    let before = prefs.scene_visibility.clone();
+    let key = scene_visibility_key(game_dir, scene_path);
+    forget_scene_visibility(&mut prefs.scene_visibility, &key, names);
+    if prefs.scene_visibility != before {
+        save_editor_prefs(game_dir, &prefs)?;
+    }
+    Ok(())
 }
 
 fn split_kv(spec: &str, flag: &str) -> Result<(String, String)> {
